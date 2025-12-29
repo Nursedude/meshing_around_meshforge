@@ -27,7 +27,7 @@ from typing import Dict, List, Tuple, Any, Optional
 from getpass import getpass
 
 # Version info
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 class Colors:
@@ -1197,6 +1197,428 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
     return True
 
 
+def install_meshing_around() -> Tuple[bool, Optional[Path], Optional[Path]]:
+    """Download and fully install meshing-around from GitHub
+
+    Returns: (success, meshing_path, venv_path)
+    """
+    print_header("Install Meshing-Around")
+
+    print("""
+This wizard will:
+  1. Clone meshing-around from GitHub
+  2. Set up a Python virtual environment (if needed)
+  3. Install all Python dependencies
+  4. Optionally set up a systemd service for auto-start
+    """)
+
+    if not get_yes_no("Continue with installation?", True):
+        return False, None, None
+
+    errors = []
+    venv_path = None
+
+    # Step 1: Determine installation location
+    print_step(1, 5, "Choosing installation location...")
+
+    default_install_path = Path.home() / "meshing-around"
+    install_path = Path(get_input("Installation directory", str(default_install_path)))
+
+    # Check if already exists
+    if install_path.exists():
+        if (install_path / "mesh_bot.py").exists():
+            print_warning(f"Meshing-around already installed at {install_path}")
+            if get_yes_no("Update existing installation instead?", True):
+                success, path = update_meshing_around(install_path)
+                return success, path, None
+            elif get_yes_no("Remove and reinstall?", False):
+                try:
+                    shutil.rmtree(install_path)
+                    print_success("Removed existing installation")
+                except Exception as e:
+                    print_error(f"Failed to remove: {e}")
+                    return False, None, None
+            else:
+                return False, None, None
+        else:
+            print_warning(f"Directory exists but doesn't contain meshing-around")
+            if not get_yes_no("Remove and use this directory?", False):
+                return False, None, None
+            try:
+                shutil.rmtree(install_path)
+            except Exception as e:
+                print_error(f"Failed to remove: {e}")
+                return False, None, None
+
+    # Step 2: Clone the repository
+    print_step(2, 5, "Cloning meshing-around from GitHub...")
+
+    # Make sure git is installed
+    ret, _, _ = run_command(['which', 'git'], capture=True)
+    if ret != 0:
+        print_info("Installing git...")
+        ret, _, stderr = run_command(['apt', 'install', '-y', 'git'], sudo=True)
+        if ret != 0:
+            print_error(f"Failed to install git: {stderr}")
+            return False, None, None
+
+    # Clone the repository
+    ret, stdout, stderr = run_command(
+        ['git', 'clone', 'https://github.com/SpudGunMan/meshing-around.git', str(install_path)],
+        desc="Cloning repository"
+    )
+
+    if ret != 0:
+        print_error(f"Failed to clone repository: {stderr}")
+        return False, None, None
+
+    print_success(f"Cloned meshing-around to {install_path}")
+
+    # Step 3: Set up virtual environment (if needed)
+    print_step(3, 5, "Setting up Python environment...")
+
+    if is_bookworm_or_newer() or check_pep668_environment():
+        print_info("PEP 668 environment detected - setting up virtual environment")
+
+        default_venv = install_path / "venv"
+        venv_input = get_input("Virtual environment path", str(default_venv))
+        venv_path = Path(venv_input)
+
+        # Check if python3-venv is installed
+        ret, _, _ = run_command(['dpkg', '-l', 'python3-venv'], capture=True)
+        if ret != 0:
+            print_info("Installing python3-venv...")
+            ret, _, stderr = run_command(['apt', 'install', '-y', 'python3-venv'], sudo=True)
+            if ret != 0:
+                print_error(f"Failed to install python3-venv: {stderr}")
+                errors.append("Failed to install python3-venv")
+
+        if not venv_path.exists():
+            print_info(f"Creating virtual environment at {venv_path}...")
+            ret, _, stderr = run_command(['python3', '-m', 'venv', str(venv_path)])
+
+            if ret == 0:
+                print_success(f"Virtual environment created")
+            else:
+                print_error(f"Failed to create venv: {stderr}")
+                errors.append("Virtual environment creation failed")
+                venv_path = None
+        else:
+            print_success("Virtual environment already exists")
+    else:
+        print_info("System pip can be used directly (no PEP 668)")
+
+    # Step 4: Install dependencies
+    print_step(4, 5, "Installing Python dependencies...")
+
+    if not install_dependencies(install_path, venv_path):
+        errors.append("Some dependencies failed to install")
+
+    # Step 5: Optional systemd service setup
+    print_step(5, 5, "Optional service setup...")
+
+    if get_yes_no("Create systemd service for auto-start on boot?", False):
+        if create_systemd_service(install_path, venv_path):
+            print_success("Systemd service created")
+        else:
+            errors.append("Systemd service creation failed")
+
+    # Summary
+    print_section("Installation Summary")
+
+    if errors:
+        print_warning("Installation completed with some issues:")
+        for err in errors:
+            print_error(f"  • {err}")
+    else:
+        print_success("Meshing-around installed successfully!")
+
+    print_info(f"\nInstallation path: {install_path}")
+
+    if venv_path:
+        print_info(f"Virtual environment: {venv_path}")
+        print(f"""
+{Colors.OKCYAN}To run the bot:{Colors.ENDC}
+  1. source {venv_path}/bin/activate
+  2. cd {install_path}
+  3. python3 mesh_bot.py
+
+{Colors.OKCYAN}Or use the systemd service (if created):{Colors.ENDC}
+  sudo systemctl start meshing-around
+  sudo systemctl enable meshing-around  # auto-start on boot
+""")
+    else:
+        print(f"""
+{Colors.OKCYAN}To run the bot:{Colors.ENDC}
+  1. cd {install_path}
+  2. python3 mesh_bot.py
+""")
+
+    return len(errors) == 0, install_path, venv_path
+
+
+def create_systemd_service(install_path: Path, venv_path: Optional[Path] = None) -> bool:
+    """Create a systemd service file for meshing-around auto-start"""
+    print_section("Create Systemd Service")
+
+    # Get current user
+    username = os.environ.get('USER', os.environ.get('LOGNAME', 'pi'))
+
+    # Determine python path
+    if venv_path and venv_path.exists():
+        python_path = str(venv_path / "bin" / "python3")
+    else:
+        python_path = "/usr/bin/python3"
+
+    # Create service file content
+    service_name = "meshing-around"
+    service_content = f"""[Unit]
+Description=Meshing-Around Meshtastic Bot
+After=network.target
+
+[Service]
+Type=simple
+User={username}
+WorkingDirectory={install_path}
+ExecStart={python_path} {install_path}/mesh_bot.py
+Restart=on-failure
+RestartSec=10
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+{f'Environment=VIRTUAL_ENV={venv_path}' if venv_path else ''}
+
+# Logging
+StandardOutput=append:/var/log/meshing-around.log
+StandardError=append:/var/log/meshing-around.log
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+    # Preview the service
+    print_info("Service file preview:")
+    print(f"{Colors.OKCYAN}{service_content}{Colors.ENDC}")
+
+    if not get_yes_no("Create this service file?", True):
+        return False
+
+    # Write service file
+    service_path = Path(f"/etc/systemd/system/{service_name}.service")
+    temp_path = Path(f"/tmp/{service_name}.service")
+
+    try:
+        # Write to temp file first
+        with open(temp_path, 'w') as f:
+            f.write(service_content)
+
+        # Copy to systemd directory with sudo
+        ret, _, stderr = run_command(['cp', str(temp_path), str(service_path)], sudo=True)
+        if ret != 0:
+            print_error(f"Failed to copy service file: {stderr}")
+            return False
+
+        # Set permissions
+        run_command(['chmod', '644', str(service_path)], sudo=True)
+
+        # Create log file
+        log_path = Path("/var/log/meshing-around.log")
+        run_command(['touch', str(log_path)], sudo=True)
+        run_command(['chown', f'{username}:{username}', str(log_path)], sudo=True)
+
+        # Reload systemd
+        ret, _, stderr = run_command(['systemctl', 'daemon-reload'], sudo=True)
+        if ret != 0:
+            print_error(f"Failed to reload systemd: {stderr}")
+            return False
+
+        print_success(f"Service created: {service_path}")
+
+        # Offer to enable and start
+        if get_yes_no("Enable service to start on boot?", True):
+            ret, _, stderr = run_command(['systemctl', 'enable', service_name], sudo=True)
+            if ret == 0:
+                print_success("Service enabled for auto-start")
+            else:
+                print_error(f"Failed to enable service: {stderr}")
+
+        if get_yes_no("Start the service now?", False):
+            ret, _, stderr = run_command(['systemctl', 'start', service_name], sudo=True)
+            if ret == 0:
+                print_success("Service started")
+                # Show status
+                time.sleep(2)
+                ret, stdout, _ = run_command(['systemctl', 'status', service_name], capture=True)
+                if ret == 0:
+                    print(stdout)
+            else:
+                print_error(f"Failed to start service: {stderr}")
+
+        print_info(f"""
+Service management commands:
+  sudo systemctl start {service_name}     # Start the bot
+  sudo systemctl stop {service_name}      # Stop the bot
+  sudo systemctl restart {service_name}   # Restart the bot
+  sudo systemctl status {service_name}    # Check status
+  sudo journalctl -u {service_name} -f    # View logs
+""")
+
+        return True
+
+    except Exception as e:
+        print_error(f"Failed to create service: {e}")
+        return False
+    finally:
+        # Clean up temp file
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def run_install_script(meshing_path: Path) -> bool:
+    """Run the meshing-around install.sh script for automated setup"""
+    print_section("Run install.sh")
+
+    install_script = meshing_path / "install.sh"
+
+    if not install_script.exists():
+        print_error(f"install.sh not found at {meshing_path}")
+        print_info("This script is part of the meshing-around repository")
+        print_info("It automates venv creation and requirements installation")
+        return False
+
+    print_info("The install.sh script will:")
+    print("  • Optionally create a Python virtual environment")
+    print("  • Install requirements from requirements.txt")
+    print("  • Set up the meshing-around bot environment")
+
+    if not get_yes_no("\nRun install.sh now?", True):
+        return False
+
+    # Make sure the script is executable
+    run_command(['chmod', '+x', str(install_script)])
+
+    # Run the install script
+    print_info("Running install.sh...")
+    original_dir = os.getcwd()
+
+    try:
+        os.chdir(meshing_path)
+        ret, stdout, stderr = run_command(['bash', str(install_script)])
+
+        if ret == 0:
+            print_success("install.sh completed successfully!")
+            return True
+        else:
+            print_error(f"install.sh failed with exit code {ret}")
+            if stderr:
+                print_error(f"Error: {stderr}")
+            return False
+    except Exception as e:
+        print_error(f"Failed to run install.sh: {e}")
+        return False
+    finally:
+        os.chdir(original_dir)
+
+
+def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> bool:
+    """Run the meshing-around launch.sh script to start the bot"""
+    print_section("Launch Bot")
+
+    launch_script = meshing_path / "launch.sh"
+
+    # Check for launch.sh first
+    if launch_script.exists():
+        print_info("Found launch.sh - this is used for venv installations")
+        print_info("It will activate the venv and start the bot")
+
+        if get_yes_no("Run launch.sh to start the bot?", True):
+            # Make sure the script is executable
+            run_command(['chmod', '+x', str(launch_script)])
+
+            print_info("Starting bot via launch.sh...")
+            original_dir = os.getcwd()
+
+            try:
+                os.chdir(meshing_path)
+
+                # Run in background using nohup
+                process = subprocess.Popen(
+                    ['bash', str(launch_script)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True
+                )
+
+                # Wait a few seconds to see if it starts
+                time.sleep(3)
+
+                if process.poll() is None:
+                    print_success(f"Bot started successfully! PID: {process.pid}")
+                    print_info("Bot is running in the background")
+                    return True
+                else:
+                    stdout, stderr = process.communicate()
+                    print_error("Bot failed to start:")
+                    if stderr:
+                        print(stderr.decode())
+                    return False
+
+            except Exception as e:
+                print_error(f"Failed to run launch.sh: {e}")
+                return False
+            finally:
+                os.chdir(original_dir)
+
+    else:
+        print_warning("launch.sh not found - using direct Python execution")
+
+        # Fall back to running mesh_bot.py directly
+        bot_script = meshing_path / "mesh_bot.py"
+        if not bot_script.exists():
+            print_error(f"mesh_bot.py not found at {meshing_path}")
+            return False
+
+        # Determine python command
+        if venv_path and venv_path.exists():
+            python_cmd = str(venv_path / "bin" / "python3")
+            print_info(f"Using venv Python: {python_cmd}")
+        else:
+            python_cmd = "python3"
+            print_info("Using system Python")
+
+        if get_yes_no("Start the bot now?", True):
+            original_dir = os.getcwd()
+            try:
+                os.chdir(meshing_path)
+
+                process = subprocess.Popen(
+                    [python_cmd, str(bot_script)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    start_new_session=True
+                )
+
+                time.sleep(3)
+
+                if process.poll() is None:
+                    print_success(f"Bot started successfully! PID: {process.pid}")
+                    return True
+                else:
+                    stdout, stderr = process.communicate()
+                    print_error("Bot failed to start:")
+                    if stderr:
+                        print(stderr.decode())
+                    return False
+
+            except Exception as e:
+                print_error(f"Failed to start bot: {e}")
+                return False
+            finally:
+                os.chdir(original_dir)
+
+    return False
+
+
 def verify_bot_running(meshing_path: Path) -> bool:
     """Verify that the meshing-around bot can run"""
     print_section("Verify Bot")
@@ -1546,17 +1968,18 @@ def main_menu():
     # Show startup menu
     print_section("Start Menu")
     print("1. Quick Setup (recommended for first-time users)")
-    print("2. Advanced Configuration")
-    print("3. System Maintenance Only")
+    print("2. Install Meshing-Around (fresh install)")
+    print("3. Advanced Configuration")
+    print("4. System Maintenance Only")
     if is_raspberry_pi():
-        print("4. Raspberry Pi Setup")
+        print("5. Raspberry Pi Setup")
+        print("6. Show System Info")
+        print("7. Exit")
+        max_choice = "7"
+    else:
         print("5. Show System Info")
         print("6. Exit")
         max_choice = "6"
-    else:
-        print("4. Show System Info")
-        print("5. Exit")
-        max_choice = "5"
 
     start_choice = get_input(f"\nSelect option (1-{max_choice})", "1")
 
@@ -1566,22 +1989,31 @@ def main_menu():
             config_file = get_input("Save config to", "config.ini")
             save_config(config, config_file)
         return
-    elif start_choice == "3":
+    elif start_choice == "2":
+        success, meshing_path, venv_path = install_meshing_around()
+        if success and meshing_path:
+            if get_yes_no("\nConfigure the bot now?", True):
+                config = create_basic_config()
+                config_file = str(meshing_path / "config.ini")
+                save_config(config, config_file)
+                print_success(f"Config saved to {config_file}")
+        return
+    elif start_choice == "4":
         system_maintenance_menu()
         return
-    elif start_choice == "4" and is_raspberry_pi():
+    elif start_choice == "5" and is_raspberry_pi():
         raspberry_pi_setup()
         if get_yes_no("\nContinue to configuration?", True):
             pass
         else:
             return
-    elif (start_choice == "4" and not is_raspberry_pi()) or (start_choice == "5" and is_raspberry_pi()):
+    elif (start_choice == "5" and not is_raspberry_pi()) or (start_choice == "6" and is_raspberry_pi()):
         show_system_info()
         if get_yes_no("\nContinue to configuration?", True):
             pass
         else:
             return
-    elif (start_choice == "5" and not is_raspberry_pi()) or (start_choice == "6" and is_raspberry_pi()):
+    elif (start_choice == "6" and not is_raspberry_pi()) or (start_choice == "7" and is_raspberry_pi()):
         print_success("Goodbye!")
         return
 
@@ -1617,18 +2049,21 @@ def main_menu():
         print("11. Global Alert Settings")
         print(f"\n{Colors.BOLD}--- System Maintenance ---{Colors.ENDC}")
         print("12. System Update (apt update/upgrade)")
-        print("13. Update Meshing-Around (git pull)")
-        print("14. Install Dependencies")
-        print("15. Verify Bot Running")
-        print("16. Show System Info")
+        print("13. Install Meshing-Around (fresh install)")
+        print("14. Update Meshing-Around (git pull)")
+        print("15. Install Dependencies")
+        print("16. Run install.sh (use meshing-around's installer)")
+        print("17. Verify Bot Running")
+        print("18. Launch Bot (using launch.sh if available)")
+        print("19. Show System Info")
         if is_raspberry_pi():
-            print("17. Raspberry Pi Setup")
+            print("20. Raspberry Pi Setup")
         print(f"\n{Colors.BOLD}--- Save & Exit ---{Colors.ENDC}")
-        print("18. Save and Exit")
-        print("19. Save, Deploy & Start Bot")
-        print("20. Exit without Saving")
+        print("21. Save and Exit")
+        print("22. Save, Deploy & Start Bot")
+        print("23. Exit without Saving")
 
-        choice = get_input("\nSelect option (1-20)", "18")
+        choice = get_input("\nSelect option (1-23)", "21")
 
         if choice == "1":
             configure_interface(config)
@@ -1655,22 +2090,34 @@ def main_menu():
         elif choice == "12":
             system_update()
         elif choice == "13":
-            success, meshing_path = update_meshing_around(meshing_path)
+            success, meshing_path, venv_path = install_meshing_around()
         elif choice == "14":
+            success, meshing_path = update_meshing_around(meshing_path)
+        elif choice == "15":
             if meshing_path:
                 install_dependencies(meshing_path, venv_path)
             else:
-                print_error("Meshing-around not found. Run option 13 first.")
-        elif choice == "15":
+                print_error("Meshing-around not found. Run option 13 or 14 first.")
+        elif choice == "16":
+            if meshing_path:
+                run_install_script(meshing_path)
+            else:
+                print_error("Meshing-around not found. Run option 13 or 14 first.")
+        elif choice == "17":
             if meshing_path:
                 verify_bot_running(meshing_path)
             else:
-                print_error("Meshing-around not found. Run option 13 first.")
-        elif choice == "16":
-            show_system_info()
-        elif choice == "17" and is_raspberry_pi():
-            _, venv_path = raspberry_pi_setup()
+                print_error("Meshing-around not found. Run option 13 or 14 first.")
         elif choice == "18":
+            if meshing_path:
+                run_launch_script(meshing_path, venv_path)
+            else:
+                print_error("Meshing-around not found. Run option 13 or 14 first.")
+        elif choice == "19":
+            show_system_info()
+        elif choice == "20" and is_raspberry_pi():
+            _, venv_path = raspberry_pi_setup()
+        elif choice == "21":
             save_config(config, config_file)
             print_success("\nConfiguration complete!")
             if meshing_path:
@@ -1679,14 +2126,14 @@ def main_menu():
                 print_info(f"Activate venv: source {venv_path}/bin/activate")
             print(f"\nRun the bot with: python3 mesh_bot.py")
             break
-        elif choice == "19":
+        elif choice == "22":
             save_config(config, config_file)
             if meshing_path:
                 deploy_and_start(config_file, meshing_path)
             else:
                 print_error("Meshing-around not found. Configure path first.")
             break
-        elif choice == "20":
+        elif choice == "23":
             if get_yes_no("Exit without saving changes?", False):
                 print_warning("Exiting without saving")
                 break
@@ -1706,41 +2153,56 @@ def system_maintenance_menu():
     while True:
         print_section("Maintenance Menu")
         print("1. System Update (apt update/upgrade)")
-        print("2. Update Meshing-Around (git pull)")
-        print("3. Install Dependencies")
-        print("4. Verify Bot Running")
-        print("5. Show System Info")
+        print("2. Install Meshing-Around (fresh install)")
+        print("3. Update Meshing-Around (git pull)")
+        print("4. Install Dependencies")
+        print("5. Run install.sh (meshing-around's installer)")
+        print("6. Launch Bot (using launch.sh)")
+        print("7. Verify Bot Running")
+        print("8. Show System Info")
         if is_raspberry_pi():
-            print("6. Raspberry Pi Setup")
-            print("7. Run All Maintenance")
-            print("8. Back to Main Menu")
-            max_opt = "8"
+            print("9. Raspberry Pi Setup")
+            print("10. Run All Maintenance")
+            print("11. Back to Main Menu")
+            max_opt = "11"
         else:
-            print("6. Run All Maintenance")
-            print("7. Back to Main Menu")
-            max_opt = "7"
+            print("9. Run All Maintenance")
+            print("10. Back to Main Menu")
+            max_opt = "10"
 
-        choice = get_input(f"\nSelect option (1-{max_opt})", "7" if is_raspberry_pi() else "6")
+        choice = get_input(f"\nSelect option (1-{max_opt})", max_opt)
 
         if choice == "1":
             system_update()
         elif choice == "2":
-            success, meshing_path = update_meshing_around(meshing_path)
+            success, meshing_path, venv_path = install_meshing_around()
         elif choice == "3":
+            success, meshing_path = update_meshing_around(meshing_path)
+        elif choice == "4":
             if meshing_path:
                 install_dependencies(meshing_path, venv_path)
             else:
-                print_error("Meshing-around not found. Run option 2 first.")
-        elif choice == "4":
+                print_error("Meshing-around not found. Run option 2 or 3 first.")
+        elif choice == "5":
+            if meshing_path:
+                run_install_script(meshing_path)
+            else:
+                print_error("Meshing-around not found. Run option 2 or 3 first.")
+        elif choice == "6":
+            if meshing_path:
+                run_launch_script(meshing_path, venv_path)
+            else:
+                print_error("Meshing-around not found. Run option 2 or 3 first.")
+        elif choice == "7":
             if meshing_path:
                 verify_bot_running(meshing_path)
             else:
-                print_error("Meshing-around not found. Run option 2 first.")
-        elif choice == "5":
+                print_error("Meshing-around not found. Run option 2 or 3 first.")
+        elif choice == "8":
             show_system_info()
-        elif choice == "6" and is_raspberry_pi():
+        elif choice == "9" and is_raspberry_pi():
             _, venv_path = raspberry_pi_setup()
-        elif (choice == "6" and not is_raspberry_pi()) or (choice == "7" and is_raspberry_pi()):
+        elif (choice == "9" and not is_raspberry_pi()) or (choice == "10" and is_raspberry_pi()):
             # Run all maintenance
             print_section("Running All Maintenance")
             if is_raspberry_pi():
@@ -1756,7 +2218,7 @@ def system_maintenance_menu():
                 print_step(5 if is_raspberry_pi() else 4, 5 if is_raspberry_pi() else 4, "Verify Bot")
                 verify_bot_running(meshing_path)
             print_success("Maintenance complete!")
-        elif (choice == "7" and not is_raspberry_pi()) or (choice == "8" and is_raspberry_pi()):
+        elif (choice == "10" and not is_raspberry_pi()) or (choice == "11" and is_raspberry_pi()):
             break
         else:
             print_error("Invalid choice")

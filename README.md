@@ -30,6 +30,24 @@ This repository provides enhanced alert configuration capabilities for the meshi
 
 ## ✨ Features
 
+### Complete Installation & Management
+
+- **Fresh Install** - Clone and set up meshing-around from GitHub
+- **Automated venv Setup** - PEP 668 compliant virtual environment creation
+- **Dependency Installation** - Handles package name fixes (pubsub→PyPubSub, etc.)
+- **install.sh Integration** - Use meshing-around's native installer
+- **launch.sh Support** - Start bot using venv-aware launch script
+- **Systemd Service** - Create auto-start service for the bot
+- **System Updates** - Integrated apt update/upgrade
+
+### Raspberry Pi Specific Features
+
+- **Auto-Detection** - Detects Pi model and OS version
+- **Serial Port Setup** - Configure UART via raspi-config
+- **I2C/SPI Configuration** - Enable interfaces for sensors
+- **dialout Group** - Automatic permission setup
+- **Bookworm/Trixie Support** - Handles PEP 668 environment
+
 ### 12 Configurable Alert Types
 
 1. **Emergency Alerts** - Custom keywords, multi-channel notifications
