@@ -128,6 +128,275 @@ def validate_port(port: str) -> bool:
     """Validate serial port exists"""
     return os.path.exists(port) or port.startswith('/dev/')
 
+
+# ============================================================================
+# RASPBERRY PI COMPATIBILITY FUNCTIONS
+# ============================================================================
+
+def is_raspberry_pi() -> bool:
+    """Detect if running on a Raspberry Pi"""
+    try:
+        with open('/proc/cpuinfo', 'r') as f:
+            cpuinfo = f.read()
+            if 'Raspberry Pi' in cpuinfo or 'BCM' in cpuinfo:
+                return True
+    except:
+        pass
+
+    # Check for Pi-specific files
+    if os.path.exists('/sys/firmware/devicetree/base/model'):
+        try:
+            with open('/sys/firmware/devicetree/base/model', 'r') as f:
+                if 'Raspberry Pi' in f.read():
+                    return True
+        except:
+            pass
+
+    return False
+
+
+def get_pi_model() -> str:
+    """Get Raspberry Pi model information"""
+    try:
+        with open('/sys/firmware/devicetree/base/model', 'r') as f:
+            return f.read().strip().rstrip('\x00')
+    except:
+        return "Unknown"
+
+
+def get_os_info() -> Tuple[str, str]:
+    """Get OS name and version (codename)"""
+    os_name = "Unknown"
+    os_version = "Unknown"
+
+    try:
+        with open('/etc/os-release', 'r') as f:
+            for line in f:
+                if line.startswith('PRETTY_NAME='):
+                    os_name = line.split('=')[1].strip().strip('"')
+                elif line.startswith('VERSION_CODENAME='):
+                    os_version = line.split('=')[1].strip().strip('"')
+    except:
+        pass
+
+    return os_name, os_version
+
+
+def is_bookworm_or_newer() -> bool:
+    """Check if running Debian Bookworm (12) or newer"""
+    _, codename = get_os_info()
+    # Bookworm and newer codenames
+    new_codenames = ['bookworm', 'trixie', 'forky', 'sid']
+    return codename.lower() in new_codenames
+
+
+def check_pep668_environment() -> bool:
+    """Check if PEP 668 externally managed environment is in effect"""
+    # Check for EXTERNALLY-MANAGED file
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    managed_file = Path(f"/usr/lib/python{python_version}/EXTERNALLY-MANAGED")
+    return managed_file.exists()
+
+
+def get_serial_ports() -> List[str]:
+    """Get available serial ports, including Raspberry Pi specific ones"""
+    ports = []
+
+    # Common USB serial ports
+    usb_patterns = ['/dev/ttyUSB*', '/dev/ttyACM*']
+
+    # Raspberry Pi specific serial ports
+    pi_ports = ['/dev/ttyAMA0', '/dev/serial0', '/dev/serial1', '/dev/ttyS0']
+
+    # Check USB ports
+    for pattern in usb_patterns:
+        ret, stdout, _ = run_command(['ls', pattern], capture=True)
+        if ret == 0 and stdout.strip():
+            ports.extend(stdout.strip().split('\n'))
+
+    # Check Pi-specific ports
+    for port in pi_ports:
+        if os.path.exists(port):
+            ports.append(port)
+
+    return list(set(ports))  # Remove duplicates
+
+
+def check_user_groups() -> Tuple[bool, bool]:
+    """Check if user is in dialout and gpio groups"""
+    try:
+        groups = subprocess.run(['groups'], capture_output=True, text=True).stdout
+        in_dialout = 'dialout' in groups
+        in_gpio = 'gpio' in groups
+        return in_dialout, in_gpio
+    except:
+        return False, False
+
+
+def fix_serial_permissions() -> bool:
+    """Add current user to dialout group for serial port access"""
+    print_section("Serial Port Permissions")
+
+    in_dialout, in_gpio = check_user_groups()
+
+    if in_dialout:
+        print_success("User already in 'dialout' group")
+        return True
+
+    print_warning("User not in 'dialout' group - serial ports may not be accessible")
+
+    if not get_yes_no("Add current user to 'dialout' group?", True):
+        print_warning("Skipping - you may need to run as root or add yourself to dialout group")
+        return False
+
+    username = os.environ.get('USER', os.environ.get('LOGNAME', ''))
+    if not username:
+        print_error("Could not determine username")
+        return False
+
+    ret, _, stderr = run_command(['usermod', '-a', '-G', 'dialout', username], sudo=True)
+
+    if ret == 0:
+        print_success(f"Added {username} to 'dialout' group")
+        print_warning("You must log out and back in for this to take effect!")
+        print_info("Or run: newgrp dialout")
+        return True
+    else:
+        print_error(f"Failed to add user to dialout group: {stderr}")
+        return False
+
+
+def setup_virtual_environment(venv_path: Path = None) -> Tuple[bool, Optional[Path]]:
+    """Set up a Python virtual environment for Bookworm compatibility"""
+    print_section("Python Environment Setup")
+
+    if not check_pep668_environment():
+        print_info("PEP 668 not in effect - can use system pip directly")
+        return True, None
+
+    print_warning("Raspberry Pi OS Bookworm uses PEP 668 (externally managed environment)")
+    print_info("A virtual environment is recommended for Python packages")
+
+    if venv_path is None:
+        default_venv = Path.home() / "meshing-around-venv"
+        venv_input = get_input("Virtual environment path", str(default_venv))
+        venv_path = Path(venv_input)
+
+    if venv_path.exists():
+        print_success(f"Virtual environment already exists: {venv_path}")
+        return True, venv_path
+
+    if not get_yes_no(f"Create virtual environment at {venv_path}?", True):
+        print_warning("Skipping venv - pip installs may fail on Bookworm")
+        return False, None
+
+    # Check if python3-venv is installed
+    ret, _, _ = run_command(['dpkg', '-l', 'python3-venv'], capture=True)
+    if ret != 0:
+        print_info("Installing python3-venv...")
+        ret, _, stderr = run_command(['apt', 'install', '-y', 'python3-venv'], sudo=True)
+        if ret != 0:
+            print_error(f"Failed to install python3-venv: {stderr}")
+            return False, None
+
+    # Create virtual environment
+    print_info(f"Creating virtual environment at {venv_path}...")
+    ret, _, stderr = run_command(['python3', '-m', 'venv', str(venv_path)])
+
+    if ret == 0:
+        print_success(f"Virtual environment created: {venv_path}")
+        print_info(f"Activate with: source {venv_path}/bin/activate")
+        return True, venv_path
+    else:
+        print_error(f"Failed to create venv: {stderr}")
+        return False, None
+
+
+def get_pip_command(venv_path: Optional[Path] = None) -> List[str]:
+    """Get the appropriate pip command based on environment"""
+    if venv_path and venv_path.exists():
+        return [str(venv_path / "bin" / "pip3")]
+    elif check_pep668_environment():
+        # Use --break-system-packages flag for Bookworm
+        return ['pip3', '--break-system-packages']
+    else:
+        return ['pip3']
+
+
+def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
+    """Complete Raspberry Pi setup wizard"""
+    print_header("Raspberry Pi Setup")
+
+    if not is_raspberry_pi():
+        print_info("Not running on Raspberry Pi - skipping Pi-specific setup")
+        return True, None
+
+    pi_model = get_pi_model()
+    os_name, os_codename = get_os_info()
+
+    print_success(f"Detected: {pi_model}")
+    print_info(f"OS: {os_name} ({os_codename})")
+
+    errors = []
+    venv_path = None
+
+    # Step 1: Check serial permissions
+    print_step(1, 4, "Checking serial port permissions...")
+    if not fix_serial_permissions():
+        errors.append("Serial permissions not configured")
+
+    # Step 2: Check available serial ports
+    print_step(2, 4, "Detecting serial ports...")
+    ports = get_serial_ports()
+    if ports:
+        print_success(f"Found serial ports: {', '.join(ports)}")
+    else:
+        print_warning("No serial ports found - connect your Meshtastic device")
+
+    # Step 3: Handle PEP 668 / virtual environment
+    print_step(3, 4, "Setting up Python environment...")
+    if is_bookworm_or_newer():
+        success, venv_path = setup_virtual_environment()
+        if not success:
+            errors.append("Virtual environment not configured")
+
+    # Step 4: Check for required system packages
+    print_step(4, 4, "Checking system packages...")
+    required_packages = ['python3-pip', 'git']
+    missing = []
+
+    for pkg in required_packages:
+        ret, _, _ = run_command(['dpkg', '-l', pkg], capture=True)
+        if ret != 0:
+            missing.append(pkg)
+
+    if missing:
+        print_warning(f"Missing packages: {', '.join(missing)}")
+        if get_yes_no("Install missing packages?", True):
+            ret, _, stderr = run_command(['apt', 'install', '-y'] + missing, sudo=True)
+            if ret == 0:
+                print_success("Packages installed")
+            else:
+                print_error(f"Failed to install packages: {stderr}")
+                errors.append("Some packages not installed")
+    else:
+        print_success("All required packages installed")
+
+    # Summary
+    print_section("Raspberry Pi Setup Summary")
+    if errors:
+        print_warning("Setup completed with issues:")
+        for err in errors:
+            print_error(f"  • {err}")
+    else:
+        print_success("Raspberry Pi setup complete!")
+
+    if venv_path:
+        print_info(f"Virtual environment: {venv_path}")
+        print_info(f"Activate before running bot: source {venv_path}/bin/activate")
+
+    return len(errors) == 0, venv_path
+
 def get_input(prompt: str, default: str = "", input_type: type = str, password: bool = False) -> Any:
     """Get user input with optional default value and password masking"""
     if default:
@@ -582,8 +851,8 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
     return True, meshing_path
 
 
-def install_dependencies(meshing_path: Path) -> bool:
-    """Install Python dependencies for meshing-around"""
+def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -> bool:
+    """Install Python dependencies for meshing-around with Raspberry Pi compatibility"""
     print_section("Install Dependencies")
 
     requirements_file = meshing_path / "requirements.txt"
@@ -594,18 +863,77 @@ def install_dependencies(meshing_path: Path) -> bool:
     if not get_yes_no("Install Python dependencies?", True):
         return True
 
-    print_info("Installing Python dependencies...")
-    ret, stdout, stderr = run_command(
-        ['pip3', 'install', '-r', str(requirements_file)],
-        desc="Installing dependencies"
-    )
+    # Determine the pip command to use
+    pip_cmd = get_pip_command(venv_path)
+    pip_display = ' '.join(pip_cmd)
+
+    # Check for Bookworm/PEP 668
+    if check_pep668_environment() and not venv_path:
+        print_warning("Raspberry Pi OS Bookworm detected with PEP 668")
+        print_info("Using --break-system-packages flag (or use a virtual environment)")
+
+    print_info(f"Using pip command: {pip_display}")
+
+    # Try installing from requirements.txt first
+    print_info("Installing from requirements.txt...")
+    install_cmd = pip_cmd + ['install', '-r', str(requirements_file)]
+    ret, stdout, stderr = run_command(install_cmd, capture=True)
 
     if ret != 0:
-        print_error(f"Failed to install dependencies: {stderr}")
-        print_warning("Try running: pip3 install -r requirements.txt manually")
-        return False
+        print_warning("Some packages failed to install from requirements.txt")
+        print_info("Trying alternative package names...")
 
-    print_success("Dependencies installed")
+        # Known package name fixes for compatibility
+        package_fixes = {
+            'pubsub': 'PyPubSub',
+            'pyephem': 'ephem',
+        }
+
+        # Install core packages individually with fixes
+        core_packages = [
+            'meshtastic',
+            'PyPubSub',  # Instead of pubsub
+            'ephem',     # Instead of pyephem
+            'requests',
+            'maidenhead',
+            'beautifulsoup4',
+            'dadjokes',
+            'geopy',
+            'schedule',
+        ]
+
+        failed_packages = []
+        for pkg in core_packages:
+            print_info(f"Installing {pkg}...")
+            install_cmd = pip_cmd + ['install', pkg]
+            ret, _, stderr = run_command(install_cmd, capture=True)
+            if ret != 0:
+                failed_packages.append(pkg)
+                print_warning(f"  Failed to install {pkg}")
+            else:
+                print_success(f"  Installed {pkg}")
+
+        if failed_packages:
+            print_warning(f"Failed packages: {', '.join(failed_packages)}")
+            print_info("You may need to install these manually")
+            return False
+    else:
+        print_success("All dependencies installed from requirements.txt")
+
+    # Verify critical packages
+    print_info("Verifying critical packages...")
+    python_cmd = str(venv_path / "bin" / "python3") if venv_path else "python3"
+
+    critical = ['meshtastic']
+    for pkg in critical:
+        ret, _, _ = run_command([python_cmd, '-c', f'import {pkg}'], capture=True)
+        if ret == 0:
+            print_success(f"  {pkg} OK")
+        else:
+            print_error(f"  {pkg} MISSING")
+            return False
+
+    print_success("Dependencies installed successfully!")
     return True
 
 
@@ -688,47 +1016,71 @@ def verify_bot_running(meshing_path: Path) -> bool:
 
 
 def quick_setup():
-    """Quick setup wizard for first-time users"""
+    """Quick setup wizard for first-time users with Raspberry Pi support"""
     print_header("Quick Setup Wizard")
 
-    print("""
+    # Detect platform
+    pi_detected = is_raspberry_pi()
+    bookworm_detected = is_bookworm_or_newer()
+
+    if pi_detected:
+        pi_model = get_pi_model()
+        print_success(f"Detected: {pi_model}")
+
+    if bookworm_detected:
+        print_warning("Raspberry Pi OS Bookworm detected - will configure virtual environment")
+
+    steps = 6 if pi_detected else 5
+    print(f"""
 This wizard will:
-  1. Update your system (apt update/upgrade)
-  2. Find or clone meshing-around
-  3. Install dependencies
-  4. Create a basic configuration
-  5. Verify the bot can run
+  1. {"Raspberry Pi setup (permissions, venv)" if pi_detected else "Check system requirements"}
+  2. Update your system (apt update/upgrade)
+  3. Find or clone meshing-around
+  4. Install dependencies
+  5. Create a basic configuration
+  6. Verify the bot can run
 """)
 
     if not get_yes_no("Continue with quick setup?", True):
         return None
 
     errors = []
+    venv_path = None
 
-    # Step 1: System update
-    print_step(1, 5, "System Update")
+    # Step 1: Raspberry Pi setup (or system check)
+    if pi_detected:
+        print_step(1, steps, "Raspberry Pi Setup")
+        success, venv_path = raspberry_pi_setup()
+        if not success:
+            errors.append("Raspberry Pi setup had issues")
+    else:
+        print_step(1, steps, "System Check")
+        show_system_info()
+
+    # Step 2: System update
+    print_step(2, steps, "System Update")
     if not system_update():
         errors.append("System update had issues")
 
-    # Step 2: Find/update meshing-around
-    print_step(2, 5, "Meshing-Around Setup")
+    # Step 3: Find/update meshing-around
+    print_step(3, steps, "Meshing-Around Setup")
     success, meshing_path = update_meshing_around()
     if not success:
         errors.append("Failed to update meshing-around")
 
-    # Step 3: Install dependencies
+    # Step 4: Install dependencies (with venv support)
     if meshing_path:
-        print_step(3, 5, "Install Dependencies")
-        if not install_dependencies(meshing_path):
+        print_step(4, steps, "Install Dependencies")
+        if not install_dependencies(meshing_path, venv_path):
             errors.append("Dependency installation had issues")
 
-    # Step 4: Create basic config
-    print_step(4, 5, "Create Configuration")
+    # Step 5: Create basic config
+    print_step(5, steps, "Create Configuration")
     config = create_basic_config()
 
-    # Step 5: Verify bot
+    # Step 6: Verify bot
     if meshing_path:
-        print_step(5, 5, "Verify Bot")
+        print_step(6, steps, "Verify Bot")
         if not verify_bot_running(meshing_path):
             errors.append("Bot verification failed")
 
@@ -743,10 +1095,19 @@ This wizard will:
 
     if meshing_path:
         print_info(f"Meshing-around location: {meshing_path}")
-        print_info("Next steps:")
-        print(f"  1. Copy config.ini to {meshing_path}/")
-        print(f"  2. cd {meshing_path}")
-        print("  3. python3 mesh_bot.py")
+
+        if venv_path:
+            print_info(f"Virtual environment: {venv_path}")
+            print_info("\nNext steps:")
+            print(f"  1. Copy config.ini to {meshing_path}/")
+            print(f"  2. source {venv_path}/bin/activate")
+            print(f"  3. cd {meshing_path}")
+            print("  4. python3 mesh_bot.py")
+        else:
+            print_info("Next steps:")
+            print(f"  1. Copy config.ini to {meshing_path}/")
+            print(f"  2. cd {meshing_path}")
+            print("  3. python3 mesh_bot.py")
 
     return config
 
@@ -791,16 +1152,38 @@ def create_basic_config() -> configparser.ConfigParser:
 
 
 def show_system_info():
-    """Display system information"""
+    """Display system information including Raspberry Pi details"""
     print_section("System Information")
 
+    # Raspberry Pi detection
+    if is_raspberry_pi():
+        pi_model = get_pi_model()
+        print_success(f"Raspberry Pi: {pi_model}")
+    else:
+        print_info("Platform: Standard Linux/x86")
+
     # OS Info
-    ret, stdout, _ = run_command(['uname', '-a'], capture=True)
+    os_name, os_codename = get_os_info()
+    print(f"OS: {os_name}")
+
+    if is_bookworm_or_newer():
+        print_warning(f"  Codename: {os_codename} (PEP 668 applies)")
+    else:
+        print(f"  Codename: {os_codename}")
+
+    # Kernel
+    ret, stdout, _ = run_command(['uname', '-r'], capture=True)
     if ret == 0:
-        print(f"System: {stdout.strip()}")
+        print(f"Kernel: {stdout.strip()}")
 
     # Python version
     print(f"Python: {sys.version.split()[0]}")
+
+    # PEP 668 status
+    if check_pep668_environment():
+        print_warning("PEP 668: Externally managed environment (use venv or --break-system-packages)")
+    else:
+        print_success("PEP 668: Not in effect (system pip works normally)")
 
     # Check for meshtastic library
     try:
@@ -810,29 +1193,55 @@ def show_system_info():
         print_warning("Meshtastic library: NOT INSTALLED")
         print_info("  Install with: pip3 install meshtastic")
 
-    # Check for serial ports
-    print("\nAvailable serial ports:")
-    ret, stdout, _ = run_command(['ls', '-la', '/dev/ttyUSB*'], capture=True)
-    if ret == 0:
-        print(stdout)
+    # User groups
+    in_dialout, in_gpio = check_user_groups()
+    print(f"\nUser groups:")
+    if in_dialout:
+        print_success("  dialout: YES (serial port access)")
     else:
-        ret, stdout, _ = run_command(['ls', '-la', '/dev/ttyACM*'], capture=True)
-        if ret == 0:
-            print(stdout)
-        else:
-            print_warning("  No USB serial ports found")
+        print_warning("  dialout: NO (run 'sudo usermod -a -G dialout $USER')")
+
+    if is_raspberry_pi() and in_gpio:
+        print_success("  gpio: YES")
+
+    # Check for serial ports (including Pi-specific)
+    print("\nSerial ports:")
+    ports = get_serial_ports()
+    if ports:
+        for port in ports:
+            print_success(f"  {port}")
+    else:
+        print_warning("  No serial ports found - connect your Meshtastic device")
 
     # Check for meshing-around
     meshing_path = find_meshing_around()
     if meshing_path:
-        print(f"\nMeshing-around found: {meshing_path}")
+        print(f"\nMeshing-around: {meshing_path}")
+        # Check for config
+        if (meshing_path / "config.ini").exists():
+            print_success("  config.ini: Found")
+        else:
+            print_warning("  config.ini: Not found")
     else:
         print_warning("\nMeshing-around: NOT FOUND")
+
+    # Check for virtual environment
+    venv_path = Path.home() / "meshing-around-venv"
+    if venv_path.exists():
+        print_success(f"\nVirtual environment: {venv_path}")
+    elif is_bookworm_or_newer():
+        print_warning(f"\nVirtual environment: Not found (recommended for Bookworm)")
 
     # Disk space
     ret, stdout, _ = run_command(['df', '-h', '/'], capture=True)
     if ret == 0:
         print(f"\nDisk space:\n{stdout}")
+
+    # Memory (useful for Pi)
+    if is_raspberry_pi():
+        ret, stdout, _ = run_command(['free', '-h'], capture=True)
+        if ret == 0:
+            print(f"Memory:\n{stdout}")
 
 def load_config(config_file: str) -> configparser.ConfigParser:
     """Load existing config or create new one"""
@@ -873,15 +1282,29 @@ def main_menu():
     print("\nThis tool will help you configure your Meshtastic bot")
     print("You can configure alert settings, connection parameters, and more\n")
 
+    # Detect Raspberry Pi
+    if is_raspberry_pi():
+        pi_model = get_pi_model()
+        print_success(f"Raspberry Pi detected: {pi_model}")
+        if is_bookworm_or_newer():
+            print_info("OS: Bookworm or newer (PEP 668 support enabled)")
+
     # Show startup menu
     print_section("Start Menu")
     print("1. Quick Setup (recommended for first-time users)")
     print("2. Advanced Configuration")
     print("3. System Maintenance Only")
-    print("4. Show System Info")
-    print("5. Exit")
+    if is_raspberry_pi():
+        print("4. Raspberry Pi Setup")
+        print("5. Show System Info")
+        print("6. Exit")
+        max_choice = "6"
+    else:
+        print("4. Show System Info")
+        print("5. Exit")
+        max_choice = "5"
 
-    start_choice = get_input("\nSelect option (1-5)", "1")
+    start_choice = get_input(f"\nSelect option (1-{max_choice})", "1")
 
     if start_choice == "1":
         config = quick_setup()
@@ -892,13 +1315,19 @@ def main_menu():
     elif start_choice == "3":
         system_maintenance_menu()
         return
-    elif start_choice == "4":
+    elif start_choice == "4" and is_raspberry_pi():
+        raspberry_pi_setup()
+        if get_yes_no("\nContinue to configuration?", True):
+            pass
+        else:
+            return
+    elif (start_choice == "4" and not is_raspberry_pi()) or (start_choice == "5" and is_raspberry_pi()):
         show_system_info()
         if get_yes_no("\nContinue to configuration?", True):
             pass
         else:
             return
-    elif start_choice == "5":
+    elif (start_choice == "5" and not is_raspberry_pi()) or (start_choice == "6" and is_raspberry_pi()):
         print_success("Goodbye!")
         return
 
@@ -911,6 +1340,11 @@ def main_menu():
 
     # Track meshing-around path
     meshing_path = find_meshing_around()
+
+    # Track virtual environment path
+    venv_path = Path.home() / "meshing-around-venv"
+    if not venv_path.exists():
+        venv_path = None
 
     # Configuration wizard
     while True:
@@ -933,12 +1367,14 @@ def main_menu():
         print("14. Install Dependencies")
         print("15. Verify Bot Running")
         print("16. Show System Info")
+        if is_raspberry_pi():
+            print("17. Raspberry Pi Setup")
         print(f"\n{Colors.BOLD}--- Save & Exit ---{Colors.ENDC}")
-        print("17. Save and Exit")
-        print("18. Save, Deploy & Start Bot")
-        print("19. Exit without Saving")
+        print("18. Save and Exit")
+        print("19. Save, Deploy & Start Bot")
+        print("20. Exit without Saving")
 
-        choice = get_input("\nSelect option (1-19)", "17")
+        choice = get_input("\nSelect option (1-20)", "18")
 
         if choice == "1":
             configure_interface(config)
@@ -968,7 +1404,7 @@ def main_menu():
             success, meshing_path = update_meshing_around(meshing_path)
         elif choice == "14":
             if meshing_path:
-                install_dependencies(meshing_path)
+                install_dependencies(meshing_path, venv_path)
             else:
                 print_error("Meshing-around not found. Run option 13 first.")
         elif choice == "15":
@@ -978,21 +1414,25 @@ def main_menu():
                 print_error("Meshing-around not found. Run option 13 first.")
         elif choice == "16":
             show_system_info()
-        elif choice == "17":
+        elif choice == "17" and is_raspberry_pi():
+            _, venv_path = raspberry_pi_setup()
+        elif choice == "18":
             save_config(config, config_file)
             print_success("\nConfiguration complete!")
             if meshing_path:
                 print_info(f"Copy config to: {meshing_path}/config.ini")
+            if venv_path:
+                print_info(f"Activate venv: source {venv_path}/bin/activate")
             print(f"\nRun the bot with: python3 mesh_bot.py")
             break
-        elif choice == "18":
+        elif choice == "19":
             save_config(config, config_file)
             if meshing_path:
                 deploy_and_start(config_file, meshing_path)
             else:
                 print_error("Meshing-around not found. Configure path first.")
             break
-        elif choice == "19":
+        elif choice == "20":
             if get_yes_no("Exit without saving changes?", False):
                 print_warning("Exiting without saving")
                 break
@@ -1001,10 +1441,13 @@ def main_menu():
 
 
 def system_maintenance_menu():
-    """Menu for system maintenance only"""
+    """Menu for system maintenance only with Raspberry Pi support"""
     print_header("System Maintenance")
 
     meshing_path = find_meshing_around()
+    venv_path = Path.home() / "meshing-around-venv"
+    if not venv_path.exists():
+        venv_path = None
 
     while True:
         print_section("Maintenance Menu")
@@ -1013,10 +1456,17 @@ def system_maintenance_menu():
         print("3. Install Dependencies")
         print("4. Verify Bot Running")
         print("5. Show System Info")
-        print("6. Run All Maintenance")
-        print("7. Back to Main Menu")
+        if is_raspberry_pi():
+            print("6. Raspberry Pi Setup")
+            print("7. Run All Maintenance")
+            print("8. Back to Main Menu")
+            max_opt = "8"
+        else:
+            print("6. Run All Maintenance")
+            print("7. Back to Main Menu")
+            max_opt = "7"
 
-        choice = get_input("\nSelect option (1-7)", "6")
+        choice = get_input(f"\nSelect option (1-{max_opt})", "7" if is_raspberry_pi() else "6")
 
         if choice == "1":
             system_update()
@@ -1024,7 +1474,7 @@ def system_maintenance_menu():
             success, meshing_path = update_meshing_around(meshing_path)
         elif choice == "3":
             if meshing_path:
-                install_dependencies(meshing_path)
+                install_dependencies(meshing_path, venv_path)
             else:
                 print_error("Meshing-around not found. Run option 2 first.")
         elif choice == "4":
@@ -1034,16 +1484,25 @@ def system_maintenance_menu():
                 print_error("Meshing-around not found. Run option 2 first.")
         elif choice == "5":
             show_system_info()
-        elif choice == "6":
+        elif choice == "6" and is_raspberry_pi():
+            _, venv_path = raspberry_pi_setup()
+        elif (choice == "6" and not is_raspberry_pi()) or (choice == "7" and is_raspberry_pi()):
             # Run all maintenance
             print_section("Running All Maintenance")
+            if is_raspberry_pi():
+                print_step(1, 5, "Raspberry Pi Setup")
+                _, venv_path = raspberry_pi_setup()
+            print_step(2 if is_raspberry_pi() else 1, 5 if is_raspberry_pi() else 4, "System Update")
             system_update()
+            print_step(3 if is_raspberry_pi() else 2, 5 if is_raspberry_pi() else 4, "Update Meshing-Around")
             success, meshing_path = update_meshing_around(meshing_path)
             if meshing_path:
-                install_dependencies(meshing_path)
+                print_step(4 if is_raspberry_pi() else 3, 5 if is_raspberry_pi() else 4, "Install Dependencies")
+                install_dependencies(meshing_path, venv_path)
+                print_step(5 if is_raspberry_pi() else 4, 5 if is_raspberry_pi() else 4, "Verify Bot")
                 verify_bot_running(meshing_path)
             print_success("Maintenance complete!")
-        elif choice == "7":
+        elif (choice == "7" and not is_raspberry_pi()) or (choice == "8" and is_raspberry_pi()):
             break
         else:
             print_error("Invalid choice")
