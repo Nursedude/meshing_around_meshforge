@@ -125,7 +125,7 @@ def find_meshing_around() -> Optional[Path]:
         if result.returncode == 0 and result.stdout.strip():
             bot_path = Path(result.stdout.strip().split('\n')[0]).parent
             return bot_path
-    except:
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         pass
 
     return None
@@ -155,7 +155,7 @@ def is_raspberry_pi() -> bool:
             cpuinfo = f.read()
             if 'Raspberry Pi' in cpuinfo or 'BCM' in cpuinfo:
                 return True
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         pass
 
     # Check for Pi-specific files
@@ -164,7 +164,7 @@ def is_raspberry_pi() -> bool:
             with open('/sys/firmware/devicetree/base/model', 'r') as f:
                 if 'Raspberry Pi' in f.read():
                     return True
-        except:
+        except (FileNotFoundError, PermissionError, IOError):
             pass
 
     return False
@@ -175,7 +175,7 @@ def get_pi_model() -> str:
     try:
         with open('/sys/firmware/devicetree/base/model', 'r') as f:
             return f.read().strip().rstrip('\x00')
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         return "Unknown"
 
 
@@ -191,7 +191,7 @@ def get_os_info() -> Tuple[str, str]:
                     os_name = line.split('=')[1].strip().strip('"')
                 elif line.startswith('VERSION_CODENAME='):
                     os_version = line.split('=')[1].strip().strip('"')
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         pass
 
     return os_name, os_version
@@ -244,7 +244,7 @@ def check_user_groups() -> Tuple[bool, bool]:
         in_dialout = 'dialout' in groups
         in_gpio = 'gpio' in groups
         return in_dialout, in_gpio
-    except:
+    except (subprocess.SubprocessError, FileNotFoundError, Exception):
         return False, False
 
 
@@ -451,7 +451,7 @@ def check_serial_enabled() -> Tuple[bool, bool]:
                 console_enabled = 'console=serial' in cmdline or 'console=ttyAMA' in cmdline
 
         return uart_enabled, console_enabled
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         return False, False
 
 

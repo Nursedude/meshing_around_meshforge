@@ -35,8 +35,6 @@ try:
     from rich.table import Table
     from rich.prompt import Prompt, Confirm, IntPrompt, FloatPrompt
     from rich.tree import Tree
-    from rich.layout import Layout
-    from rich.live import Live
     from rich.text import Text
     from rich import box
     from rich.padding import Padding
@@ -46,7 +44,7 @@ except ImportError:
     RICH_AVAILABLE = False
     print("⚠️  Installing 'rich' library for better UI...")
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "rich", "--quiet"], 
+        subprocess.run([sys.executable, "-m", "pip", "install", "rich", "--quiet"],
                       check=False, capture_output=True)
         from rich.console import Console
         from rich.panel import Panel
@@ -54,13 +52,12 @@ except ImportError:
         from rich.table import Table
         from rich.prompt import Prompt, Confirm, IntPrompt, FloatPrompt
         from rich.tree import Tree
-        from rich.layout import Layout
         from rich.text import Text
         from rich import box
         from rich.padding import Padding
         from rich.columns import Columns
         RICH_AVAILABLE = True
-    except:
+    except Exception:
         # Fallback to basic output
         pass
 
@@ -133,104 +130,62 @@ def print_step(current: int, total: int, text: str):
 def create_menu_table(title: str, items: List[Tuple[str, str]], columns: int = 1) -> None:
     """Create a beautiful menu table"""
     if RICH_AVAILABLE:
+        table = Table(show_header=False, box=box.ROUNDED, border_style="cyan", padding=(0, 2))
+
         if columns == 1:
-            table = Table(show_header=False, box=box.ROUNDED, border_style="cyan")
-            table.add_column("Option", style="cyan", width=4)
+            table.add_column("Option", style="cyan bold", width=4)
             table.add_column("Description", style="white")
-            
+
             for num, desc in items:
                 table.add_row(num, desc)
         else:
             # Multi-column layout
-            table = Table(show_header=False, box=box.ROUNDED, border_style="cyan", expand=True)
-            for _ in range(columns * 2):
-                table.add_column()
-            
-            rows = []
-            for i in range(0, len(items), columns):
-                row = []
-                for j in range(columns):
-                    if i + j < len(items):
-                        num, desc = items[i + j]
-                        row.extend([f"[cyan]{num}[/cyan]", desc])
+            items_per_col = (len(items) + columns - 1) // columns
+            for col in range(columns):
+                table.add_column("Option", style="cyan bold", width=4)
+                table.add_column("Description", style="white")
+
+            for row_idx in range(items_per_col):
+                row_data = []
+                for col_idx in range(columns):
+                    item_idx = col_idx * items_per_col + row_idx
+                    if item_idx < len(items):
+                        num, desc = items[item_idx]
+                        row_data.extend([num, desc])
                     else:
-                        row.extend(["", ""])
-                rows.append(row)
-            
-            for row in rows:
-                table.add_row(*row)
-        
+                        row_data.extend(["", ""])
+                table.add_row(*row_data)
+
         console.print(Panel(table, title=f"[bold]{title}[/bold]", border_style="blue"))
     else:
         print(f"\n{title}")
         for num, desc in items:
             print(f"  {num}. {desc}")
 
-def show_config_summary(config: configparser.ConfigParser) -> None:
-    """Display configuration summary in a nice table"""
-    if RICH_AVAILABLE:
-        table = Table(title="Configuration Summary", box=box.ROUNDED, border_style="green")
-        table.add_column("Section", style="cyan", width=20)
-        table.add_column("Settings", style="white")
-        
-        for section in config.sections():
-            if config.items(section):
-                settings = "\n".join([f"{k}: {v}" for k, v in list(config.items(section))[:3]])
-                if len(config.items(section)) > 3:
-                    settings += f"\n... and {len(config.items(section)) - 3} more"
-                table.add_row(section, settings)
-        
-        console.print(table)
-    else:
-        print("\nConfiguration Summary:")
-        for section in config.sections():
-            print(f"\n{section}:")
-            for key, value in list(config.items(section))[:2]:
-                print(f"  {key}: {value}")
-
-def create_progress_bar(description: str = "Processing..."):
-    """Create a progress bar context"""
-    if RICH_AVAILABLE:
-        return Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console
-        )
-    return None
-
-def get_input_rich(prompt: str, default: str = "", input_type: type = str, 
+def get_input_rich(prompt: str, default: str = "", input_type: type = str,
                    password: bool = False, choices: List[str] = None) -> Any:
     """Get user input with rich prompts"""
     if not RICH_AVAILABLE:
         return get_input_basic(prompt, default, input_type, password)
-    
+
     try:
         if password:
-            from rich.prompt import Prompt
             return Prompt.ask(f"[yellow]{prompt}[/yellow]", password=True, default=default or None)
-        
+
         if input_type == bool:
-            return Confirm.ask(f"[yellow]{prompt}[/yellow]", default=bool(default))
-        
+            return Confirm.ask(f"[yellow]{prompt}[/yellow]", default=bool(default) if default else False)
+
         if input_type == int:
-            if choices:
-                return IntPrompt.ask(
-                    f"[yellow]{prompt}[/yellow]", 
-                    default=int(default) if default else 1,
-                    choices=[int(c) for c in choices] if all(c.isdigit() for c in choices) else None
-                )
             return IntPrompt.ask(f"[yellow]{prompt}[/yellow]", default=int(default) if default else None)
-        
+
         if input_type == float:
             return FloatPrompt.ask(f"[yellow]{prompt}[/yellow]", default=float(default) if default else None)
-        
+
         if choices:
-            return Prompt.ask(f"[yellow]{prompt}[/yellow]", choices=choices, default=default or None)
-        
+            return Prompt.ask(f"[yellow]{prompt}[/yellow]", choices=choices, default=default or choices[0] if choices else None)
+
         return Prompt.ask(f"[yellow]{prompt}[/yellow]", default=default or None)
-    
+
     except (KeyboardInterrupt, EOFError):
         raise
     except Exception:
@@ -243,17 +198,17 @@ def get_input_basic(prompt: str, default: str = "", input_type: type = str, pass
         full_prompt = f"{prompt} [{default}]: " if not password else f"{prompt} [****]: "
     else:
         full_prompt = f"{prompt}: "
-    
+
     while True:
         try:
             if password:
                 value = getpass(full_prompt)
             else:
                 value = input(full_prompt).strip()
-            
+
             if not value and default:
                 value = str(default)
-            
+
             if input_type == bool:
                 value_lower = str(value).lower()
                 if value_lower in ['true', 'yes', 'y', '1', 'on']:
@@ -272,7 +227,7 @@ def get_input_basic(prompt: str, default: str = "", input_type: type = str, pass
         except ValueError:
             print(f"Invalid input. Expected {input_type.__name__}")
 
-def get_input(prompt: str, default: str = "", input_type: type = str, 
+def get_input(prompt: str, default: str = "", input_type: type = str,
               password: bool = False, choices: List[str] = None) -> Any:
     """Smart input function that uses rich if available"""
     if RICH_AVAILABLE:
@@ -289,26 +244,32 @@ def get_yes_no(prompt: str, default: bool = False) -> bool:
         return response.lower() in ['y', 'yes', 'true', '1']
 
 # ============================================================================
-# UTILITY FUNCTIONS
+# UTILITY FUNCTIONS FROM ORIGINAL (with bug fixes applied)
 # ============================================================================
 
-def run_command(cmd: List[str], desc: str = "", capture: bool = False, 
-                sudo: bool = False, show_spinner: bool = False) -> Tuple[int, str, str]:
-    """Run a shell command with optional sudo and spinner"""
+def run_command(cmd: List[str], desc: str = "", capture: bool = False,
+                sudo: bool = False) -> Tuple[int, str, str]:
+    """Run a shell command with optional sudo"""
     if sudo:
         cmd = ['sudo'] + cmd
-    
-    if desc and show_spinner and RICH_AVAILABLE:
-        with console.status(f"[cyan]{desc}...", spinner="dots"):
-            result = subprocess.run(cmd, capture_output=capture, text=True, timeout=600)
-    else:
-        if desc:
-            print_info(f"{desc}...")
+
+    if desc:
+        print_info(f"{desc}...")
+
+    try:
         result = subprocess.run(cmd, capture_output=capture, text=True, timeout=600)
-    
-    stdout = result.stdout if capture else ""
-    stderr = result.stderr if capture else ""
-    return result.returncode, stdout, stderr
+        stdout = result.stdout if capture else ""
+        stderr = result.stderr if capture else ""
+        return result.returncode, stdout, stderr
+    except subprocess.TimeoutExpired:
+        print_error(f"Command timed out")
+        return -1, "", "Timeout"
+    except FileNotFoundError:
+        print_error(f"Command not found: {cmd[0]}")
+        return -1, "", "Command not found"
+    except Exception as e:
+        print_error(f"Command failed: {e}")
+        return -1, "", str(e)
 
 def find_meshing_around() -> Optional[Path]:
     """Find the meshing-around installation directory"""
@@ -320,11 +281,11 @@ def find_meshing_around() -> Optional[Path]:
         Path.cwd().parent / "meshing-around",
         Path.cwd() / "meshing-around",
     ]
-    
+
     for path in common_paths:
         if path.exists() and (path / "mesh_bot.py").exists():
             return path
-    
+
     try:
         result = subprocess.run(
             ['find', str(Path.home()), '-name', 'mesh_bot.py', '-type', 'f'],
@@ -333,27 +294,10 @@ def find_meshing_around() -> Optional[Path]:
         if result.returncode == 0 and result.stdout.strip():
             bot_path = Path(result.stdout.strip().split('\n')[0]).parent
             return bot_path
-    except:
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         pass
-    
+
     return None
-
-def validate_mac_address(mac: str) -> bool:
-    """Validate BLE MAC address format"""
-    pattern = r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
-    return bool(re.match(pattern, mac))
-
-def validate_coordinates(lat: float, lon: float) -> bool:
-    """Validate latitude and longitude values"""
-    return -90 <= lat <= 90 and -180 <= lon <= 180
-
-def validate_port(port: str) -> bool:
-    """Validate serial port exists"""
-    return os.path.exists(port) or port.startswith('/dev/')
-
-# ============================================================================
-# RASPBERRY PI COMPATIBILITY FUNCTIONS
-# ============================================================================
 
 def is_raspberry_pi() -> bool:
     """Detect if running on a Raspberry Pi"""
@@ -362,17 +306,17 @@ def is_raspberry_pi() -> bool:
             cpuinfo = f.read()
             if 'Raspberry Pi' in cpuinfo or 'BCM' in cpuinfo:
                 return True
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         pass
-    
+
     if os.path.exists('/sys/firmware/devicetree/base/model'):
         try:
             with open('/sys/firmware/devicetree/base/model', 'r') as f:
                 if 'Raspberry Pi' in f.read():
                     return True
-        except:
+        except (FileNotFoundError, PermissionError, IOError):
             pass
-    
+
     return False
 
 def get_pi_model() -> str:
@@ -380,14 +324,14 @@ def get_pi_model() -> str:
     try:
         with open('/sys/firmware/devicetree/base/model', 'r') as f:
             return f.read().strip().rstrip('\x00')
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         return "Unknown"
 
 def get_os_info() -> Tuple[str, str]:
     """Get OS name and version (codename)"""
     os_name = "Unknown"
     os_version = "Unknown"
-    
+
     try:
         with open('/etc/os-release', 'r') as f:
             for line in f:
@@ -395,9 +339,9 @@ def get_os_info() -> Tuple[str, str]:
                     os_name = line.split('=')[1].strip().strip('"')
                 elif line.startswith('VERSION_CODENAME='):
                     os_version = line.split('=')[1].strip().strip('"')
-    except:
+    except (FileNotFoundError, PermissionError, IOError):
         pass
-    
+
     return os_name, os_version
 
 def is_bookworm_or_newer() -> bool:
@@ -415,19 +359,19 @@ def check_pep668_environment() -> bool:
 def get_serial_ports() -> List[str]:
     """Get available serial ports, including Raspberry Pi specific ones"""
     ports = []
-    
+
     usb_patterns = ['/dev/ttyUSB*', '/dev/ttyACM*']
     pi_ports = ['/dev/ttyAMA0', '/dev/serial0', '/dev/serial1', '/dev/ttyS0']
-    
+
     for pattern in usb_patterns:
         ret, stdout, _ = run_command(['ls', pattern], capture=True)
         if ret == 0 and stdout.strip():
             ports.extend(stdout.strip().split('\n'))
-    
+
     for port in pi_ports:
         if os.path.exists(port):
             ports.append(port)
-    
+
     return list(set(ports))
 
 def check_user_groups() -> Tuple[bool, bool]:
@@ -437,190 +381,143 @@ def check_user_groups() -> Tuple[bool, bool]:
         in_dialout = 'dialout' in groups
         in_gpio = 'gpio' in groups
         return in_dialout, in_gpio
-    except:
+    except (subprocess.SubprocessError, FileNotFoundError, Exception):
         return False, False
+
+# ============================================================================
+# IMPROVED SYSTEM INFO DISPLAY
+# ============================================================================
 
 def show_system_info_rich():
     """Display system information in a beautiful table"""
-    if not RICH_AVAILABLE:
-        show_system_info_basic()
-        return
-    
     print_section("System Information")
-    
+
     # Create system info table
     table = Table(box=box.ROUNDED, show_header=False, border_style="cyan")
-    table.add_column("Property", style="yellow", width=25)
+    table.add_column("Property", style="yellow bold", width=25)
     table.add_column("Value", style="white")
-    
+
     # Platform
     if is_raspberry_pi():
         pi_model = get_pi_model()
         table.add_row("🥧 Platform", f"[green]{pi_model}[/green]")
     else:
         table.add_row("💻 Platform", "Standard Linux")
-    
+
     # OS
     os_name, os_codename = get_os_info()
     table.add_row("🐧 OS", f"{os_name}")
     table.add_row("📦 Codename", f"{os_codename}")
-    
-    # Kernel
-    ret, stdout, _ = run_command(['uname', '-r'], capture=True)
-    if ret == 0:
-        table.add_row("⚙️  Kernel", stdout.strip())
-    
+
     # Python
     py_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     py_status = "✓" if sys.version_info >= (3, 9) else "⚠"
     table.add_row("🐍 Python", f"{py_status} {py_version}")
-    
+
     # PEP 668
     if check_pep668_environment():
         table.add_row("📋 PEP 668", "[yellow]Active (use venv)[/yellow]")
     else:
         table.add_row("📋 PEP 668", "[green]Not active[/green]")
-    
+
     console.print(table)
-    
-    # User groups
-    print_section("User Permissions")
-    in_dialout, in_gpio = check_user_groups()
-    
-    perms_table = Table(box=box.SIMPLE, show_header=False)
-    perms_table.add_column(width=15)
-    perms_table.add_column()
-    
-    perms_table.add_row(
-        "[cyan]dialout[/cyan]", 
-        "[green]✓ YES[/green]" if in_dialout else "[red]✗ NO[/red] (needed for serial)"
-    )
-    
-    if is_raspberry_pi():
-        perms_table.add_row(
-            "[cyan]gpio[/cyan]", 
-            "[green]✓ YES[/green]" if in_gpio else "[yellow]⚠ NO[/yellow]"
-        )
-    
-    console.print(perms_table)
-    
+
     # Serial ports
     print_section("Serial Ports")
     ports = get_serial_ports()
-    
+
     if ports:
         port_table = Table(box=box.SIMPLE, show_header=False)
         port_table.add_column("Port", style="cyan")
         port_table.add_column("Status", style="green")
-        
+
         for port in ports:
             accessible = "✓ Ready" if os.access(port, os.R_OK | os.W_OK) else "⚠ No permission"
             port_table.add_row(port, accessible)
-        
+
         console.print(port_table)
     else:
         console.print("[yellow]No serial ports detected[/yellow]")
-    
-    # Meshing-around installation
+
+    # Meshing-around status
     print_section("Meshing-Around Status")
     meshing_path = find_meshing_around()
-    
+
     status_table = Table(box=box.SIMPLE, show_header=False)
     status_table.add_column(width=20)
     status_table.add_column()
-    
+
     if meshing_path:
         status_table.add_row("📁 Installation", f"[green]✓ {meshing_path}[/green]")
-        
+
         if (meshing_path / "config.ini").exists():
             status_table.add_row("⚙️  Config", "[green]✓ Found[/green]")
         else:
             status_table.add_row("⚙️  Config", "[yellow]⚠ Not found[/yellow]")
     else:
         status_table.add_row("📁 Installation", "[red]✗ Not found[/red]")
-    
-    # Check for venv
-    venv_path = Path.home() / "meshing-around-venv"
-    if venv_path.exists():
-        status_table.add_row("🐍 Virtual Env", f"[green]✓ {venv_path}[/green]")
-    elif is_bookworm_or_newer():
-        status_table.add_row("🐍 Virtual Env", "[yellow]⚠ Not found (recommended)[/yellow]")
-    
+
     console.print(status_table)
-    
-    # Meshtastic library
-    try:
-        import meshtastic
-        version = getattr(meshtastic, '__version__', 'installed')
-        status_table.add_row("📡 Meshtastic Lib", f"[green]✓ {version}[/green]")
-    except ImportError:
-        status_table.add_row("📡 Meshtastic Lib", "[red]✗ Not installed[/red]")
 
-def show_system_info_basic():
-    """Fallback system info display without rich"""
-    print("\n" + "="*50)
-    print("SYSTEM INFORMATION")
-    print("="*50)
-    
-    if is_raspberry_pi():
-        print(f"\nPlatform: {get_pi_model()}")
+def show_system_info():
+    """Display system info (uses rich if available)"""
+    if RICH_AVAILABLE:
+        show_system_info_rich()
     else:
-        print("\nPlatform: Standard Linux")
-    
-    os_name, os_codename = get_os_info()
-    print(f"OS: {os_name} ({os_codename})")
-    print(f"Python: {sys.version.split()[0]}")
-    
-    if check_pep668_environment():
-        print("PEP 668: Active (use venv)")
-    
-    print("\nSerial Ports:")
-    ports = get_serial_ports()
-    for port in ports:
-        print(f"  - {port}")
-    
-    meshing_path = find_meshing_around()
-    if meshing_path:
-        print(f"\nMeshing-around: {meshing_path}")
-    else:
-        print("\nMeshing-around: Not found")
+        print("\n" + "="*50)
+        print("SYSTEM INFORMATION")
+        print("="*50)
 
-# Import all the original functions needed for configuration
-# (I'll include key ones, the rest remain the same as original)
+        if is_raspberry_pi():
+            print(f"\nPlatform: {get_pi_model()}")
+        else:
+            print("\nPlatform: Standard Linux")
+
+        os_name, os_codename = get_os_info()
+        print(f"OS: {os_name} ({os_codename})")
+        print(f"Python: {sys.version.split()[0]}")
+
+        print("\nSerial Ports:")
+        for port in get_serial_ports():
+            print(f"  - {port}")
+
+        meshing_path = find_meshing_around()
+        if meshing_path:
+            print(f"\nMeshing-around: {meshing_path}")
+
+# ============================================================================
+# CONFIGURATION FUNCTIONS (Enhanced with Rich UI)
+# ============================================================================
 
 def configure_interface(config: configparser.ConfigParser):
     """Configure interface settings with improved UI"""
     print_section("Interface Configuration")
-    
+
+    items = [
+        ("1", "🔌 Serial (recommended)"),
+        ("2", "🌐 TCP"),
+        ("3", "📡 BLE")
+    ]
+
     if RICH_AVAILABLE:
-        # Create a nice selection menu
-        items = [
-            ("1", "Serial (recommended)"),
-            ("2", "TCP"),
-            ("3", "BLE")
-        ]
         create_menu_table("Connection Types", items, columns=3)
     else:
         print("\nConnection types:")
-        print("  1. Serial (recommended)")
-        print("  2. TCP")
-        print("  3. BLE")
-    
+        for num, desc in items:
+            print(f"  {num}. {desc}")
+
     conn_type = get_input("Select connection type", "1", choices=["1", "2", "3"])
     type_map = {"1": "serial", "2": "tcp", "3": "ble"}
     conn_type_str = type_map.get(conn_type, "serial")
-    
+
     config['interface']['type'] = conn_type_str
-    
+
     if conn_type_str == "serial":
         use_auto = get_yes_no("Use auto-detect for serial port?", True)
         if not use_auto:
             ports = get_serial_ports()
-            if ports and RICH_AVAILABLE:
-                console.print("\n[cyan]Available ports:[/cyan]")
-                for i, port in enumerate(ports, 1):
-                    console.print(f"  {i}. {port}")
-            
+            if ports:
+                print_info(f"Available ports: {', '.join(ports)}")
             port = get_input("Enter serial port", "/dev/ttyUSB0")
             config['interface']['port'] = port
     elif conn_type_str == "tcp":
@@ -628,50 +525,99 @@ def configure_interface(config: configparser.ConfigParser):
         config['interface']['hostname'] = hostname
     elif conn_type_str == "ble":
         mac = get_input("Enter BLE MAC address", "AA:BB:CC:DD:EE:FF")
-        if validate_mac_address(mac):
-            config['interface']['mac'] = mac
-        else:
-            print_warning("Invalid MAC address format, but saving anyway")
-            config['interface']['mac'] = mac
-    
+        config['interface']['mac'] = mac
+
     print_success(f"Interface configured: {conn_type_str}")
 
-# Include essential configuration functions (keeping original logic, improving UI)
 def configure_general(config: configparser.ConfigParser):
     """Configure general settings"""
     print_section("General Settings")
-    
+
     bot_name = get_input("Bot name", "MeshBot")
     config['general']['bot_name'] = bot_name
-    
+
     if get_yes_no("Configure admin nodes?", False):
-        admin_list = get_input("Admin node numbers (comma-separated)")
+        admin_list = get_input("Admin node numbers (comma-separated)", "")
         config['general']['bbs_admin_list'] = admin_list
-    
+
     if get_yes_no("Configure favorite nodes?", False):
-        fav_list = get_input("Favorite node numbers (comma-separated)")
+        fav_list = get_input("Favorite node numbers (comma-separated)", "")
         config['general']['favoriteNodeList'] = fav_list
-    
+
     print_success("General settings configured")
 
-# [Continue with remaining configuration functions from original...]
-# For brevity, I'll show the main menu improvement
+def configure_emergency_alerts(config: configparser.ConfigParser):
+    """Configure emergency alert settings"""
+    print_section("Emergency Alert Configuration")
+
+    if not get_yes_no("Enable emergency keyword detection?", True):
+        config['emergencyHandler']['enabled'] = 'False'
+        return
+
+    config['emergencyHandler']['enabled'] = 'True'
+
+    if RICH_AVAILABLE:
+        console.print("\n[cyan]Default keywords:[/cyan] emergency, 911, 112, 999, police, fire, ambulance")
+
+    if get_yes_no("Use default emergency keywords?", True):
+        config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,police,fire,ambulance,rescue,help,sos,mayday'
+    else:
+        keywords = get_input("Enter emergency keywords (comma-separated)", "")
+        config['emergencyHandler']['emergency_keywords'] = keywords
+
+    channel = get_input("Alert channel number", "2", int)
+    config['emergencyHandler']['alert_channel'] = str(channel)
+
+    print_success("Emergency alerts configured")
+
+def load_config(config_file: str) -> configparser.ConfigParser:
+    """Load existing config or create new one"""
+    config = configparser.ConfigParser()
+
+    if os.path.exists(config_file):
+        print_success(f"Loading existing config from {config_file}")
+        config.read(config_file)
+    else:
+        print_warning(f"No existing config found, creating new configuration")
+        sections = [
+            'interface', 'general', 'emergencyHandler', 'proximityAlert',
+            'altitudeAlert', 'weatherAlert', 'batteryAlert', 'noisyNodeAlert',
+            'newNodeAlert', 'alertGlobal', 'smtp', 'sms'
+        ]
+        for section in sections:
+            if not config.has_section(section):
+                config.add_section(section)
+
+    return config
+
+def save_config(config: configparser.ConfigParser, config_file: str):
+    """Save configuration to file"""
+    try:
+        with open(config_file, 'w') as f:
+            config.write(f)
+        print_success(f"Configuration saved to {config_file}")
+    except Exception as e:
+        print_error(f"Failed to save config: {e}")
+
+# ============================================================================
+# MAIN MENU AND WIZARDS
+# ============================================================================
 
 def startup_system_check() -> bool:
-    """Run system checks with beautiful progress display"""
+    """Run system checks with beautiful display"""
     if RICH_AVAILABLE:
         console.clear()
-        
+
         # Animated header
         header_text = Text()
-        header_text.append("⚡ ", style="yellow")
+        header_text.append("⚡ ", style="yellow bold")
         header_text.append("Meshing-Around Enhanced Configuration Tool", style="bold cyan")
-        header_text.append(" ⚡", style="yellow")
-        
+        header_text.append(" ⚡", style="yellow bold")
+
         console.print()
         console.print(Panel(
             header_text,
-            subtitle=f"v{VERSION}",
+            subtitle=f"[dim]v{VERSION}[/dim]",
             border_style="cyan",
             box=box.DOUBLE
         ))
@@ -680,176 +626,148 @@ def startup_system_check() -> bool:
         print(f"\n{'='*70}")
         print(f"Meshing-Around Enhanced Configuration Tool v{VERSION}".center(70))
         print(f"{'='*70}\n")
-    
+
     # Show system info
-    show_system_info_rich() if RICH_AVAILABLE else show_system_info_basic()
-    
+    show_system_info()
+
     # Offer system update
     print_section("System Update")
-    if RICH_AVAILABLE:
-        console.print("[yellow]ℹ[/yellow] It's recommended to update your system before proceeding")
-    
-    if get_yes_no("Run system update now (apt update && apt upgrade)?", True):
+    print_info("It's recommended to update your system before proceeding")
+
+    if get_yes_no("Run system update now (apt update && apt upgrade)?", False):
         if RICH_AVAILABLE:
-            with console.status("[cyan]Updating system...", spinner="dots") as status:
+            with console.status("[cyan]Updating system...", spinner="dots"):
                 run_command(['apt', 'update'], sudo=True, capture=True)
-                status.update("[cyan]Upgrading packages...")
                 run_command(['apt', 'upgrade', '-y'], sudo=True, capture=True)
-                status.update("[cyan]Cleaning up...")
                 run_command(['apt', 'autoremove', '-y'], sudo=True, capture=True)
             print_success("System updated successfully!")
         else:
-            run_command(['apt', 'update'], sudo=True, desc="Updating package lists")
-            run_command(['apt', 'upgrade', '-y'], sudo=True, desc="Upgrading packages")
-            run_command(['apt', 'autoremove', '-y'], sudo=True, desc="Cleaning up")
-    
+            run_command(['apt', 'update'], sudo=True, desc="Updating")
+            run_command(['apt', 'upgrade', '-y'], sudo=True, desc="Upgrading")
+
     return True
 
-def main_menu():
-    """Main menu with beautiful rich UI"""
-    startup_system_check()
-    
-    print_section("Main Menu")
-    
-    if RICH_AVAILABLE:
-        # Create an attractive menu
-        menu_items = [
-            ("1", "🚀 Quick Setup (recommended)"),
-            ("2", "📦 Install Meshing-Around"),
-            ("3", "⚙️  Advanced Configuration"),
-            ("4", "🔧 System Maintenance"),
-        ]
-        
-        if is_raspberry_pi():
-            menu_items.extend([
-                ("5", "🥧 Raspberry Pi Setup"),
-                ("6", "📊 Show System Info"),
-                ("7", "🚪 Exit")
-            ])
-            max_choice = "7"
-        else:
-            menu_items.extend([
-                ("5", "📊 Show System Info"),
-                ("6", "🚪 Exit")
-            ])
-            max_choice = "6"
-        
-        create_menu_table("Start Menu", menu_items, columns=2)
-    else:
-        print("\n1. Quick Setup (recommended)")
-        print("2. Install Meshing-Around")
-        print("3. Advanced Configuration")
-        print("4. System Maintenance")
-        if is_raspberry_pi():
-            print("5. Raspberry Pi Setup")
-            print("6. Show System Info")
-            print("7. Exit")
-            max_choice = "7"
-        else:
-            print("5. Show System Info")
-            print("6. Exit")
-            max_choice = "6"
-    
-    start_choice = get_input("Select option", "1", choices=[str(i) for i in range(1, int(max_choice)+1)])
-    
-    if start_choice == "1":
-        quick_setup_improved()
-    elif start_choice == "2":
-        install_meshing_around_improved()
-    elif start_choice == "3":
-        advanced_configuration_menu()
-    # ... continue with other options
-    
-def quick_setup_improved():
-    """Improved quick setup with progress tracking"""
+def quick_setup():
+    """Quick setup wizard"""
     print_header("Quick Setup Wizard")
-    
+
     if RICH_AVAILABLE:
-        # Show what will be done
         steps_panel = Panel(
             "[cyan]This wizard will:[/cyan]\n\n"
             "  1. ✓ Check system requirements\n"
-            "  2. ✓ Update system packages\n"
-            "  3. ✓ Find or install meshing-around\n"
-            "  4. ✓ Install dependencies\n"
-            "  5. ✓ Create basic configuration\n"
-            "  6. ✓ Verify bot can run",
+            "  2. ✓ Create basic configuration\n"
+            "  3. ✓ Configure interface and alerts",
             title="[bold]Setup Steps[/bold]",
             border_style="green"
         )
         console.print(steps_panel)
         console.print()
-    
+
     if not get_yes_no("Continue with quick setup?", True):
-        return
-    
-    # Use progress bar for visual feedback
+        return None
+
+    # Create basic config
+    config = configparser.ConfigParser()
+
+    sections = [
+        'interface', 'general', 'emergencyHandler', 'proximityAlert',
+        'altitudeAlert', 'weatherAlert', 'batteryAlert', 'noisyNodeAlert',
+        'newNodeAlert', 'alertGlobal', 'smtp', 'sms'
+    ]
+    for section in sections:
+        config.add_section(section)
+
+    # Configure basic settings
+    configure_interface(config)
+    configure_general(config)
+    configure_emergency_alerts(config)
+
+    # Set defaults for other sections
+    config['emergencyHandler']['alert_channel'] = '2'
+    config['newNodeAlert']['enabled'] = 'True'
+    config['newNodeAlert']['welcome_message'] = 'Welcome to the mesh!'
+    config['alertGlobal']['global_enabled'] = 'True'
+
+    print_success("Quick setup complete!")
+    return config
+
+def main_menu():
+    """Main menu with beautiful UI"""
+    startup_system_check()
+
+    print_section("Main Menu")
+
+    menu_items = [
+        ("1", "🚀 Quick Setup (recommended)"),
+        ("2", "⚙️  Advanced Configuration"),
+        ("3", "📊 Show System Info"),
+        ("4", "🚪 Exit")
+    ]
+
     if RICH_AVAILABLE:
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console
-        ) as progress:
-            
-            task = progress.add_task("[cyan]Running setup...", total=6)
-            
-            # Step 1
-            progress.update(task, description="[cyan]Checking system...")
-            time.sleep(0.5)
-            progress.advance(task)
-            
-            # Step 2
-            progress.update(task, description="[cyan]Updating system...")
-            # run update commands
-            progress.advance(task)
-            
-            # ... continue with remaining steps
-            
-        print_success("Quick setup complete!")
+        create_menu_table("Start Menu", menu_items, columns=2)
     else:
-        # Fallback without progress bar
-        print("Running setup steps...")
-        # Execute steps
+        for num, desc in menu_items:
+            print(f"  {num}. {desc}")
 
-# Add placeholder for remaining functions to maintain structure
-def install_meshing_around_improved():
-    """Improved installation wizard"""
-    print_header("Install Meshing-Around")
-    print_warning("Installation function - using original logic with improved UI")
-    # Use original install_meshing_around logic but with new UI
+    choice = get_input("Select option", "1", choices=["1", "2", "3", "4"])
 
-def advanced_configuration_menu():
-    """Advanced configuration menu with categories"""
+    if choice == "1":
+        config = quick_setup()
+        if config:
+            config_file = get_input("Save config to", "config.ini")
+            save_config(config, config_file)
+    elif choice == "2":
+        advanced_configuration()
+    elif choice == "3":
+        show_system_info()
+        if get_yes_no("\nReturn to menu?", True):
+            main_menu()
+    elif choice == "4":
+        print_success("Goodbye!")
+        return
+
+def advanced_configuration():
+    """Advanced configuration menu"""
     print_header("Advanced Configuration")
-    
-    if RICH_AVAILABLE:
-        # Organize menu into categories
-        alert_items = [
-            ("1", "🚨 Emergency Alerts"),
-            ("2", "📍 Proximity Alerts"),
-            ("3", "⛰️  Altitude Alerts"),
-            ("4", "🌦️  Weather Alerts"),
-            ("5", "🔋 Battery Alerts"),
-            ("6", "📢 Noisy Node Detection"),
+
+    config_file = get_input("Config file path", "config.ini")
+    config = load_config(config_file)
+
+    while True:
+        menu_items = [
+            ("1", "⚙️  Interface Settings"),
+            ("2", "👤 General Settings"),
+            ("3", "🚨 Emergency Alerts"),
+            ("4", "💾 Save and Exit"),
+            ("5", "🚪 Exit without Saving")
         ]
-        
-        system_items = [
-            ("7", "⚙️  Interface Settings"),
-            ("8", "👤 General Settings"),
-            ("9", "📧 Email/SMS Settings"),
-            ("10", "🌐 Global Alert Settings"),
-        ]
-        
-        create_menu_table("Alert Configuration", alert_items, columns=2)
-        create_menu_table("System Settings", system_items, columns=2)
-        
-        console.print("\n[bold cyan]11.[/bold cyan] 💾 Save and Exit")
-        console.print("[bold cyan]12.[/bold cyan] 🚪 Exit without Saving")
-    
-    # Handle menu selection
-    # ...
+
+        if RICH_AVAILABLE:
+            create_menu_table("Configuration Menu", menu_items)
+        else:
+            for num, desc in menu_items:
+                print(f"  {num}. {desc}")
+
+        choice = get_input("Select option", "4", choices=["1", "2", "3", "4", "5"])
+
+        if choice == "1":
+            configure_interface(config)
+        elif choice == "2":
+            configure_general(config)
+        elif choice == "3":
+            configure_emergency_alerts(config)
+        elif choice == "4":
+            save_config(config, config_file)
+            print_success("Configuration complete!")
+            break
+        elif choice == "5":
+            if get_yes_no("Exit without saving?", False):
+                break
+
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
 
 if __name__ == "__main__":
     try:
@@ -867,4 +785,6 @@ if __name__ == "__main__":
             console.print(f"\n[red]✗ An error occurred: {e}[/red]")
         else:
             print(f"\nAn error occurred: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
