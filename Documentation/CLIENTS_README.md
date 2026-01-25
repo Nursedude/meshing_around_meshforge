@@ -7,6 +7,71 @@ Built using the **MeshForge Foundation** principles:
 - User-friendly: Interactive interfaces with sensible defaults
 - Multi-platform: Works across different systems
 - Robustness: Fallback mechanisms and error handling
+- **Zero dependencies boot**: Starts with stdlib only, auto-installs as needed
+- **100% configurable**: Every feature can be toggled via config file
+
+## Connection Modes
+
+| Mode | Radio Required | Use Case |
+|------|----------------|----------|
+| **Serial** | Yes (USB) | Direct connection to Meshtastic device |
+| **TCP** | Remote | Connect to Meshtastic device on network |
+| **MQTT** | No | Connect via MQTT broker (e.g., mqtt.meshtastic.org) |
+| **BLE** | Yes (Bluetooth) | Bluetooth LE connection |
+| **Auto** | Depends | Auto-detect best available connection |
+| **Demo** | No | Simulated data for testing |
+
+## Quick Start
+
+### Standalone Launcher (Recommended)
+
+The standalone launcher handles everything automatically:
+
+```bash
+# First run - auto-installs dependencies
+python3 mesh_client.py
+
+# Interactive setup wizard
+python3 mesh_client.py --setup
+
+# Specific modes
+python3 mesh_client.py --tui      # Terminal interface
+python3 mesh_client.py --web      # Web interface
+python3 mesh_client.py --demo     # Demo mode (no hardware)
+```
+
+### Headless Setup (Raspberry Pi)
+
+For Pi Zero 2W or other headless systems:
+
+```bash
+chmod +x setup_headless.sh
+./setup_headless.sh
+```
+
+This will:
+1. Install system dependencies
+2. Set up Python virtual environment
+3. Configure connection type (MQTT for no-radio setups)
+4. Optionally install as systemd service for auto-start
+
+### Example: Pi Zero 2W with MQTT (No Radio)
+
+```bash
+# Run setup
+./setup_headless.sh
+
+# Select:
+#   Connection: 3 (MQTT)
+#   Interface: 1 (TUI) or 3 (Both)
+
+# Start manually
+source .venv/bin/activate
+python3 mesh_client.py
+
+# Or if installed as service
+sudo systemctl start mesh-client
+```
 
 ## Features
 
@@ -26,32 +91,111 @@ Built using the **MeshForge Foundation** principles:
 - Message composition and history
 - Alert acknowledgment system
 
-## Quick Start
+### MQTT Mode (No Radio)
+- Connect to public broker (mqtt.meshtastic.org)
+- Connect to private/local MQTT brokers
+- Receive mesh messages without hardware
+- Send messages (with node ID configured)
 
-### Installation
+## Configuration
 
-```bash
-# Install dependencies
-pip install -r meshing_around_clients/requirements.txt
+All settings are in `mesh_client.ini`:
 
-# Or install individually
-pip install rich fastapi uvicorn jinja2 meshtastic
+```ini
+[connection]
+# Connection type: auto, serial, tcp, mqtt, ble
+type = auto
+
+# Serial settings
+serial_port = auto
+serial_baud = 115200
+
+# TCP settings
+tcp_host = 192.168.1.100
+tcp_port = 4403
+
+# MQTT settings (for radio-less operation)
+mqtt_enabled = true
+mqtt_broker = mqtt.meshtastic.org
+mqtt_port = 1883
+mqtt_username = meshdev
+mqtt_password = large4cats
+mqtt_topic_root = msh/US
+mqtt_channel = LongFast
+
+[features]
+# Interface mode: tui, web, both, headless
+mode = tui
+
+# Web server
+web_server = false
+web_host = 0.0.0.0
+web_port = 8080
+
+# Feature toggles
+messages_enabled = true
+nodes_enabled = true
+alerts_enabled = true
+
+[alerts]
+enabled = true
+emergency_enabled = true
+emergency_keywords = emergency,911,sos,help,mayday
+battery_alerts = true
+battery_threshold = 20
+
+[advanced]
+# Auto-install missing dependencies
+auto_install_deps = true
+
+# Demo mode (simulated data)
+demo_mode = false
 ```
 
-### Running the TUI Client
+## Architecture
 
-```bash
-# Demo mode (no hardware required)
-python run_tui.py --demo
-
-# Connect to serial device
-python run_tui.py --serial /dev/ttyUSB0
-
-# Connect to TCP device
-python run_tui.py --tcp 192.168.1.100
+```
+meshing_around_meshforge/
+├── mesh_client.py              # Standalone launcher (zero-dep bootstrap)
+├── mesh_client.ini             # Master configuration file
+├── setup_headless.sh           # Headless/Pi setup script
+├── run_tui.py                  # TUI launcher
+├── run_web.py                  # Web launcher
+│
+└── meshing_around_clients/
+    ├── requirements.txt
+    ├── core/
+    │   ├── config.py            # Configuration management
+    │   ├── models.py            # Data models
+    │   ├── meshtastic_api.py    # Direct device connection
+    │   ├── mqtt_client.py       # MQTT broker connection
+    │   ├── connection_manager.py # Unified connection handling
+    │   └── message_handler.py   # Message processing
+    ├── tui/
+    │   └── app.py               # Rich-based terminal UI
+    └── web/
+        ├── app.py               # FastAPI application
+        ├── templates/           # HTML templates
+        └── static/              # CSS/JS assets
 ```
 
-#### TUI Keyboard Shortcuts
+## Command Line Options
+
+```
+python3 mesh_client.py [OPTIONS]
+
+Options:
+  --setup         Interactive configuration wizard
+  --check         Check dependencies only
+  --install-deps  Install dependencies and exit
+  --tui           Force TUI mode
+  --web           Force Web mode
+  --demo          Demo mode (no hardware)
+  --no-venv       Don't use virtual environment
+  --version       Show version
+```
+
+## TUI Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -65,96 +209,36 @@ python run_tui.py --tcp 192.168.1.100
 | `?` | Help |
 | `q` | Quit / Back |
 
-### Running the Web Client
-
-```bash
-# Demo mode
-python run_web.py --demo
-
-# Production mode
-python run_web.py --host 0.0.0.0 --port 8080
-
-# With auto-reload for development
-python run_web.py --reload --demo
-```
-
-Then open `http://localhost:8080` in your browser.
-
-## Architecture
-
-```
-meshing_around_clients/
-├── __init__.py
-├── requirements.txt
-├── core/                      # Shared core functionality
-│   ├── __init__.py
-│   ├── config.py              # Configuration management
-│   ├── models.py              # Data models (Node, Message, Alert, etc.)
-│   ├── meshtastic_api.py      # Meshtastic device communication
-│   └── message_handler.py     # Message processing and commands
-├── tui/                       # Terminal UI client
-│   ├── __init__.py
-│   ├── app.py                 # Main TUI application
-│   ├── screens/               # Screen components
-│   └── widgets/               # Custom widgets
-└── web/                       # Web client
-    ├── __init__.py
-    ├── app.py                 # FastAPI application
-    ├── routes/                # API endpoints
-    ├── static/
-    │   ├── css/style.css      # Styles
-    │   └── js/app.js          # Frontend JavaScript
-    └── templates/             # Jinja2 HTML templates
-        ├── base.html
-        ├── index.html
-        ├── nodes.html
-        ├── messages.html
-        └── alerts.html
-```
-
 ## REST API
 
-The web client provides a REST API for integration:
+The web client provides a REST API:
 
-### Status
-- `GET /api/status` - Connection and network status
-- `GET /api/network` - Full network state
-
-### Nodes
-- `GET /api/nodes` - List all nodes
-- `GET /api/nodes/{node_id}` - Get specific node
-
-### Messages
-- `GET /api/messages` - Get message history
-- `GET /api/messages?channel=0` - Filter by channel
-- `POST /api/messages/send` - Send a message
-
-### Alerts
-- `GET /api/alerts` - Get all alerts
-- `GET /api/alerts?unread_only=true` - Get unread alerts
-- `POST /api/alerts/acknowledge` - Acknowledge an alert
-
-### Connection
-- `POST /api/connect` - Connect to device
-- `POST /api/disconnect` - Disconnect from device
-
-### Configuration
-- `GET /api/config` - Get current configuration
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | Connection status |
+| `/api/network` | GET | Full network state |
+| `/api/nodes` | GET | All nodes |
+| `/api/nodes/{id}` | GET | Specific node |
+| `/api/messages` | GET | Message history |
+| `/api/messages/send` | POST | Send message |
+| `/api/alerts` | GET | All alerts |
+| `/api/alerts/acknowledge` | POST | Acknowledge alert |
+| `/api/connect` | POST | Connect to device |
+| `/api/disconnect` | POST | Disconnect |
 
 ## WebSocket
 
-Connect to `ws://host:port/ws` for real-time updates:
+Real-time updates via WebSocket at `ws://host:port/ws`:
 
 ```javascript
 const ws = new WebSocket('ws://localhost:8080/ws');
 
 ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-    // msg.type: 'init', 'message', 'alert', 'node_update', 'node_new'
-    // msg.data: payload
+    // msg.type: 'init', 'message', 'alert', 'node_update'
 };
 
-// Send a message
+// Send message
 ws.send(JSON.stringify({
     type: 'send_message',
     text: 'Hello mesh!',
@@ -163,93 +247,116 @@ ws.send(JSON.stringify({
 }));
 ```
 
-## Configuration
+## Systemd Service
 
-Configuration is stored in `~/.config/meshing-around-clients/config.ini`:
-
-```ini
-[interface]
-type = serial
-port = /dev/ttyUSB0
-# hostname = 192.168.1.100  # For TCP
-# mac = AA:BB:CC:DD:EE:FF    # For BLE
-
-[general]
-bot_name = MeshBot
-bbs_admin_list = 12345,67890
-favoriteNodeList = 11111,22222
-
-[emergencyHandler]
-enabled = True
-emergency_keywords = emergency,911,sos,help
-alert_channel = 2
-
-[web]
-host = 0.0.0.0
-port = 8080
-
-[tui]
-refresh_rate = 1.0
-show_timestamps = True
-message_history = 500
-```
-
-## Data Models
-
-### Node
-- `node_id`: Unique node identifier
-- `node_num`: Node number
-- `short_name`, `long_name`: Display names
-- `hardware_model`: Device hardware
-- `role`: CLIENT, ROUTER, REPEATER, etc.
-- `position`: Latitude, longitude, altitude
-- `telemetry`: Battery, voltage, SNR, RSSI
-- `last_heard`: Last activity timestamp
-
-### Message
-- `sender_id`, `sender_name`: Sender info
-- `recipient_id`: Destination (empty for broadcast)
-- `channel`: Channel number (0-7)
-- `text`: Message content
-- `timestamp`: When sent/received
-- `snr`, `rssi`: Signal quality
-
-### Alert
-- `alert_type`: EMERGENCY, BATTERY, NEW_NODE, etc.
-- `severity`: 1 (low) to 4 (critical)
-- `title`, `message`: Alert content
-- `acknowledged`: Acknowledgment status
-
-## Demo Mode
-
-Both clients support demo mode for testing without hardware:
+Auto-start on boot:
 
 ```bash
-python run_tui.py --demo
-python run_web.py --demo
+# Enable service (done by setup_headless.sh)
+sudo systemctl enable mesh-client
+
+# Manual control
+sudo systemctl start mesh-client
+sudo systemctl stop mesh-client
+sudo systemctl status mesh-client
+
+# View logs
+sudo journalctl -u mesh-client -f
 ```
 
-Demo mode generates:
-- 5 simulated nodes with realistic data
-- Random messages and alerts
-- Proper battery and SNR values
+## Use Cases
 
-## Integration with meshing-around
+### 1. Pi Zero 2W Monitoring Station (No Radio)
 
-These clients are designed to work alongside the main meshing-around bot:
+```
+Hardware: Raspberry Pi Zero 2W
+Connection: MQTT (mqtt.meshtastic.org)
+Interface: Web server
+Access: SSH + Browser
+```
 
-1. **Monitoring**: View real-time mesh activity
-2. **Management**: Send messages and commands
-3. **Alerts**: Monitor emergency and status alerts
-4. **Configuration**: Use shared configuration files
+Configuration:
+```ini
+[connection]
+type = mqtt
+mqtt_enabled = true
+mqtt_broker = mqtt.meshtastic.org
 
-## Contributing
+[features]
+mode = web
+web_server = true
+web_port = 8080
+```
 
-Contributions are welcome! Please:
-1. Follow the MeshForge Foundation principles
-2. Maintain compatibility with existing APIs
-3. Add tests for new features
-4. Update documentation
+### 2. Desktop with Radio
+
+```
+Hardware: Desktop + Meshtastic USB device
+Connection: Serial (auto-detect)
+Interface: TUI
+```
+
+Configuration:
+```ini
+[connection]
+type = serial
+serial_port = auto
+
+[features]
+mode = tui
+```
+
+### 3. Remote Monitoring Server
+
+```
+Hardware: Linux server
+Connection: TCP to remote Meshtastic device
+Interface: Web + API
+```
+
+Configuration:
+```ini
+[connection]
+type = tcp
+tcp_host = 192.168.1.50
+
+[features]
+mode = both
+web_server = true
+```
+
+## Troubleshooting
+
+### No serial ports detected
+```bash
+# Check if device is connected
+ls -la /dev/ttyUSB* /dev/ttyACM*
+
+# Add user to dialout group
+sudo usermod -a -G dialout $USER
+# Then logout and login
+```
+
+### MQTT connection fails
+```bash
+# Test MQTT broker connectivity
+python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883), 5); print('OK')"
+
+# Check credentials in config
+# Default: meshdev / large4cats
+```
+
+### Dependencies won't install
+```bash
+# Check internet
+ping -c 1 8.8.8.8
+
+# Manual install
+pip install rich fastapi uvicorn paho-mqtt
+
+# Or use --break-system-packages on newer Debian
+pip install --break-system-packages rich
+```
 
 ## License
 
