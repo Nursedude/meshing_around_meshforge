@@ -48,7 +48,7 @@ except ImportError:
 console = Console() if RICH_AVAILABLE else None
 
 # Version info
-VERSION = "3.0.0"
+VERSION = "0.1.0-beta"
 SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 # ============================================================================

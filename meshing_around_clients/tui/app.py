@@ -53,7 +53,7 @@ from meshing_around_clients.core import (
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
 
 # Version
-VERSION = "3.0.0"
+VERSION = "0.1.0-beta"
 
 
 class Screen:

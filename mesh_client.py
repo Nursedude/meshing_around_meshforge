@@ -37,7 +37,7 @@ from configparser import ConfigParser
 from typing import Optional, Dict, List, Tuple, Any
 
 # Version
-VERSION = "3.0.0"
+VERSION = "0.1.0-beta"
 
 # Paths
 SCRIPT_DIR = Path(__file__).parent.absolute()
