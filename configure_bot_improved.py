@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 from getpass import getpass
 
-# Check for rich library and provide fallback
+# Check for rich library and provide fallback - do NOT auto-install (PEP 668 compliance)
 try:
     from rich.console import Console
     from rich.panel import Panel
@@ -42,30 +42,13 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    print("⚠️  Installing 'rich' library for better UI...")
-    try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "rich", "--quiet"],
-                      check=False, capture_output=True)
-        from rich.console import Console
-        from rich.panel import Panel
-        from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
-        from rich.table import Table
-        from rich.prompt import Prompt, Confirm, IntPrompt, FloatPrompt
-        from rich.tree import Tree
-        from rich.text import Text
-        from rich import box
-        from rich.padding import Padding
-        from rich.columns import Columns
-        RICH_AVAILABLE = True
-    except Exception:
-        # Fallback to basic output
-        pass
+    # Rich not available, will use fallback basic output
 
 # Initialize console
 console = Console() if RICH_AVAILABLE else None
 
 # Version info
-VERSION = "2.2.0"
+VERSION = "3.0.0"
 SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 # ============================================================================
@@ -188,8 +171,8 @@ def get_input_rich(prompt: str, default: str = "", input_type: type = str,
 
     except (KeyboardInterrupt, EOFError):
         raise
-    except Exception:
-        # Fallback
+    except (ValueError, TypeError, AttributeError):
+        # Fallback for Rich prompt failures
         return get_input_basic(prompt, default, input_type, password)
 
 def get_input_basic(prompt: str, default: str = "", input_type: type = str, password: bool = False) -> Any:
@@ -267,7 +250,7 @@ def run_command(cmd: List[str], desc: str = "", capture: bool = False,
     except FileNotFoundError:
         print_error(f"Command not found: {cmd[0]}")
         return -1, "", "Command not found"
-    except Exception as e:
+    except (PermissionError, OSError) as e:
         print_error(f"Command failed: {e}")
         return -1, "", str(e)
 

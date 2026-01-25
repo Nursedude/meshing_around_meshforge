@@ -37,7 +37,7 @@ from configparser import ConfigParser
 from typing import Optional, Dict, List, Tuple, Any
 
 # Version
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 
 # Paths
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -443,7 +443,7 @@ def load_config() -> ConfigParser:
 def save_config(config: ConfigParser):
     """Save configuration to file."""
     with open(CONFIG_FILE, 'w') as f:
-        f.write(DEFAULT_CONFIG)
+        config.write(f)
     log(f"Saved config to {CONFIG_FILE}", "OK")
 
 
@@ -741,9 +741,6 @@ Examples:
         Colors.disable()
 
     # Show banner
-    if config := None:
-        pass
-
     print_banner()
 
     # Check Python version

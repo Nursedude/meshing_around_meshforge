@@ -21,7 +21,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Check for Rich library
+# Check for Rich library - do NOT auto-install (PEP 668 compliance)
 try:
     from rich.console import Console, Group
     from rich.panel import Panel
@@ -40,28 +40,11 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    print("Installing 'rich' library for TUI...")
-    import subprocess
-    subprocess.run([sys.executable, "-m", "pip", "install", "rich", "-q"], check=False)
-    try:
-        from rich.console import Console, Group
-        from rich.panel import Panel
-        from rich.table import Table
-        from rich.layout import Layout
-        from rich.live import Live
-        from rich.text import Text
-        from rich.prompt import Prompt, Confirm
-        from rich.progress import Progress, SpinnerColumn, TextColumn
-        from rich import box
-        from rich.align import Align
-        from rich.columns import Columns
-        from rich.markdown import Markdown
-        from rich.syntax import Syntax
-        from rich.tree import Tree
-        RICH_AVAILABLE = True
-    except ImportError:
-        print("Error: Could not install 'rich' library. Please install manually.")
-        sys.exit(1)
+    print("Error: 'rich' library not found.")
+    print("Please install it with: pip install rich")
+    print("  or: python3 -m pip install rich")
+    print("  or run: python3 mesh_client.py --install-deps")
+    sys.exit(1)
 
 from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,
@@ -70,7 +53,7 @@ from meshing_around_clients.core import (
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
 
 # Version
-VERSION = "1.0.0"
+VERSION = "3.0.0"
 
 
 class Screen:
@@ -750,8 +733,10 @@ class MeshingAroundTUI:
                     key = sys.stdin.read(1)
                     self._handle_key(key)
 
-        except Exception as e:
-            self.console.print(f"[red]Error: {e}[/red]")
+        except (KeyboardInterrupt, EOFError):
+            pass  # Normal exit
+        except OSError as e:
+            self.console.print(f"[red]I/O Error: {e}[/red]")
         finally:
             # Restore terminal settings
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
