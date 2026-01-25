@@ -1,0 +1,657 @@
+#!/usr/bin/env python3
+"""
+Meshing-Around Web Application
+A FastAPI-based web interface for monitoring and managing Meshtastic mesh networks.
+
+Features:
+- Real-time dashboard with WebSocket updates
+- REST API for integration
+- Modern responsive UI
+- Alert management
+- Message history and sending
+"""
+
+import sys
+import asyncio
+import json
+import uuid
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Dict, Any
+from contextlib import asynccontextmanager
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Check for required libraries
+try:
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
+    from pydantic import BaseModel
+    import uvicorn
+    FASTAPI_AVAILABLE = True
+except ImportError:
+    FASTAPI_AVAILABLE = False
+    print("Installing required web dependencies...")
+    import subprocess
+    subprocess.run([sys.executable, "-m", "pip", "install", "fastapi", "uvicorn", "jinja2", "python-multipart", "-q"], check=False)
+    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
+    from fastapi.responses import HTMLResponse, JSONResponse
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
+    from pydantic import BaseModel
+    import uvicorn
+    FASTAPI_AVAILABLE = True
+
+from meshing_around_clients.core import (
+    Config, MeshtasticAPI, MessageHandler,
+    Node, Message, Alert, MeshNetwork
+)
+from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
+
+# Version
+VERSION = "1.0.0"
+
+# Get paths
+BASE_DIR = Path(__file__).parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+STATIC_DIR = BASE_DIR / "static"
+
+
+# Pydantic models for API
+class SendMessageRequest(BaseModel):
+    text: str
+    destination: str = "^all"
+    channel: int = 0
+
+
+class AlertAcknowledgeRequest(BaseModel):
+    alert_id: str
+
+
+class ConfigUpdateRequest(BaseModel):
+    section: str
+    key: str
+    value: str
+
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time updates."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        """Broadcast message to all connected clients."""
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+    async def broadcast_update(self, update_type: str, data: dict):
+        """Broadcast an update event."""
+        await self.broadcast({
+            "type": update_type,
+            "timestamp": datetime.now().isoformat(),
+            "data": data
+        })
+
+
+class WebApplication:
+    """
+    Main web application for Meshing-Around.
+    Provides REST API and WebSocket support.
+    """
+
+    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False):
+        self.config = config or Config()
+        self.demo_mode = demo_mode
+
+        # Initialize API
+        if demo_mode:
+            self.api = MockMeshtasticAPI(self.config)
+        else:
+            self.api = MeshtasticAPI(self.config)
+
+        # Message handler
+        self.message_handler = MessageHandler(self.config)
+
+        # WebSocket manager
+        self.ws_manager = ConnectionManager()
+
+        # Create FastAPI app
+        self.app = self._create_app()
+
+        # Register callbacks
+        self._register_callbacks()
+
+    def _create_app(self) -> FastAPI:
+        """Create and configure the FastAPI application."""
+
+        @asynccontextmanager
+        async def lifespan(app: FastAPI):
+            # Startup
+            if self.demo_mode:
+                self.api.connect()
+            yield
+            # Shutdown
+            self.api.disconnect()
+
+        app = FastAPI(
+            title="Meshing-Around Web Client",
+            description="Web interface for Meshtastic mesh network management",
+            version=VERSION,
+            lifespan=lifespan
+        )
+
+        # Mount static files
+        if STATIC_DIR.exists():
+            app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+        # Setup templates
+        if TEMPLATES_DIR.exists():
+            templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+        else:
+            templates = None
+
+        # Store references
+        app.state.web_app = self
+        app.state.templates = templates
+
+        # Register routes
+        self._register_routes(app, templates)
+
+        return app
+
+    def _register_callbacks(self):
+        """Register API callbacks for real-time updates."""
+
+        def on_message(message: Message):
+            asyncio.create_task(
+                self.ws_manager.broadcast_update("message", message.to_dict())
+            )
+
+        def on_alert(alert: Alert):
+            asyncio.create_task(
+                self.ws_manager.broadcast_update("alert", alert.to_dict())
+            )
+
+        def on_node_update(node_id: str, is_new: bool):
+            node = self.api.network.nodes.get(node_id)
+            if node:
+                asyncio.create_task(
+                    self.ws_manager.broadcast_update(
+                        "node_new" if is_new else "node_update",
+                        node.to_dict()
+                    )
+                )
+
+        self.api.register_callback("on_message", on_message)
+        self.api.register_callback("on_alert", on_alert)
+        self.api.register_callback("on_node_update", on_node_update)
+
+    def _register_routes(self, app: FastAPI, templates):
+        """Register all routes."""
+
+        # ==================== HTML Routes ====================
+
+        @app.get("/", response_class=HTMLResponse)
+        async def index(request: Request):
+            """Main dashboard page."""
+            if templates:
+                return templates.TemplateResponse(
+                    "index.html",
+                    {
+                        "request": request,
+                        "version": VERSION,
+                        "demo_mode": self.demo_mode
+                    }
+                )
+            return HTMLResponse(self._get_embedded_html())
+
+        @app.get("/nodes", response_class=HTMLResponse)
+        async def nodes_page(request: Request):
+            """Nodes list page."""
+            if templates:
+                return templates.TemplateResponse(
+                    "nodes.html",
+                    {"request": request, "version": VERSION}
+                )
+            return HTMLResponse(self._get_embedded_html())
+
+        @app.get("/messages", response_class=HTMLResponse)
+        async def messages_page(request: Request):
+            """Messages page."""
+            if templates:
+                return templates.TemplateResponse(
+                    "messages.html",
+                    {"request": request, "version": VERSION}
+                )
+            return HTMLResponse(self._get_embedded_html())
+
+        @app.get("/alerts", response_class=HTMLResponse)
+        async def alerts_page(request: Request):
+            """Alerts page."""
+            if templates:
+                return templates.TemplateResponse(
+                    "alerts.html",
+                    {"request": request, "version": VERSION}
+                )
+            return HTMLResponse(self._get_embedded_html())
+
+        # ==================== API Routes ====================
+
+        @app.get("/api/status")
+        async def api_status():
+            """Get connection and network status."""
+            return {
+                "connected": self.api.is_connected,
+                "interface_type": self.api.connection_info.interface_type,
+                "device_path": self.api.connection_info.device_path,
+                "my_node_id": self.api.network.my_node_id,
+                "node_count": len(self.api.network.nodes),
+                "online_nodes": len(self.api.network.online_nodes),
+                "message_count": self.api.network.total_messages,
+                "unread_alerts": len(self.api.network.unread_alerts),
+                "demo_mode": self.demo_mode
+            }
+
+        @app.get("/api/network")
+        async def api_network():
+            """Get full network state."""
+            return self.api.network.to_dict()
+
+        @app.get("/api/nodes")
+        async def api_nodes():
+            """Get all nodes."""
+            return {
+                "nodes": [n.to_dict() for n in self.api.get_nodes()],
+                "total": len(self.api.network.nodes),
+                "online": len(self.api.network.online_nodes)
+            }
+
+        @app.get("/api/nodes/{node_id}")
+        async def api_node(node_id: str):
+            """Get specific node."""
+            node = self.api.network.get_node(node_id)
+            if not node:
+                raise HTTPException(status_code=404, detail="Node not found")
+            return node.to_dict()
+
+        @app.get("/api/messages")
+        async def api_messages(channel: Optional[int] = None, limit: int = 100):
+            """Get messages."""
+            messages = self.api.get_messages(channel=channel, limit=limit)
+            return {
+                "messages": [m.to_dict() for m in messages],
+                "total": len(messages)
+            }
+
+        @app.post("/api/messages/send")
+        async def api_send_message(request: SendMessageRequest):
+            """Send a message."""
+            success = self.api.send_message(
+                request.text,
+                request.destination,
+                request.channel
+            )
+            if success:
+                return {"status": "sent", "message": request.text}
+            raise HTTPException(status_code=500, detail="Failed to send message")
+
+        @app.get("/api/alerts")
+        async def api_alerts(unread_only: bool = False):
+            """Get alerts."""
+            alerts = self.api.get_alerts(unread_only=unread_only)
+            return {
+                "alerts": [a.to_dict() for a in alerts],
+                "total": len(alerts),
+                "unread": len(self.api.network.unread_alerts)
+            }
+
+        @app.post("/api/alerts/acknowledge")
+        async def api_acknowledge_alert(request: AlertAcknowledgeRequest):
+            """Acknowledge an alert."""
+            success = self.api.acknowledge_alert(request.alert_id)
+            if success:
+                return {"status": "acknowledged", "alert_id": request.alert_id}
+            raise HTTPException(status_code=404, detail="Alert not found")
+
+        @app.post("/api/connect")
+        async def api_connect():
+            """Connect to device."""
+            success = self.api.connect()
+            return {"status": "connected" if success else "failed"}
+
+        @app.post("/api/disconnect")
+        async def api_disconnect():
+            """Disconnect from device."""
+            self.api.disconnect()
+            return {"status": "disconnected"}
+
+        @app.get("/api/config")
+        async def api_config():
+            """Get current configuration."""
+            return self.config.to_dict()
+
+        # ==================== WebSocket ====================
+
+        @app.websocket("/ws")
+        async def websocket_endpoint(websocket: WebSocket):
+            """WebSocket endpoint for real-time updates."""
+            await self.ws_manager.connect(websocket)
+            try:
+                # Send initial state
+                await websocket.send_json({
+                    "type": "init",
+                    "data": self.api.network.to_dict()
+                })
+
+                while True:
+                    # Keep connection alive and handle incoming messages
+                    data = await websocket.receive_text()
+                    try:
+                        msg = json.loads(data)
+                        await self._handle_ws_message(websocket, msg)
+                    except json.JSONDecodeError:
+                        pass
+
+            except WebSocketDisconnect:
+                self.ws_manager.disconnect(websocket)
+
+    async def _handle_ws_message(self, websocket: WebSocket, msg: dict):
+        """Handle incoming WebSocket message."""
+        msg_type = msg.get("type")
+
+        if msg_type == "ping":
+            await websocket.send_json({"type": "pong"})
+
+        elif msg_type == "send_message":
+            text = msg.get("text", "")
+            dest = msg.get("destination", "^all")
+            channel = msg.get("channel", 0)
+            success = self.api.send_message(text, dest, channel)
+            await websocket.send_json({
+                "type": "message_status",
+                "success": success
+            })
+
+        elif msg_type == "refresh":
+            await websocket.send_json({
+                "type": "refresh",
+                "data": self.api.network.to_dict()
+            })
+
+    def _get_embedded_html(self) -> str:
+        """Return embedded HTML when templates are not available."""
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshing-Around Web Client</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        header { background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        h1 { color: #00d4ff; font-size: 24px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: #1a1a2e; border-radius: 8px; padding: 20px; border: 1px solid #2a2a4e; }
+        .card h2 { color: #00d4ff; font-size: 16px; margin-bottom: 15px; border-bottom: 1px solid #2a2a4e; padding-bottom: 10px; }
+        .stat { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #1a1a2e; }
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; font-weight: bold; }
+        .status-connected { color: #00ff88; }
+        .status-disconnected { color: #ff4444; }
+        #messages, #nodes, #alerts { max-height: 400px; overflow-y: auto; }
+        .message, .node, .alert { padding: 10px; margin: 5px 0; background: #0a0a1a; border-radius: 4px; font-size: 14px; }
+        .message .time { color: #666; font-size: 12px; }
+        .message .sender { color: #00d4ff; }
+        .alert.severity-4 { border-left: 3px solid #ff4444; }
+        .alert.severity-3 { border-left: 3px solid #ff8800; }
+        .alert.severity-2 { border-left: 3px solid #ffcc00; }
+        .alert.severity-1 { border-left: 3px solid #00d4ff; }
+        .send-form { margin-top: 15px; display: flex; gap: 10px; }
+        .send-form input { flex: 1; padding: 10px; background: #0a0a1a; border: 1px solid #2a2a4e; border-radius: 4px; color: #e0e0e0; }
+        .send-form button { padding: 10px 20px; background: #00d4ff; color: #000; border: none; border-radius: 4px; cursor: pointer; }
+        .send-form button:hover { background: #00a8cc; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Meshing-Around Web Client</h1>
+            <p id="connection-status" class="status-disconnected">Connecting...</p>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Network Status</h2>
+                <div class="stat"><span class="stat-label">Status</span><span class="stat-value" id="status">--</span></div>
+                <div class="stat"><span class="stat-label">My Node</span><span class="stat-value" id="my-node">--</span></div>
+                <div class="stat"><span class="stat-label">Nodes Online</span><span class="stat-value" id="nodes-online">--</span></div>
+                <div class="stat"><span class="stat-label">Messages</span><span class="stat-value" id="msg-count">--</span></div>
+                <div class="stat"><span class="stat-label">Unread Alerts</span><span class="stat-value" id="alert-count">--</span></div>
+            </div>
+
+            <div class="card">
+                <h2>Nodes</h2>
+                <div id="nodes"></div>
+            </div>
+
+            <div class="card">
+                <h2>Messages</h2>
+                <div id="messages"></div>
+                <div class="send-form">
+                    <input type="text" id="message-input" placeholder="Type a message...">
+                    <button onclick="sendMessage()">Send</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Alerts</h2>
+                <div id="alerts"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+
+        function connect() {
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+
+            ws.onopen = () => {
+                document.getElementById('connection-status').textContent = 'Connected';
+                document.getElementById('connection-status').className = 'status-connected';
+            };
+
+            ws.onclose = () => {
+                document.getElementById('connection-status').textContent = 'Disconnected - Reconnecting...';
+                document.getElementById('connection-status').className = 'status-disconnected';
+                setTimeout(connect, 3000);
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+        }
+
+        function handleMessage(msg) {
+            if (msg.type === 'init' || msg.type === 'refresh') {
+                updateDashboard(msg.data);
+            } else if (msg.type === 'message') {
+                addMessage(msg.data);
+            } else if (msg.type === 'alert') {
+                addAlert(msg.data);
+            } else if (msg.type === 'node_update' || msg.type === 'node_new') {
+                updateNode(msg.data);
+            }
+        }
+
+        function updateDashboard(data) {
+            document.getElementById('status').textContent = data.connection_status || 'unknown';
+            document.getElementById('my-node').textContent = data.my_node_id || 'N/A';
+            document.getElementById('nodes-online').textContent = `${data.online_node_count || 0}/${data.total_node_count || 0}`;
+            document.getElementById('msg-count').textContent = data.messages?.length || 0;
+            document.getElementById('alert-count').textContent = data.unread_alert_count || 0;
+
+            // Update nodes
+            const nodesDiv = document.getElementById('nodes');
+            nodesDiv.innerHTML = '';
+            Object.values(data.nodes || {}).slice(0, 10).forEach(node => {
+                const div = document.createElement('div');
+                div.className = 'node';
+                div.innerHTML = `<strong>${node.display_name}</strong> - ${node.time_since_heard}`;
+                nodesDiv.appendChild(div);
+            });
+
+            // Update messages
+            const msgsDiv = document.getElementById('messages');
+            msgsDiv.innerHTML = '';
+            (data.messages || []).slice(-10).reverse().forEach(msg => {
+                addMessageElement(msgsDiv, msg);
+            });
+
+            // Update alerts
+            const alertsDiv = document.getElementById('alerts');
+            alertsDiv.innerHTML = '';
+            (data.alerts || []).slice(-5).reverse().forEach(alert => {
+                addAlertElement(alertsDiv, alert);
+            });
+        }
+
+        function addMessage(msg) {
+            const msgsDiv = document.getElementById('messages');
+            addMessageElement(msgsDiv, msg, true);
+        }
+
+        function addMessageElement(container, msg, prepend = false) {
+            const div = document.createElement('div');
+            div.className = 'message';
+            div.innerHTML = `<span class="time">${msg.time_formatted}</span> <span class="sender">${msg.sender_name || msg.sender_id}</span>: ${msg.text}`;
+            if (prepend) {
+                container.insertBefore(div, container.firstChild);
+            } else {
+                container.appendChild(div);
+            }
+        }
+
+        function addAlert(alert) {
+            const alertsDiv = document.getElementById('alerts');
+            addAlertElement(alertsDiv, alert, true);
+            document.getElementById('alert-count').textContent =
+                parseInt(document.getElementById('alert-count').textContent) + 1;
+        }
+
+        function addAlertElement(container, alert, prepend = false) {
+            const div = document.createElement('div');
+            div.className = `alert severity-${alert.severity}`;
+            div.innerHTML = `<strong>${alert.title}</strong><br>${alert.message}`;
+            if (prepend) {
+                container.insertBefore(div, container.firstChild);
+            } else {
+                container.appendChild(div);
+            }
+        }
+
+        function updateNode(node) {
+            // Refresh to update node list
+            fetch('/api/status').then(r => r.json()).then(data => {
+                document.getElementById('nodes-online').textContent = `${data.online_nodes}/${data.node_count}`;
+            });
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('message-input');
+            const text = input.value.trim();
+            if (text && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'send_message',
+                    text: text,
+                    destination: '^all',
+                    channel: 0
+                }));
+                input.value = '';
+            }
+        }
+
+        document.getElementById('message-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+
+        connect();
+    </script>
+</body>
+</html>
+        """
+
+    def run(self, host: str = "0.0.0.0", port: int = 8080):
+        """Run the web application."""
+        uvicorn.run(self.app, host=host, port=port)
+
+
+def create_app(config: Optional[Config] = None, demo_mode: bool = False) -> FastAPI:
+    """Factory function to create the FastAPI app."""
+    web_app = WebApplication(config=config, demo_mode=demo_mode)
+    return web_app.app
+
+
+def main():
+    """Main entry point for the web application."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Meshing-Around Web Client")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
+    parser.add_argument("--demo", action="store_true", help="Run in demo mode without hardware")
+    parser.add_argument("--config", type=str, help="Path to config file")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
+    args = parser.parse_args()
+
+    # Load config
+    config = Config(args.config) if args.config else Config()
+    config.web.host = args.host
+    config.web.port = args.port
+
+    print(f"""
+    ╔══════════════════════════════════════════════════╗
+    ║     Meshing-Around Web Client v{VERSION}            ║
+    ╠══════════════════════════════════════════════════╣
+    ║  Starting web server...                          ║
+    ║  URL: http://{args.host}:{args.port}                      ║
+    ║  Demo Mode: {str(args.demo).ljust(36)}║
+    ╚══════════════════════════════════════════════════╝
+    """)
+
+    # Create and run application
+    web_app = WebApplication(config=config, demo_mode=args.demo)
+
+    if args.reload:
+        uvicorn.run(
+            "meshing_around_clients.web.app:create_app",
+            host=args.host,
+            port=args.port,
+            reload=True,
+            factory=True
+        )
+    else:
+        web_app.run(host=args.host, port=args.port)
+
+
+if __name__ == "__main__":
+    main()

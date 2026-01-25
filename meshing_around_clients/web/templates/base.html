@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Meshing-Around{% endblock %} | Web Client</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="nav-logo">📡</span>
+            <span class="nav-title">Meshing-Around</span>
+            <span class="nav-version">v{{ version }}</span>
+            {% if demo_mode %}
+            <span class="demo-badge">DEMO</span>
+            {% endif %}
+        </div>
+        <div class="nav-links">
+            <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
+            <a href="/nodes" class="nav-link {% if request.url.path == '/nodes' %}active{% endif %}">Nodes</a>
+            <a href="/messages" class="nav-link {% if request.url.path == '/messages' %}active{% endif %}">Messages</a>
+            <a href="/alerts" class="nav-link {% if request.url.path == '/alerts' %}active{% endif %}">Alerts</a>
+        </div>
+        <div class="nav-status">
+            <span id="connection-indicator" class="indicator disconnected"></span>
+            <span id="connection-text">Connecting...</span>
+        </div>
+    </nav>
+
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>Meshing-Around Web Client | Built with MeshForge Foundation</p>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

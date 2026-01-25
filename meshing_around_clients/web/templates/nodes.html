@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}Nodes{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Mesh Network Nodes</h1>
+    <div class="page-actions">
+        <button class="btn btn-secondary" onclick="refreshNodes()">Refresh</button>
+    </div>
+</div>
+
+<div class="panel full-width">
+    <div class="panel-content">
+        <table class="data-table data-table-full" id="full-nodes-table">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Node ID</th>
+                    <th>Name</th>
+                    <th>Hardware</th>
+                    <th>Role</th>
+                    <th>Last Heard</th>
+                    <th>Battery</th>
+                    <th>SNR</th>
+                    <th>RSSI</th>
+                    <th>Hops</th>
+                    <th>Position</th>
+                </tr>
+            </thead>
+            <tbody id="full-nodes-body">
+                <tr><td colspan="11" class="empty-message">Loading nodes...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Node Detail Modal -->
+<div id="node-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modal-node-name">Node Details</h2>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body" id="modal-node-details">
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    initNodesPage();
+});
+
+function refreshNodes() {
+    fetch('/api/nodes')
+        .then(r => r.json())
+        .then(data => updateNodesTable(data.nodes));
+}
+
+function showNodeDetails(nodeId) {
+    fetch(`/api/nodes/${nodeId}`)
+        .then(r => r.json())
+        .then(node => {
+            document.getElementById('modal-node-name').textContent = node.display_name;
+            document.getElementById('modal-node-details').innerHTML = `
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <span class="detail-label">Node ID</span>
+                        <span class="detail-value">${node.node_id}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Node Number</span>
+                        <span class="detail-value">${node.node_num}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Hardware</span>
+                        <span class="detail-value">${node.hardware_model}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Role</span>
+                        <span class="detail-value">${node.role}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Last Heard</span>
+                        <span class="detail-value">${node.time_since_heard}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Battery</span>
+                        <span class="detail-value">${node.telemetry?.battery_level || 0}%</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Voltage</span>
+                        <span class="detail-value">${node.telemetry?.voltage?.toFixed(2) || 0}V</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">SNR</span>
+                        <span class="detail-value">${node.telemetry?.snr?.toFixed(1) || 0} dB</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Position</span>
+                        <span class="detail-value">${node.position?.latitude?.toFixed(4) || 'N/A'}, ${node.position?.longitude?.toFixed(4) || 'N/A'}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Altitude</span>
+                        <span class="detail-value">${node.position?.altitude || 0}m</span>
+                    </div>
+                </div>
+            `;
+            document.getElementById('node-modal').style.display = 'flex';
+        });
+}
+
+function closeModal() {
+    document.getElementById('node-modal').style.display = 'none';
+}
+</script>
+{% endblock %}

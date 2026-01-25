@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block title %}Alerts{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Alert History</h1>
+    <div class="page-actions">
+        <label class="checkbox-label">
+            <input type="checkbox" id="unread-only" onchange="filterAlerts()">
+            Unread Only
+        </label>
+        <button class="btn btn-secondary" onclick="acknowledgeAll()">Acknowledge All</button>
+        <button class="btn btn-secondary" onclick="refreshAlerts()">Refresh</button>
+    </div>
+</div>
+
+<div class="panel full-width">
+    <div class="panel-header">
+        <div class="alert-stats">
+            <span class="alert-stat">Total: <strong id="alert-total">0</strong></span>
+            <span class="alert-stat">Unread: <strong id="alert-unread">0</strong></span>
+        </div>
+    </div>
+    <div class="panel-content">
+        <table class="data-table data-table-full" id="alerts-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Severity</th>
+                    <th>Type</th>
+                    <th>Title</th>
+                    <th>Message</th>
+                    <th>Source</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="alerts-body">
+                <tr><td colspan="8" class="empty-message">Loading alerts...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    initAlertsPage();
+});
+
+function filterAlerts() {
+    const unreadOnly = document.getElementById('unread-only').checked;
+    const url = unreadOnly ? '/api/alerts?unread_only=true' : '/api/alerts';
+    fetch(url)
+        .then(r => r.json())
+        .then(data => updateAlertsTable(data));
+}
+
+function refreshAlerts() {
+    filterAlerts();
+}
+
+function acknowledgeAlert(alertId) {
+    fetch('/api/alerts/acknowledge', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({alert_id: alertId})
+    }).then(() => refreshAlerts());
+}
+
+function acknowledgeAll() {
+    // Get all unread alerts and acknowledge them
+    fetch('/api/alerts?unread_only=true')
+        .then(r => r.json())
+        .then(data => {
+            const promises = data.alerts.map(alert =>
+                fetch('/api/alerts/acknowledge', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({alert_id: alert.id})
+                })
+            );
+            return Promise.all(promises);
+        })
+        .then(() => refreshAlerts());
+}
+</script>
+{% endblock %}

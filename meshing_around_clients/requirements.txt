@@ -1,0 +1,18 @@
+# Meshing-Around Clients Requirements
+# Core dependencies for TUI and Web clients
+
+# UI Libraries
+rich>=13.0.0
+
+# Web Framework
+fastapi>=0.100.0
+uvicorn[standard]>=0.22.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# Meshtastic (optional - for real device connection)
+meshtastic>=2.0.0
+pypubsub>=4.0.3
+
+# Utilities
+pydantic>=2.0.0
