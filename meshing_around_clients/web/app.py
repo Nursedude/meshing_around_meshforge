@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-# Check for required libraries
+# Check for required libraries - do NOT auto-install (PEP 668 compliance)
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
     from fastapi.responses import HTMLResponse, JSONResponse
@@ -34,16 +34,10 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
-    print("Installing required web dependencies...")
-    import subprocess
-    subprocess.run([sys.executable, "-m", "pip", "install", "fastapi", "uvicorn", "jinja2", "python-multipart", "-q"], check=False)
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
-    from fastapi.responses import HTMLResponse, JSONResponse
-    from fastapi.staticfiles import StaticFiles
-    from fastapi.templating import Jinja2Templates
-    from pydantic import BaseModel
-    import uvicorn
-    FASTAPI_AVAILABLE = True
+    print("Error: Web dependencies not found.")
+    print("Please install them with: pip install fastapi uvicorn jinja2 python-multipart")
+    print("  or run: python3 mesh_client.py --install-deps")
+    sys.exit(1)
 
 from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,
@@ -52,7 +46,7 @@ from meshing_around_clients.core import (
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
 
 # Version
-VERSION = "1.0.0"
+VERSION = "3.0.0"
 
 # Get paths
 BASE_DIR = Path(__file__).parent
@@ -96,7 +90,8 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError, ConnectionError):
+                # Client disconnected or connection closed
                 pass
 
     async def broadcast_update(self, update_type: str, data: dict):

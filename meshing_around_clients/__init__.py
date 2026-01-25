@@ -9,5 +9,5 @@ Built using the MeshForge foundation principles:
 - Robustness: Fallback mechanisms and error handling
 """
 
-__version__ = "1.0.0"
+__version__ = "3.0.0"
 __author__ = "MeshForge Team"
