@@ -1,0 +1,581 @@
+"""
+Meshtastic API layer for Meshing-Around Clients.
+Provides interface to communicate with Meshtastic devices.
+"""
+
+import asyncio
+import threading
+import queue
+import time
+import uuid
+from datetime import datetime
+from typing import Optional, Callable, List, Dict, Any
+from dataclasses import dataclass
+
+from .models import (
+    Node, Message, Alert, MeshNetwork, Position, NodeTelemetry,
+    NodeRole, MessageType, AlertType
+)
+from .config import Config
+
+# Try to import meshtastic
+try:
+    import meshtastic
+    import meshtastic.serial_interface
+    import meshtastic.tcp_interface
+    import meshtastic.ble_interface
+    from pubsub import pub
+    MESHTASTIC_AVAILABLE = True
+except ImportError:
+    MESHTASTIC_AVAILABLE = False
+
+
+@dataclass
+class ConnectionInfo:
+    """Connection information and status."""
+    connected: bool = False
+    interface_type: str = ""
+    device_path: str = ""
+    error_message: str = ""
+    my_node_id: str = ""
+    my_node_num: int = 0
+
+
+class MeshtasticAPI:
+    """
+    API layer for Meshtastic device communication.
+    Provides a unified interface for serial, TCP, and BLE connections.
+    """
+
+    def __init__(self, config: Config):
+        self.config = config
+        self.interface = None
+        self.network = MeshNetwork()
+        self.connection_info = ConnectionInfo()
+        self._message_queue: queue.Queue = queue.Queue()
+        self._callbacks: Dict[str, List[Callable]] = {
+            "on_connect": [],
+            "on_disconnect": [],
+            "on_message": [],
+            "on_node_update": [],
+            "on_alert": [],
+            "on_position": [],
+            "on_telemetry": []
+        }
+        self._running = False
+        self._worker_thread: Optional[threading.Thread] = None
+
+    @property
+    def is_connected(self) -> bool:
+        return self.connection_info.connected
+
+    def register_callback(self, event: str, callback: Callable) -> None:
+        """Register a callback for an event."""
+        if event in self._callbacks:
+            self._callbacks[event].append(callback)
+
+    def unregister_callback(self, event: str, callback: Callable) -> None:
+        """Unregister a callback."""
+        if event in self._callbacks and callback in self._callbacks[event]:
+            self._callbacks[event].remove(callback)
+
+    def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
+        """Trigger all callbacks for an event."""
+        if event in self._callbacks:
+            for callback in self._callbacks[event]:
+                try:
+                    callback(*args, **kwargs)
+                except Exception as e:
+                    print(f"Callback error for {event}: {e}")
+
+    def connect(self) -> bool:
+        """Connect to the Meshtastic device."""
+        if not MESHTASTIC_AVAILABLE:
+            self.connection_info.error_message = "Meshtastic library not installed"
+            return False
+
+        try:
+            # Subscribe to meshtastic events
+            pub.subscribe(self._on_receive, "meshtastic.receive")
+            pub.subscribe(self._on_connection, "meshtastic.connection.established")
+            pub.subscribe(self._on_disconnect_event, "meshtastic.connection.lost")
+
+            interface_type = self.config.interface.type
+
+            if interface_type == "serial":
+                port = self.config.interface.port if self.config.interface.port else None
+                self.interface = meshtastic.serial_interface.SerialInterface(port)
+                self.connection_info.device_path = port or "auto"
+            elif interface_type == "tcp":
+                hostname = self.config.interface.hostname
+                if not hostname:
+                    self.connection_info.error_message = "TCP hostname not configured"
+                    return False
+                self.interface = meshtastic.tcp_interface.TCPInterface(hostname)
+                self.connection_info.device_path = hostname
+            elif interface_type == "ble":
+                mac = self.config.interface.mac
+                if not mac:
+                    self.connection_info.error_message = "BLE MAC address not configured"
+                    return False
+                self.interface = meshtastic.ble_interface.BLEInterface(mac)
+                self.connection_info.device_path = mac
+            else:
+                self.connection_info.error_message = f"Unknown interface type: {interface_type}"
+                return False
+
+            self.connection_info.interface_type = interface_type
+            self.connection_info.connected = True
+            self.network.connection_status = "connected"
+
+            # Get my node info
+            if self.interface.myInfo:
+                self.connection_info.my_node_id = hex(self.interface.myInfo.my_node_num)
+                self.connection_info.my_node_num = self.interface.myInfo.my_node_num
+                self.network.my_node_id = self.connection_info.my_node_id
+
+            # Load initial node database
+            self._load_node_database()
+
+            # Start worker thread
+            self._running = True
+            self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+            self._worker_thread.start()
+
+            self._trigger_callbacks("on_connect", self.connection_info)
+            return True
+
+        except Exception as e:
+            self.connection_info.error_message = str(e)
+            self.connection_info.connected = False
+            self.network.connection_status = "error"
+            return False
+
+    def disconnect(self) -> None:
+        """Disconnect from the Meshtastic device."""
+        self._running = False
+
+        if self.interface:
+            try:
+                pub.unsubscribe(self._on_receive, "meshtastic.receive")
+                pub.unsubscribe(self._on_connection, "meshtastic.connection.established")
+                pub.unsubscribe(self._on_disconnect_event, "meshtastic.connection.lost")
+                self.interface.close()
+            except Exception:
+                pass
+
+        self.interface = None
+        self.connection_info.connected = False
+        self.network.connection_status = "disconnected"
+        self._trigger_callbacks("on_disconnect")
+
+    def _load_node_database(self) -> None:
+        """Load the node database from the connected device."""
+        if not self.interface or not hasattr(self.interface, 'nodes'):
+            return
+
+        for node_id, node_info in self.interface.nodes.items():
+            node = self._parse_node_info(node_id, node_info)
+            if node:
+                self.network.add_node(node)
+
+    def _parse_node_info(self, node_id: str, node_info: dict) -> Optional[Node]:
+        """Parse node info from Meshtastic to our model."""
+        try:
+            user = node_info.get('user', {})
+            position = node_info.get('position', {})
+            device_metrics = node_info.get('deviceMetrics', {})
+
+            # Parse position
+            pos = Position(
+                latitude=position.get('latitude', 0.0),
+                longitude=position.get('longitude', 0.0),
+                altitude=position.get('altitude', 0),
+                time=datetime.fromtimestamp(position['time']) if position.get('time') else None
+            )
+
+            # Parse telemetry
+            telemetry = NodeTelemetry(
+                battery_level=device_metrics.get('batteryLevel', 0),
+                voltage=device_metrics.get('voltage', 0.0),
+                channel_utilization=device_metrics.get('channelUtilization', 0.0),
+                air_util_tx=device_metrics.get('airUtilTx', 0.0),
+                uptime_seconds=device_metrics.get('uptimeSeconds', 0)
+            )
+
+            # Parse role
+            role_str = user.get('role', 'CLIENT')
+            try:
+                role = NodeRole[role_str.upper()]
+            except (KeyError, AttributeError):
+                role = NodeRole.CLIENT
+
+            # Determine if favorite/admin
+            node_num_str = str(node_info.get('num', ''))
+            is_favorite = node_num_str in self.config.favorite_nodes
+            is_admin = node_num_str in self.config.admin_nodes
+
+            # Last heard
+            last_heard = None
+            if node_info.get('lastHeard'):
+                last_heard = datetime.fromtimestamp(node_info['lastHeard'])
+
+            # SNR/RSSI
+            if 'snr' in node_info:
+                telemetry.snr = node_info['snr']
+            if 'rssi' in node_info:
+                telemetry.rssi = node_info['rssi']
+
+            return Node(
+                node_id=node_id,
+                node_num=node_info.get('num', 0),
+                short_name=user.get('shortName', ''),
+                long_name=user.get('longName', ''),
+                hardware_model=user.get('hwModel', 'UNKNOWN'),
+                role=role,
+                position=pos,
+                telemetry=telemetry,
+                last_heard=last_heard,
+                is_favorite=is_favorite,
+                is_admin=is_admin,
+                hop_count=node_info.get('hopsAway', 0)
+            )
+        except Exception as e:
+            print(f"Error parsing node info: {e}")
+            return None
+
+    def _on_receive(self, packet: dict, interface: Any) -> None:
+        """Handle received packet from Meshtastic."""
+        self._message_queue.put(("receive", packet))
+
+    def _on_connection(self, interface: Any, topic: Any = None) -> None:
+        """Handle connection established event."""
+        self.connection_info.connected = True
+        self.network.connection_status = "connected"
+        self._load_node_database()
+        self._trigger_callbacks("on_connect", self.connection_info)
+
+    def _on_disconnect_event(self, interface: Any, topic: Any = None) -> None:
+        """Handle connection lost event."""
+        self.connection_info.connected = False
+        self.network.connection_status = "disconnected"
+        self._trigger_callbacks("on_disconnect")
+
+    def _worker_loop(self) -> None:
+        """Worker thread to process incoming messages."""
+        while self._running:
+            try:
+                event_type, data = self._message_queue.get(timeout=0.5)
+                if event_type == "receive":
+                    self._process_packet(data)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"Worker error: {e}")
+
+    def _process_packet(self, packet: dict) -> None:
+        """Process a received packet."""
+        try:
+            decoded = packet.get('decoded', {})
+            portnum = decoded.get('portnum', '')
+
+            # Update sender node last heard
+            sender_id = packet.get('fromId', '')
+            if sender_id and sender_id in self.network.nodes:
+                self.network.nodes[sender_id].last_heard = datetime.now()
+                self.network.nodes[sender_id].is_online = True
+
+            # Handle different packet types
+            if portnum == 'TEXT_MESSAGE_APP':
+                self._handle_text_message(packet)
+            elif portnum == 'POSITION_APP':
+                self._handle_position(packet)
+            elif portnum == 'TELEMETRY_APP':
+                self._handle_telemetry(packet)
+            elif portnum == 'NODEINFO_APP':
+                self._handle_nodeinfo(packet)
+
+        except Exception as e:
+            print(f"Error processing packet: {e}")
+
+    def _handle_text_message(self, packet: dict) -> None:
+        """Handle incoming text message."""
+        decoded = packet.get('decoded', {})
+        text = decoded.get('text', decoded.get('payload', b'').decode('utf-8', errors='ignore'))
+
+        sender_id = packet.get('fromId', '')
+        sender_name = ""
+        if sender_id in self.network.nodes:
+            sender_name = self.network.nodes[sender_id].display_name
+
+        message = Message(
+            id=str(uuid.uuid4()),
+            sender_id=sender_id,
+            sender_name=sender_name,
+            recipient_id=packet.get('toId', ''),
+            channel=packet.get('channel', 0),
+            text=text,
+            message_type=MessageType.TEXT,
+            timestamp=datetime.now(),
+            hop_count=packet.get('hopLimit', 0) - packet.get('hopStart', 0),
+            snr=packet.get('snr', 0.0),
+            rssi=packet.get('rssi', 0),
+            is_incoming=True
+        )
+
+        self.network.add_message(message)
+        self._trigger_callbacks("on_message", message)
+
+        # Check for emergency keywords
+        if self.config.alerts.enabled:
+            text_lower = text.lower()
+            for keyword in self.config.alerts.emergency_keywords:
+                if keyword.lower() in text_lower:
+                    alert = Alert(
+                        id=str(uuid.uuid4()),
+                        alert_type=AlertType.EMERGENCY,
+                        title="Emergency Keyword Detected",
+                        message=f"{sender_name}: {text}",
+                        severity=4,
+                        source_node=sender_id,
+                        metadata={"keyword": keyword}
+                    )
+                    self.network.add_alert(alert)
+                    self._trigger_callbacks("on_alert", alert)
+                    break
+
+    def _handle_position(self, packet: dict) -> None:
+        """Handle position update."""
+        sender_id = packet.get('fromId', '')
+        decoded = packet.get('decoded', {})
+        position_data = decoded.get('position', {})
+
+        if sender_id in self.network.nodes:
+            node = self.network.nodes[sender_id]
+            node.position = Position(
+                latitude=position_data.get('latitude', 0.0) / 1e7 if position_data.get('latitudeI') else position_data.get('latitude', 0.0),
+                longitude=position_data.get('longitude', 0.0) / 1e7 if position_data.get('longitudeI') else position_data.get('longitude', 0.0),
+                altitude=position_data.get('altitude', 0),
+                time=datetime.now()
+            )
+            node.last_heard = datetime.now()
+            self._trigger_callbacks("on_position", sender_id, node.position)
+
+    def _handle_telemetry(self, packet: dict) -> None:
+        """Handle telemetry update."""
+        sender_id = packet.get('fromId', '')
+        decoded = packet.get('decoded', {})
+        telemetry_data = decoded.get('telemetry', {})
+        device_metrics = telemetry_data.get('deviceMetrics', {})
+
+        if sender_id in self.network.nodes:
+            node = self.network.nodes[sender_id]
+            node.telemetry = NodeTelemetry(
+                battery_level=device_metrics.get('batteryLevel', node.telemetry.battery_level),
+                voltage=device_metrics.get('voltage', node.telemetry.voltage),
+                channel_utilization=device_metrics.get('channelUtilization', node.telemetry.channel_utilization),
+                air_util_tx=device_metrics.get('airUtilTx', node.telemetry.air_util_tx),
+                uptime_seconds=device_metrics.get('uptimeSeconds', node.telemetry.uptime_seconds),
+                last_updated=datetime.now()
+            )
+            node.last_heard = datetime.now()
+            self._trigger_callbacks("on_telemetry", sender_id, node.telemetry)
+
+            # Check battery alert
+            if (self.config.alerts.enabled and
+                node.telemetry.battery_level > 0 and
+                node.telemetry.battery_level < 20):
+                alert = Alert(
+                    id=str(uuid.uuid4()),
+                    alert_type=AlertType.BATTERY,
+                    title="Low Battery Alert",
+                    message=f"{node.display_name} battery at {node.telemetry.battery_level}%",
+                    severity=2,
+                    source_node=sender_id
+                )
+                self.network.add_alert(alert)
+                self._trigger_callbacks("on_alert", alert)
+
+    def _handle_nodeinfo(self, packet: dict) -> None:
+        """Handle node info update."""
+        sender_id = packet.get('fromId', '')
+        decoded = packet.get('decoded', {})
+        user = decoded.get('user', {})
+
+        is_new = sender_id not in self.network.nodes
+
+        if sender_id in self.network.nodes:
+            node = self.network.nodes[sender_id]
+            node.short_name = user.get('shortName', node.short_name)
+            node.long_name = user.get('longName', node.long_name)
+            node.hardware_model = user.get('hwModel', node.hardware_model)
+            node.last_heard = datetime.now()
+        else:
+            # New node
+            node_num = packet.get('from', 0)
+            node = Node(
+                node_id=sender_id,
+                node_num=node_num,
+                short_name=user.get('shortName', ''),
+                long_name=user.get('longName', ''),
+                hardware_model=user.get('hwModel', 'UNKNOWN'),
+                last_heard=datetime.now()
+            )
+            self.network.add_node(node)
+
+        self._trigger_callbacks("on_node_update", sender_id, is_new)
+
+        # New node alert
+        if is_new and self.config.alerts.enabled:
+            alert = Alert(
+                id=str(uuid.uuid4()),
+                alert_type=AlertType.NEW_NODE,
+                title="New Node Joined",
+                message=f"New node joined the mesh: {node.display_name}",
+                severity=1,
+                source_node=sender_id
+            )
+            self.network.add_alert(alert)
+            self._trigger_callbacks("on_alert", alert)
+
+    def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
+        """Send a text message."""
+        if not self.interface:
+            return False
+
+        try:
+            if destination == "^all":
+                self.interface.sendText(text, channelIndex=channel)
+            else:
+                # Parse destination node number
+                dest_num = int(destination.lstrip('!'), 16) if destination.startswith('!') else int(destination)
+                self.interface.sendText(text, destinationId=dest_num, channelIndex=channel)
+
+            # Log outgoing message
+            message = Message(
+                id=str(uuid.uuid4()),
+                sender_id=self.network.my_node_id,
+                sender_name=self.config.bot_name,
+                recipient_id=destination,
+                channel=channel,
+                text=text,
+                message_type=MessageType.TEXT,
+                timestamp=datetime.now(),
+                is_incoming=False
+            )
+            self.network.add_message(message)
+            return True
+
+        except Exception as e:
+            print(f"Error sending message: {e}")
+            return False
+
+    def request_position(self, node_id: str) -> bool:
+        """Request position from a node."""
+        if not self.interface:
+            return False
+        try:
+            node_num = int(node_id.lstrip('!'), 16) if node_id.startswith('!') else int(node_id)
+            self.interface.sendPosition(destinationId=node_num)
+            return True
+        except Exception as e:
+            print(f"Error requesting position: {e}")
+            return False
+
+    def get_nodes(self) -> List[Node]:
+        """Get all known nodes."""
+        return list(self.network.nodes.values())
+
+    def get_messages(self, channel: Optional[int] = None, limit: int = 100) -> List[Message]:
+        """Get messages, optionally filtered by channel."""
+        messages = self.network.messages
+        if channel is not None:
+            messages = [m for m in messages if m.channel == channel]
+        return messages[-limit:]
+
+    def get_alerts(self, unread_only: bool = False) -> List[Alert]:
+        """Get alerts."""
+        if unread_only:
+            return self.network.unread_alerts
+        return self.network.alerts
+
+    def acknowledge_alert(self, alert_id: str) -> bool:
+        """Acknowledge an alert."""
+        for alert in self.network.alerts:
+            if alert.id == alert_id:
+                alert.acknowledged = True
+                return True
+        return False
+
+
+class MockMeshtasticAPI(MeshtasticAPI):
+    """
+    Mock API for testing without actual Meshtastic hardware.
+    Generates fake nodes and messages for development.
+    """
+
+    def __init__(self, config: Config):
+        super().__init__(config)
+        self._demo_mode = True
+
+    def connect(self) -> bool:
+        """Simulate connection."""
+        self.connection_info.connected = True
+        self.connection_info.interface_type = "mock"
+        self.connection_info.device_path = "demo"
+        self.connection_info.my_node_id = "!deadbeef"
+        self.connection_info.my_node_num = 0xDEADBEEF
+        self.network.connection_status = "connected (demo)"
+        self.network.my_node_id = self.connection_info.my_node_id
+
+        # Generate demo nodes
+        demo_nodes = [
+            ("!abc12345", 0xABC12345, "BaseStation", "HQ Base Station", "TBEAM"),
+            ("!def67890", 0xDEF67890, "Mobile1", "Field Unit Alpha", "TLORA"),
+            ("!fed98765", 0xFED98765, "Relay", "Mountain Repeater", "HELTEC"),
+            ("!123abcde", 0x123ABCDE, "Solar1", "Solar Powered Node", "RAK4631"),
+            ("!456fghij", 0x456FGHIJ, "Router", "Community Router", "TBEAM"),
+        ]
+
+        for node_id, node_num, short, long, hw in demo_nodes:
+            node = Node(
+                node_id=node_id,
+                node_num=node_num,
+                short_name=short,
+                long_name=long,
+                hardware_model=hw,
+                role=NodeRole.CLIENT if "Router" not in short else NodeRole.ROUTER,
+                last_heard=datetime.now(),
+                is_online=True
+            )
+            node.telemetry.battery_level = 75 + (node_num % 25)
+            node.telemetry.snr = 5.0 + (node_num % 10)
+            self.network.add_node(node)
+
+        self._running = True
+        self._trigger_callbacks("on_connect", self.connection_info)
+        return True
+
+    def disconnect(self) -> None:
+        """Simulate disconnect."""
+        self._running = False
+        self.connection_info.connected = False
+        self.network.connection_status = "disconnected"
+        self._trigger_callbacks("on_disconnect")
+
+    def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
+        """Simulate sending a message."""
+        message = Message(
+            id=str(uuid.uuid4()),
+            sender_id=self.network.my_node_id,
+            sender_name="Me",
+            recipient_id=destination,
+            channel=channel,
+            text=text,
+            message_type=MessageType.TEXT,
+            timestamp=datetime.now(),
+            is_incoming=False,
+            ack_received=True
+        )
+        self.network.add_message(message)
+        return True

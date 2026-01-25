@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Messages{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Message History</h1>
+    <div class="page-actions">
+        <select id="channel-filter" class="channel-select" onchange="filterMessages()">
+            <option value="">All Channels</option>
+            <option value="0">Channel 0</option>
+            <option value="1">Channel 1</option>
+            <option value="2">Channel 2</option>
+            <option value="3">Channel 3</option>
+            <option value="4">Channel 4</option>
+            <option value="5">Channel 5</option>
+            <option value="6">Channel 6</option>
+            <option value="7">Channel 7</option>
+        </select>
+        <button class="btn btn-secondary" onclick="refreshMessages()">Refresh</button>
+    </div>
+</div>
+
+<div class="messages-page">
+    <div class="panel full-width">
+        <div class="panel-content">
+            <div class="messages-list messages-list-full" id="full-messages-list">
+                <div class="empty-message">Loading messages...</div>
+            </div>
+        </div>
+        <div class="panel-footer">
+            <div class="send-form send-form-full">
+                <input type="text" id="full-message-input" placeholder="Type a message..." class="message-input">
+                <input type="text" id="destination-input" placeholder="Destination (^all)" class="destination-input">
+                <select id="full-channel-select" class="channel-select">
+                    <option value="0">Channel 0</option>
+                    <option value="1">Channel 1</option>
+                    <option value="2">Channel 2</option>
+                    <option value="3">Channel 3</option>
+                </select>
+                <button id="full-send-btn" class="send-btn" onclick="sendFullMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    initMessagesPage();
+});
+
+function filterMessages() {
+    const channel = document.getElementById('channel-filter').value;
+    const url = channel ? `/api/messages?channel=${channel}` : '/api/messages';
+    fetch(url)
+        .then(r => r.json())
+        .then(data => updateFullMessagesList(data.messages));
+}
+
+function refreshMessages() {
+    filterMessages();
+}
+
+function sendFullMessage() {
+    const text = document.getElementById('full-message-input').value.trim();
+    const dest = document.getElementById('destination-input').value.trim() || '^all';
+    const channel = parseInt(document.getElementById('full-channel-select').value);
+
+    if (text) {
+        sendMessage(text, dest, channel);
+        document.getElementById('full-message-input').value = '';
+    }
+}
+
+document.getElementById('full-message-input').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') sendFullMessage();
+});
+</script>
+{% endblock %}

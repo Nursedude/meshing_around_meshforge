@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <!-- Status Cards Row -->
+    <div class="stats-row">
+        <div class="stat-card">
+            <div class="stat-icon status-icon" id="status-icon">●</div>
+            <div class="stat-content">
+                <div class="stat-value" id="stat-status">--</div>
+                <div class="stat-label">Connection Status</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">📡</div>
+            <div class="stat-content">
+                <div class="stat-value" id="stat-my-node">--</div>
+                <div class="stat-label">My Node ID</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-content">
+                <div class="stat-value"><span id="stat-online">0</span>/<span id="stat-total">0</span></div>
+                <div class="stat-label">Nodes Online</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">💬</div>
+            <div class="stat-content">
+                <div class="stat-value" id="stat-messages">0</div>
+                <div class="stat-label">Messages</div>
+            </div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🔔</div>
+            <div class="stat-content">
+                <div class="stat-value" id="stat-alerts">0</div>
+                <div class="stat-label">Unread Alerts</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="dashboard-grid">
+        <!-- Nodes Panel -->
+        <div class="panel panel-nodes">
+            <div class="panel-header">
+                <h2>Active Nodes</h2>
+                <a href="/nodes" class="panel-link">View All →</a>
+            </div>
+            <div class="panel-content">
+                <table class="data-table" id="nodes-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Last Seen</th>
+                            <th>Battery</th>
+                            <th>SNR</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nodes-body">
+                        <tr><td colspan="4" class="empty-message">Loading nodes...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Messages Panel -->
+        <div class="panel panel-messages">
+            <div class="panel-header">
+                <h2>Recent Messages</h2>
+                <a href="/messages" class="panel-link">View All →</a>
+            </div>
+            <div class="panel-content">
+                <div class="messages-list" id="messages-list">
+                    <div class="empty-message">Loading messages...</div>
+                </div>
+            </div>
+            <div class="panel-footer">
+                <div class="send-form">
+                    <input type="text" id="message-input" placeholder="Type a message..." class="message-input">
+                    <select id="channel-select" class="channel-select">
+                        <option value="0">Ch 0</option>
+                        <option value="1">Ch 1</option>
+                        <option value="2">Ch 2</option>
+                        <option value="3">Ch 3</option>
+                    </select>
+                    <button id="send-btn" class="send-btn">Send</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Alerts Panel -->
+        <div class="panel panel-alerts">
+            <div class="panel-header">
+                <h2>Alerts</h2>
+                <a href="/alerts" class="panel-link">View All →</a>
+            </div>
+            <div class="panel-content">
+                <div class="alerts-list" id="alerts-list">
+                    <div class="empty-message">No alerts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Map Placeholder -->
+        <div class="panel panel-map">
+            <div class="panel-header">
+                <h2>Network Overview</h2>
+            </div>
+            <div class="panel-content">
+                <div class="network-stats">
+                    <div class="network-stat">
+                        <span class="network-stat-label">Interface</span>
+                        <span class="network-stat-value" id="net-interface">--</span>
+                    </div>
+                    <div class="network-stat">
+                        <span class="network-stat-label">Device</span>
+                        <span class="network-stat-value" id="net-device">--</span>
+                    </div>
+                    <div class="network-stat">
+                        <span class="network-stat-label">Channels</span>
+                        <span class="network-stat-value" id="net-channels">8</span>
+                    </div>
+                    <div class="network-stat">
+                        <span class="network-stat-label">Uptime</span>
+                        <span class="network-stat-value" id="net-uptime">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Dashboard-specific initialization
+document.addEventListener('DOMContentLoaded', function() {
+    initDashboard();
+});
+</script>
+{% endblock %}
