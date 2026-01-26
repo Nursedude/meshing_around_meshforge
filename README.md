@@ -8,6 +8,65 @@ Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-aroun
 
 > ⚠️ **Beta Software** - This is early-stage code. Test thoroughly before deploying!
 
+## Architecture Overview
+
+```mermaid
+graph TB
+    subgraph "MeshForge"
+        ML[mesh_client.py<br/>Launcher]
+        CB[configure_bot.py<br/>Setup Wizard]
+
+        subgraph "Interfaces"
+            TUI[TUI Client<br/>Terminal]
+            WEB[Web Client<br/>Browser]
+        end
+
+        subgraph "Core Layer"
+            CM[Connection Manager]
+            MH[Message Handler]
+            CFG[Config Manager]
+        end
+    end
+
+    subgraph "Connections"
+        SER[Serial/USB]
+        TCP[TCP/IP]
+        MQTT[MQTT Broker]
+        BLE[Bluetooth LE]
+    end
+
+    subgraph "External"
+        RADIO[Meshtastic Radio]
+        BROKER[mqtt.meshtastic.org]
+        MESH((Mesh Network))
+    end
+
+    ML --> TUI
+    ML --> WEB
+    TUI --> CM
+    WEB --> CM
+    CM --> MH
+    CM --> CFG
+
+    CM --> SER
+    CM --> TCP
+    CM --> MQTT
+    CM --> BLE
+
+    SER --> RADIO
+    TCP --> RADIO
+    BLE --> RADIO
+    MQTT --> BROKER
+
+    RADIO --> MESH
+    BROKER --> MESH
+
+    style ML fill:#4a9eff,color:#fff
+    style TUI fill:#9b59b6,color:#fff
+    style WEB fill:#27ae60,color:#fff
+    style MESH fill:#e74c3c,color:#fff
+```
+
 ## TLDR
 
 - **Configure meshing-around bot**: `python3 configure_bot.py`
@@ -43,6 +102,33 @@ python3 mesh_client.py --setup
 
 ### Connection Options
 
+```mermaid
+flowchart TD
+    START{Do you have a<br/>Meshtastic radio?}
+
+    START -->|Yes| LOCAL{Is it connected<br/>to THIS machine?}
+    START -->|No| MQTT_MODE[Use MQTT Mode<br/>Connect via broker]
+
+    LOCAL -->|Yes, USB| SERIAL[Serial Mode]
+    LOCAL -->|Yes, Bluetooth| BLE[BLE Mode]
+    LOCAL -->|No, on network| TCP[TCP Mode]
+
+    SERIAL --> READY[Ready to monitor!]
+    BLE --> READY
+    TCP --> READY
+    MQTT_MODE --> READY
+
+    TEST{Just want to<br/>test things?}
+    START -.->|"Not sure"| TEST
+    TEST -->|Yes| DEMO[Demo Mode]
+    DEMO --> READY
+
+    style START fill:#f39c12,color:#fff
+    style READY fill:#27ae60,color:#fff
+    style MQTT_MODE fill:#3498db,color:#fff
+    style DEMO fill:#9b59b6,color:#fff
+```
+
 | Mode | Need Radio? | Use Case |
 |------|-------------|----------|
 | Serial | Yes (USB) | Radio plugged into this machine |
@@ -71,6 +157,22 @@ Run `python3 mesh_client.py --setup` for interactive configuration.
 ## Pi Zero 2W Setup (Headless, No Radio)
 
 Perfect for a monitoring station using MQTT:
+
+```mermaid
+flowchart LR
+    A[Run setup_headless.sh] --> B[Install Dependencies]
+    B --> C[Create Virtual Env]
+    C --> D[Configure MQTT]
+    D --> E{Install as Service?}
+    E -->|Yes| F[Enable systemd]
+    E -->|No| G[Manual Start]
+    F --> H[Auto-start on boot]
+    G --> H
+    H --> I[Access Web UI<br/>:8080]
+
+    style A fill:#e74c3c,color:#fff
+    style I fill:#27ae60,color:#fff
+```
 
 ```sh
 chmod +x setup_headless.sh
@@ -101,7 +203,67 @@ This sets up:
 | `GET /api/messages` | Message history |
 | `POST /api/messages/send` | Send a message |
 
+## How It Works
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant MeshForge
+    participant Connection
+    participant Mesh as Mesh Network
+
+    User->>MeshForge: Start client
+    MeshForge->>MeshForge: Load config
+    MeshForge->>Connection: Initialize (Serial/TCP/MQTT/BLE)
+    Connection->>Mesh: Connect
+
+    loop Real-time Updates
+        Mesh->>Connection: New message/node data
+        Connection->>MeshForge: Process & format
+        MeshForge->>User: Display in TUI/Web
+    end
+
+    User->>MeshForge: Send message
+    MeshForge->>Connection: Route message
+    Connection->>Mesh: Transmit
+    Mesh-->>User: Delivery confirmed
+```
+
 ## Project Layout
+
+```mermaid
+graph LR
+    subgraph "Entry Points"
+        A[mesh_client.py]
+        B[configure_bot.py]
+        C[setup_headless.sh]
+    end
+
+    subgraph "Clients Package"
+        D[core/]
+        E[tui/]
+        F[web/]
+    end
+
+    subgraph "Core Modules"
+        G[config.py]
+        H[connection_manager.py]
+        I[message_handler.py]
+        J[models.py]
+    end
+
+    A --> D
+    A --> E
+    A --> F
+    D --> G
+    D --> H
+    D --> I
+    D --> J
+
+    style A fill:#4a9eff,color:#fff
+    style B fill:#27ae60,color:#fff
+    style C fill:#9b59b6,color:#fff
+```
 
 ```
 ├── mesh_client.py          # Start here - main launcher
