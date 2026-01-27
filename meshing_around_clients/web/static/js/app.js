@@ -209,7 +209,7 @@ function renderBattery(level) {
 
 // Format position
 function formatPosition(pos) {
-    if (!pos || (!pos.latitude && !pos.longitude)) return 'N/A';
+    if (!pos || (pos.latitude == null && pos.longitude == null)) return 'N/A';
     return `${pos.latitude?.toFixed(4)}, ${pos.longitude?.toFixed(4)}`;
 }
 
@@ -263,7 +263,7 @@ function renderMessage(msg, detailed = false) {
         html += `
             <div class="message-meta">
                 <span>Ch: ${msg.channel}</span>
-                <span>To: ${msg.is_broadcast ? 'All' : msg.recipient_id}</span>
+                <span>To: ${msg.is_broadcast ? 'All' : escapeHtml(msg.recipient_id)}</span>
                 <span>SNR: ${msg.snr?.toFixed(1) || '-'}</span>
                 <span>Hops: ${msg.hop_count || 0}</span>
             </div>
@@ -325,7 +325,7 @@ function updateAlertsTable(data) {
     tbody.innerHTML = alerts.slice().reverse().map(alert => `
         <tr>
             <td>${alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '-'}</td>
-            <td><span class="status-badge severity-${alert.severity}">${alert.severity_label}</span></td>
+            <td><span class="status-badge severity-${alert.severity}">${escapeHtml(alert.severity_label)}</span></td>
             <td>${escapeHtml(alert.alert_type)}</td>
             <td>${escapeHtml(alert.title)}</td>
             <td>${escapeHtml(alert.message)}</td>

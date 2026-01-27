@@ -178,7 +178,6 @@ class MessageHandler:
             try:
                 return handler(parsed)
             except Exception as e:
-                logger = logging.getLogger(__name__)
                 logger.error("Command handler error for %s: %s", parsed.command, e)
                 return CommandResponse(text="An internal error occurred.")
 

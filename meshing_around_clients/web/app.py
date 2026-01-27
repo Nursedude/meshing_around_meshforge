@@ -192,6 +192,13 @@ class WebApplication:
 
     def _register_callbacks(self):
         """Register API callbacks for real-time updates."""
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+
+        def _schedule_coroutine(coro):
+            """Safely schedule a coroutine from a sync callback thread."""
+            loop = self._event_loop
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(coro, loop)
 
         def on_message(message: Message):
             self._schedule_async(

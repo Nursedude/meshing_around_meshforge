@@ -378,24 +378,27 @@ setup_systemd_service() {
     read -p "Install as systemd service for auto-start? [y/N]: " INSTALL_SERVICE
 
     if [[ "$INSTALL_SERVICE" =~ ^[Yy]$ ]]; then
-        # Create service file
-        sudo tee "$SERVICE_FILE" > /dev/null << EOF
+        # Create service file - use envsubst for safe variable substitution
+        SERVICE_USER="$USER"
+        SERVICE_WORKDIR="$SCRIPT_DIR"
+        SERVICE_EXEC="$SCRIPT_DIR/.venv/bin/python $SCRIPT_DIR/mesh_client.py"
+        sudo tee "$SERVICE_FILE" > /dev/null <<SVCEOF
 [Unit]
 Description=Meshing-Around Mesh Client
 After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$SCRIPT_DIR
-ExecStart=$SCRIPT_DIR/.venv/bin/python $SCRIPT_DIR/mesh_client.py
+User=${SERVICE_USER}
+WorkingDirectory=${SERVICE_WORKDIR}
+ExecStart=${SERVICE_EXEC}
 Restart=always
 RestartSec=10
 Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SVCEOF
 
         sudo systemctl daemon-reload
         sudo systemctl enable mesh-client

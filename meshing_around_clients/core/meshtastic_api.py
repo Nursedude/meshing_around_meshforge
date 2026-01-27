@@ -3,7 +3,6 @@ Meshtastic API layer for Meshing-Around Clients.
 Provides interface to communicate with Meshtastic devices.
 """
 
-import asyncio
 import threading
 import queue
 import time
@@ -317,7 +316,7 @@ class MeshtasticAPI:
             text=text,
             message_type=MessageType.TEXT,
             timestamp=datetime.now(),
-            hop_count=packet.get('hopStart', 0) - packet.get('hopLimit', 0),
+            hop_count=max(0, packet.get('hopStart', 0) - packet.get('hopLimit', 0)),
             snr=packet.get('snr', 0.0),
             rssi=packet.get('rssi', 0),
             is_incoming=True
