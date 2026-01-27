@@ -144,6 +144,8 @@ class MQTTMeshtasticClient:
                 self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
                 return True
             else:
+                # Connection timed out — stop the background loop thread
+                self._client.loop_stop()
                 return False
 
         except Exception as e:
@@ -287,9 +289,17 @@ class MQTTMeshtasticClient:
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
+            lat = pos_data.get("latitude")
+            if lat is None:
+                lat_i = pos_data.get("latitudeI", 0)
+                lat = lat_i / 1e7 if lat_i else 0.0
+            lon = pos_data.get("longitude")
+            if lon is None:
+                lon_i = pos_data.get("longitudeI", 0)
+                lon = lon_i / 1e7 if lon_i else 0.0
             node.position = Position(
-                latitude=pos_data.get("latitude", 0) or pos_data.get("latitudeI", 0) / 1e7,
-                longitude=pos_data.get("longitude", 0) or pos_data.get("longitudeI", 0) / 1e7,
+                latitude=lat,
+                longitude=lon,
                 altitude=pos_data.get("altitude", 0),
                 time=datetime.now()
             )

@@ -29,7 +29,6 @@ Configuration:
 import os
 import sys
 import subprocess
-import json
 import socket
 import time
 from pathlib import Path
@@ -75,7 +74,7 @@ def log(msg: str, level: str = "INFO"):
     try:
         with open(LOG_FILE, 'a') as f:
             f.write(log_msg + "\n")
-    except Exception:
+    except OSError:
         pass
 
     # Print to stdout with colors
@@ -115,7 +114,7 @@ def run_cmd(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tuple[i
         return -1, "", "Command timed out"
     except FileNotFoundError:
         return -1, "", f"Command not found: {cmd[0]}"
-    except Exception as e:
+    except OSError as e:
         return -1, "", str(e)
 
 
@@ -151,10 +150,19 @@ OPTIONAL_DEPS = {
 }
 
 
+# Mapping from pip package names to importable module names
+_IMPORT_NAME_MAP = {
+    "paho-mqtt": "paho.mqtt.client",
+    "python-multipart": "multipart",
+    "pypubsub": "pubsub",
+}
+
+
 def check_dependency(package: str) -> bool:
     """Check if a Python package is installed."""
     try:
-        __import__(package.replace("-", "_").split("[")[0])
+        import_name = _IMPORT_NAME_MAP.get(package, package.replace("-", "_").split("[")[0])
+        __import__(import_name)
         return True
     except ImportError:
         return False
@@ -441,9 +449,10 @@ def load_config() -> ConfigParser:
 
 
 def save_config(config: ConfigParser):
-    """Save configuration to file."""
+    """Save configuration to file with restricted permissions."""
     with open(CONFIG_FILE, 'w') as f:
         config.write(f)
+    os.chmod(CONFIG_FILE, 0o600)
     log(f"Saved config to {CONFIG_FILE}", "OK")
 
 
@@ -498,7 +507,6 @@ def detect_connection_type(config: ConfigParser) -> str:
 
     # Demo mode as last resort
     log("No connection available, using demo mode", "WARN")
-    config.set("advanced", "demo_mode", "true")
     return "demo"
 
 
@@ -564,9 +572,10 @@ def interactive_setup():
         port = input("Web port [8080]: ").strip() or "8080"
         config.set("features", "web_port", port)
 
-    # Save config
+    # Save config with restrictive permissions
     with open(CONFIG_FILE, 'w') as f:
         config.write(f)
+    os.chmod(CONFIG_FILE, 0o600)
 
     print(f"\n{Colors.GREEN}Configuration saved to {CONFIG_FILE}{Colors.RESET}")
     print("Run 'python3 mesh_client.py' to start the client.")
@@ -595,7 +604,7 @@ def check_system():
         with open("/proc/cpuinfo", "r") as f:
             if "Raspberry Pi" in f.read():
                 log("Running on Raspberry Pi", "OK")
-    except Exception:
+    except OSError:
         pass
 
     return True
@@ -641,7 +650,7 @@ def run_application(config: ConfigParser):
         elif mode == "web":
             from meshing_around_clients.web.app import WebApplication
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = config.get("features", "web_host", fallback="0.0.0.0")
+            host = config.get("features", "web_host", fallback="127.0.0.1")
             port = config.getint("features", "web_port", fallback=8080)
             web_app.run(host=host, port=port)
 
@@ -651,16 +660,9 @@ def run_application(config: ConfigParser):
             from meshing_around_clients.web.app import WebApplication
             from meshing_around_clients.tui.app import MeshingAroundTUI
 
-            # Shared API instance
-            if demo_mode:
-                from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
-                api = MockMeshtasticAPI(app_config)
-            else:
-                api = MeshtasticAPI(app_config)
-
             # Start web server in thread
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = config.get("features", "web_host", fallback="0.0.0.0")
+            host = config.get("features", "web_host", fallback="127.0.0.1")
             port = config.getint("features", "web_port", fallback=8080)
 
             def run_web():

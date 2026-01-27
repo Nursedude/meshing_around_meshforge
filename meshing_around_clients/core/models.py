@@ -3,6 +3,7 @@ Data models for Meshing-Around Clients.
 Defines the core data structures used across TUI and Web clients.
 """
 
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List, Dict, Any
@@ -121,7 +122,8 @@ class Node:
             return self.long_name
         if self.short_name:
             return self.short_name
-        return f"!{self.node_id[-4:]}"
+        node_suffix = self.node_id.lstrip("!")[-4:]
+        return f"!{node_suffix}"
 
     @property
     def time_since_heard(self) -> str:
@@ -255,7 +257,10 @@ class Alert:
 
 @dataclass
 class MeshNetwork:
-    """Represents the overall mesh network state."""
+    """Represents the overall mesh network state.
+
+    Thread-safe: all mutating operations are protected by a lock.
+    """
     nodes: Dict[str, Node] = field(default_factory=dict)
     messages: List[Message] = field(default_factory=list)
     alerts: List[Alert] = field(default_factory=list)
@@ -263,58 +268,71 @@ class MeshNetwork:
     connection_status: str = "disconnected"
     channel_count: int = 8
 
+    def __post_init__(self):
+        self._lock = threading.Lock()
+
     @property
     def online_nodes(self) -> List[Node]:
-        return [n for n in self.nodes.values() if n.is_online]
+        with self._lock:
+            return [n for n in self.nodes.values() if n.is_online]
 
     @property
     def favorite_nodes(self) -> List[Node]:
-        return [n for n in self.nodes.values() if n.is_favorite]
+        with self._lock:
+            return [n for n in self.nodes.values() if n.is_favorite]
 
     @property
     def unread_alerts(self) -> List[Alert]:
-        return [a for a in self.alerts if not a.acknowledged]
+        with self._lock:
+            return [a for a in self.alerts if not a.acknowledged]
 
     @property
     def total_messages(self) -> int:
-        return len(self.messages)
+        with self._lock:
+            return len(self.messages)
 
     def get_node(self, node_id: str) -> Optional[Node]:
-        return self.nodes.get(node_id)
+        with self._lock:
+            return self.nodes.get(node_id)
 
     def add_node(self, node: Node) -> None:
-        self.nodes[node.node_id] = node
+        with self._lock:
+            self.nodes[node.node_id] = node
 
     def add_message(self, message: Message, max_history: int = 1000) -> None:
-        self.messages.append(message)
-        # Keep message history bounded
-        if len(self.messages) > max_history:
-            self.messages = self.messages[-max_history:]
+        with self._lock:
+            self.messages.append(message)
+            if len(self.messages) > max_history:
+                self.messages = self.messages[-max_history:]
 
     def add_alert(self, alert: Alert, max_history: int = 500) -> None:
-        self.alerts.append(alert)
-        if len(self.alerts) > max_history:
-            self.alerts = self.alerts[-max_history:]
+        with self._lock:
+            self.alerts.append(alert)
+            if len(self.alerts) > max_history:
+                self.alerts = self.alerts[-max_history:]
 
     def get_messages_for_channel(self, channel: int) -> List[Message]:
-        return [m for m in self.messages if m.channel == channel]
+        with self._lock:
+            return [m for m in self.messages if m.channel == channel]
 
     def get_messages_for_node(self, node_id: str) -> List[Message]:
-        return [m for m in self.messages
-                if m.sender_id == node_id or m.recipient_id == node_id]
+        with self._lock:
+            return [m for m in self.messages
+                    if m.sender_id == node_id or m.recipient_id == node_id]
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "nodes": {k: v.to_dict() for k, v in self.nodes.items()},
-            "messages": [m.to_dict() for m in self.messages[-100:]],  # Last 100
-            "alerts": [a.to_dict() for a in self.alerts[-50:]],  # Last 50
-            "my_node_id": self.my_node_id,
-            "connection_status": self.connection_status,
-            "channel_count": self.channel_count,
-            "online_node_count": len(self.online_nodes),
-            "total_node_count": len(self.nodes),
-            "unread_alert_count": len(self.unread_alerts)
-        }
+        with self._lock:
+            return {
+                "nodes": {k: v.to_dict() for k, v in self.nodes.items()},
+                "messages": [m.to_dict() for m in self.messages[-100:]],
+                "alerts": [a.to_dict() for a in self.alerts[-50:]],
+                "my_node_id": self.my_node_id,
+                "connection_status": self.connection_status,
+                "channel_count": self.channel_count,
+                "online_node_count": len([n for n in self.nodes.values() if n.is_online]),
+                "total_node_count": len(self.nodes),
+                "unread_alert_count": len([a for a in self.alerts if not a.acknowledged])
+            }
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)

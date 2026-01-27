@@ -328,14 +328,24 @@ def setup_virtual_environment(venv_path: Path = None) -> Tuple[bool, Optional[Pa
 
 
 def get_pip_command(venv_path: Optional[Path] = None) -> List[str]:
-    """Get the appropriate pip command based on environment"""
+    """Get the appropriate pip command based on environment.
+
+    Returns a base command list. The --break-system-packages flag is placed
+    after 'install' since pip requires subcommand before global flags.
+    Usage: get_pip_command() + ['install', ...] or
+           get_pip_command() + ['install'] + get_pip_extra_flags() + [...]
+    """
     if venv_path and venv_path.exists():
         return [str(venv_path / "bin" / "pip3")]
-    elif check_pep668_environment():
-        # Use --break-system-packages flag for Bookworm
-        return ['pip3', '--break-system-packages']
     else:
         return ['pip3']
+
+
+def get_pip_install_flags() -> List[str]:
+    """Get extra flags needed for pip install (e.g. --break-system-packages)."""
+    if check_pep668_environment():
+        return ['--break-system-packages']
+    return []
 
 
 def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
@@ -1125,18 +1135,20 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
 
     # Determine the pip command to use
     pip_cmd = get_pip_command(venv_path)
-    pip_display = ' '.join(pip_cmd)
 
     # Check for Bookworm/PEP 668
     if check_pep668_environment() and not venv_path:
         print_warning("Raspberry Pi OS Bookworm detected with PEP 668")
         print_info("Using --break-system-packages flag (or use a virtual environment)")
 
+    extra_flags = get_pip_install_flags()
+    pip_display = ' '.join(pip_cmd)
+
     print_info(f"Using pip command: {pip_display}")
 
     # Try installing from requirements.txt first
     print_info("Installing from requirements.txt...")
-    install_cmd = pip_cmd + ['install', '-r', str(requirements_file)]
+    install_cmd = pip_cmd + ['install'] + extra_flags + ['-r', str(requirements_file)]
     ret, stdout, stderr = run_command(install_cmd, capture=True)
 
     if ret != 0:
@@ -1165,7 +1177,7 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
         failed_packages = []
         for pkg in core_packages:
             print_info(f"Installing {pkg}...")
-            install_cmd = pip_cmd + ['install', pkg]
+            install_cmd = pip_cmd + ['install'] + extra_flags + [pkg]
             ret, _, stderr = run_command(install_cmd, capture=True)
             if ret != 0:
                 failed_packages.append(pkg)

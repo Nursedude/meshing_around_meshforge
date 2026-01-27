@@ -150,9 +150,9 @@ function updateNodesTable(nodes) {
         <tr>
             <td>
                 ${node.is_favorite ? '<span class="status-badge favorite">★</span>' : ''}
-                ${node.display_name || node.node_id}
+                ${escapeHtml(node.display_name || node.node_id)}
             </td>
-            <td>${node.time_since_heard || 'Never'}</td>
+            <td>${escapeHtml(node.time_since_heard || 'Never')}</td>
             <td>${renderBattery(node.telemetry?.battery_level)}</td>
             <td>${node.telemetry?.snr?.toFixed(1) || '-'} dB</td>
         </tr>
@@ -170,17 +170,17 @@ function updateFullNodesTable(nodes) {
     }
 
     tbody.innerHTML = nodes.map(node => `
-        <tr onclick="showNodeDetails('${node.node_id}')" style="cursor: pointer;">
+        <tr onclick="showNodeDetails('${escapeHtml(node.node_id)}')" style="cursor: pointer;">
             <td>
                 <span class="status-badge ${node.is_online ? 'online' : 'offline'}">
                     ${node.is_online ? 'Online' : 'Offline'}
                 </span>
             </td>
-            <td><code>${node.node_id}</code></td>
-            <td>${node.display_name}</td>
-            <td>${node.hardware_model}</td>
-            <td>${node.role}</td>
-            <td>${node.time_since_heard}</td>
+            <td><code>${escapeHtml(node.node_id)}</code></td>
+            <td>${escapeHtml(node.display_name)}</td>
+            <td>${escapeHtml(node.hardware_model)}</td>
+            <td>${escapeHtml(node.role)}</td>
+            <td>${escapeHtml(node.time_since_heard)}</td>
             <td>${renderBattery(node.telemetry?.battery_level)}</td>
             <td>${node.telemetry?.snr?.toFixed(1) || '-'} dB</td>
             <td>${node.telemetry?.rssi || '-'}</td>
@@ -253,7 +253,7 @@ function renderMessage(msg, detailed = false) {
     let html = `
         <div class="${className}">
             <div class="message-header">
-                <span class="message-sender">${msg.sender_name || msg.sender_id}</span>
+                <span class="message-sender">${escapeHtml(msg.sender_name || msg.sender_id)}</span>
                 <span class="message-time">${msg.time_formatted || ''}</span>
             </div>
             <div class="message-text">${escapeHtml(msg.text)}</div>
@@ -326,10 +326,10 @@ function updateAlertsTable(data) {
         <tr>
             <td>${alert.timestamp ? new Date(alert.timestamp).toLocaleString() : '-'}</td>
             <td><span class="status-badge severity-${alert.severity}">${alert.severity_label}</span></td>
-            <td>${alert.alert_type}</td>
+            <td>${escapeHtml(alert.alert_type)}</td>
             <td>${escapeHtml(alert.title)}</td>
             <td>${escapeHtml(alert.message)}</td>
-            <td>${alert.source_node || '-'}</td>
+            <td>${escapeHtml(alert.source_node || '-')}</td>
             <td>${alert.acknowledged ? '✓' : '✗'}</td>
             <td>
                 ${!alert.acknowledged ? `<button class="btn btn-secondary" onclick="acknowledgeAlert('${alert.id}')">Ack</button>` : ''}
@@ -344,7 +344,7 @@ function renderAlert(alert) {
         <div class="alert-item severity-${alert.severity}">
             <div class="alert-header">
                 <span class="alert-title">${escapeHtml(alert.title)}</span>
-                <span class="alert-type">${alert.alert_type}</span>
+                <span class="alert-type">${escapeHtml(alert.alert_type)}</span>
             </div>
             <div class="alert-message">${escapeHtml(alert.message)}</div>
         </div>
