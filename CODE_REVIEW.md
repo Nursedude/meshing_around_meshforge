@@ -3,276 +3,335 @@
 **Date:** 2026-01-27
 **Reviewer:** Claude (automated)
 **Scope:** Full repository review — all source files, scripts, configuration, and documentation
-**Commit reviewed:** `52ae8f1` (HEAD of main)
+**Commit reviewed:** `d35a89e` (HEAD after PR #14 merge)
+**Previous review:** 2026-01-27 (pre-PR #13/#14)
 
 ---
 
-## Repository Summary
+## Executive Summary
+
+This is a **follow-up review** after PRs #13 and #14 addressed 25 findings and security/threading fixes. Of the 25 original findings, **16 are fully resolved**, **3 are partially resolved**, and **6 remain open**. This review also identifies **7 new findings** not covered previously.
+
+| Category | Previous | Fixed | Remaining | New |
+|----------|----------|-------|-----------|-----|
+| Critical | 4 | 3 | 1 | 0 |
+| High     | 4 | 3 | 1 | 2 |
+| Medium   | 9 | 6 | 3 | 3 |
+| Low      | 8 | 4 | 4 | 2 |
+| **Total** | **25** | **16** | **9** | **7** |
+
+---
+
+## Repository Statistics
 
 | Metric | Value |
 |--------|-------|
-| Python source lines | ~8,270 |
-| Web frontend lines (HTML/CSS/JS) | ~1,710 |
-| Shell script lines | ~470 |
-| Documentation files | 9 markdown files (~112K) |
-| Total files | 37 |
+| Python source files | 16 (including `__init__.py`) |
+| Python source lines | ~8,400 |
+| Web frontend (HTML/CSS/JS) | ~1,715 lines |
+| Shell script lines | ~489 |
+| Documentation files | 11 markdown files |
 | Test files | **0** |
 | CI/CD config | **None** |
 | Version | 0.1.0-beta |
 
 ---
 
-## Recent Activity (Last 11 PRs)
+## Fixed Findings (16 of 25 — Resolved by PRs #13 and #14)
 
-The repo has been built through a rapid sequence of Claude-assisted PRs:
+These are confirmed fixed and require no further action.
 
-| PR | Description |
-|----|-------------|
-| #11 | Add Mermaid diagrams to README + CLAUDE.md |
-| #10 | Downgrade to v0.1.0-beta, README style |
-| #9 | Fix code review issues, update to v3.0.0 |
-| #8 | Add standalone launcher with MQTT + headless setup |
-| #7 | Add TUI and Web clients |
-| #6 | UI improvements with Rich library |
-| #5 | Add meshing-around installer and systemd support |
-| #4 | Raspberry Pi OS Bookworm compatibility |
-| #3 | Merge from main |
-| #2 | Raspberry Pi OS Bookworm compatibility |
-| #1 | Rename gitignore to .gitignore |
-
-Development pattern: mostly single-feature branches merged quickly, with code review issues addressed in follow-up PRs rather than iteratively within the same branch.
-
----
-
-## Critical Findings
-
-### 1. `meshtastic_api.py:537` — Invalid hex literal prevents import
-
-```python
-"!456FGHIJ"  # This is valid as a string
-```
-
-**Update after re-examination:** The string literal `"!456FGHIJ"` is valid Python. However, the mock data at line 537 uses hex-like node IDs that include invalid hex characters (G, H, I, J), which would cause issues if any code tries to parse them as hex integers. This is a latent bug in the demo/mock path.
-
-**Severity:** MEDIUM — affects demo mode only
-
-### 2. Shell injection in `setup_headless.sh:240-354`
-
-The `generate_config()` function uses an **unquoted heredoc** to pass user input into Python:
-
-```bash
-python3 << EOF
-# $MQTT_BROKER, $TCP_HOST, etc. are interpolated directly
-config.set("connection", "mqtt_broker", "$MQTT_BROKER")
-EOF
-```
-
-Variables from `read -p` (user input) are interpolated into Python code without sanitization. A malicious input like `"); import os; os.system("rm -rf /` could achieve arbitrary code execution.
-
-**Fix:** Quote the heredoc delimiter: `<< 'EOF'` and pass variables via environment or command-line arguments.
-
-**Severity:** CRITICAL
-
-### 3. XSS vulnerabilities across the entire web UI
-
-Multiple locations inject unsanitized mesh network data into HTML via `innerHTML`:
-
-| File | Lines | Unescaped Fields |
-|------|-------|-----------------|
-| `web/app.py` (embedded HTML) | 514, 541, 559 | `display_name`, `text`, `title`, `message` |
-| `web/static/js/app.js` | 149-191, 256 | `display_name`, `node_id`, `hardware_model`, `role`, `sender_name` |
-| `web/templates/nodes.html` | 68-111 | All node detail modal fields |
-
-An `escapeHtml()` function exists in `app.js:421` but is only used for message text and alert title/message. Node names, IDs, hardware models, sender names, and roles are all injected raw.
-
-A malicious node on the mesh could set its display name to `<img src=x onerror=alert(1)>` and execute JavaScript in every viewer's browser.
-
-**Severity:** CRITICAL
-
-### 4. Zero authentication on web API
-
-All API routes in `web/app.py` are completely unauthenticated despite `WebConfig` having `enable_auth`, `api_key`, `username`, and `password_hash` fields. These fields are never checked. Combined with the default bind to `0.0.0.0`:
-
-- `POST /api/connect` — anyone can connect/disconnect the device
-- `POST /api/messages/send` — anyone can send mesh messages
-- `GET /api/config` — exposes full configuration
-- No WebSocket origin validation at `/ws`
-- No CSRF protection on POST endpoints
-
-**Severity:** CRITICAL
-
-### 5. Hardcoded MQTT credentials in source code
-
-```python
-# mqtt_client.py:43-44
-self.username = config.get("mqtt_username", "meshdev")
-self.password = config.get("mqtt_password", "large4cats")
-
-# connection_manager.py:239-240 (same fallback)
-```
-
-While these are the well-known public Meshtastic broker credentials, embedding them as fallback defaults in source code normalizes the pattern. If a user overrides with private credentials, the config file is written without restrictive permissions (`config.py:200`, `mesh_client.py:443`).
-
-**Severity:** HIGH
-
-### 6. Thread safety — no synchronization on shared state
-
-`MeshNetwork` in `models.py` uses plain `dict` and `list` for `nodes`, `messages`, and `alerts`. These are accessed from multiple threads (MQTT callbacks, Meshtastic worker threads, main thread, web request handlers) without locks. The `add_message()` method does list reassignment (`self.messages = self.messages[-max_history:]`) which is not atomic.
-
-**Severity:** HIGH
-
-### 7. `asyncio.create_task()` called from non-async threads
-
-In `web/app.py:175-178`, callbacks registered with the connection manager call `asyncio.create_task()` directly. These callbacks fire from Meshtastic/MQTT worker threads, not the asyncio event loop thread. This will raise `RuntimeError: no running event loop` at runtime.
-
-**Fix:** Use `asyncio.run_coroutine_threadsafe(coro, loop)` with a stored event loop reference.
-
-**Severity:** HIGH
-
-### 8. TUI has no Rich fallback — exits immediately
-
-`tui/app.py:41-47` sets `RICH_AVAILABLE = False` then calls `sys.exit(1)`. The CLAUDE.md guidelines explicitly require: *"Rich Library Fallback — UI must work without Rich installed. Provide plain-text fallback for all UI elements."* The TUI violates this completely.
-
-**Severity:** HIGH
+| # | Finding | Severity | Status |
+|---|---------|----------|--------|
+| 2 | Shell injection in `setup_headless.sh` heredoc | CRITICAL | **FIXED** — heredoc now quoted (`<< 'EOF'`), vars via environment |
+| 3 | XSS in web UI — missing `escapeHtml()` calls | CRITICAL | **FIXED** — `escapeHtml()` applied consistently in `app.js` and templates |
+| 4 | Zero authentication on web API | CRITICAL | **FIXED** — `_check_api_auth()` added with API key + basic auth, all API routes have `Depends(require_auth)` |
+| 6 | Thread safety — no locks on shared state | HIGH | **FIXED** — `MeshNetwork` now uses `threading.Lock()` in all public methods |
+| 7 | `asyncio.create_task()` from non-async threads | HIGH | **FIXED** — `_schedule_async()` and `_schedule_coroutine()` use `run_coroutine_threadsafe()` |
+| 9 | Position parsing `0 or latitudeI / 1e7` bug | MEDIUM | **FIXED** — explicit `None` checks replace `or` fallthrough |
+| 10 | `check_dependency()` incorrect package mapping | MEDIUM | **FIXED** — `_IMPORT_NAME_MAP` handles `paho-mqtt` -> `paho`, etc. |
+| 12 | `detect_connection_type()` mutating config | MEDIUM | **FIXED** — no longer sets `demo_mode` as side effect |
+| 13 | `--break-system-packages` pip flag in wrong position | MEDIUM | **FIXED** — `get_pip_install_flags()` returns flags separately |
+| 14 | Nodes page refresh calling wrong function | MEDIUM | **FIXED** — `refreshNodes()` now calls `updateFullNodesTable()` |
+| 15 | Dead WebSocket connections accumulating | MEDIUM | **FIXED** — `broadcast()` now collects and removes dead connections |
+| 16 | Config file written without restrictive permissions | MEDIUM | **FIXED** — `os.chmod(path, 0o600)` added in `config.py:203` and `mesh_client.py` |
+| 18 | Dead `json` import in `mesh_client.py` | LOW | **FIXED** — removed |
+| 20 | Silent exception swallowing in message filters | LOW | **FIXED** — now logs filter errors |
+| 23 | `.gitignore` missing `.venv/` | LOW | **FIXED** — `.venv/` now present in `.gitignore:9` |
+| 25 | Error messages leaking internal state over mesh | LOW | **FIXED** — generic error messages returned to users |
 
 ---
 
-## Medium Findings
+## Remaining Open Findings (9 from original review)
 
-### 9. Position parsing bugs
+### CRITICAL — 1 remaining
 
-**`meshtastic_api.py:356-357` and `mqtt_client.py:291-292`:**
+#### [R1] Web server binds `0.0.0.0` by default (was Finding #17)
 
-```python
-latitude=pos_data.get("latitude", 0) or pos_data.get("latitudeI", 0) / 1e7,
+**File:** `mesh_client.py:329`
+
+```
+web_host = 0.0.0.0
 ```
 
-- If `latitude` is `0` (the equator), the `or` expression falls through to `latitudeI / 1e7`
-- Latitude 0.0 and longitude 0.0 are valid coordinates that will never be correctly reported
+`setup_headless.sh:289` was fixed to default to `127.0.0.1`, but the main client config template in `mesh_client.py:329` still defaults to `0.0.0.0`. Combined with auth being disabled by default (`web_auth_enabled = false` at line 314), the web API is still network-exposed without authentication on a fresh install launched via `mesh_client.py`.
 
-### 10. `check_dependency()` incorrect package name mapping
-
-`mesh_client.py:157` — The function converts package names with `replace("-", "_")`, but:
-- `paho-mqtt` imports as `paho.mqtt.client`, not `paho_mqtt`
-- `python-multipart` imports as `multipart`, not `python_multipart`
-
-This causes these packages to always appear "missing" and triggers reinstallation on every launch.
-
-### 11. Dead code in "both" mode
-
-`mesh_client.py:655-659` — A shared `api` object is created but never passed to either `WebApplication` or `MeshingAroundTUI`. Both create their own connection internally. The shared API is dead code.
-
-### 12. `detect_connection_type()` has side effects
-
-`mesh_client.py:500-502` — A "detection" function mutates the config object by setting `demo_mode = true`. This is surprising behavior that can cause bugs if the function is called more than once.
-
-### 13. `--break-system-packages` pip flag in wrong position
-
-`configure_bot.py:336` — `get_pip_command()` returns `['pip3', '--break-system-packages']`, placing the flag before the subcommand. The correct position is after `install`.
-
-### 14. Nodes page refresh calls wrong function
-
-`web/templates/nodes.html:60` — `refreshNodes()` calls `updateNodesTable()` (dashboard summary) instead of `updateFullNodesTable()` (full nodes page). The refresh button on the nodes page appears to do nothing.
-
-### 15. Dead WebSocket connections accumulate
-
-`web/app.py:90-95` — Failed `send_json()` calls catch the exception but never remove the dead connection from `active_connections`. Over long sessions, this is a memory/resource leak.
-
-### 16. Config file permission gap
-
-Config files containing credentials (`mesh_client.ini`) are written with default umask permissions. No `os.chmod(path, 0o600)` call restricts access.
-
-### 17. Web server binds `0.0.0.0` by default
-
-Both `mesh_client.py:320` and `setup_headless.sh:275` default to binding on all interfaces with authentication disabled. This should default to `127.0.0.1`.
+**Severity:** CRITICAL (auth disabled + network-exposed = unauthenticated remote access)
+**Fix:** Change `mesh_client.py:329` to `web_host = 127.0.0.1`
 
 ---
 
-## Low Findings
+### HIGH — 1 remaining
 
-### 18. Dead imports
+#### [R2] TUI exits immediately without Rich — no fallback (was Finding #8)
 
-| File | Import | Status |
-|------|--------|--------|
-| `mesh_client.py:32` | `json` | Never used |
-| `message_handler.py:7` | `re` | Never used |
-| `message_handler.py:8` | `asyncio` | Never used |
+**File:** `tui/app.py:801-809`
 
-### 19. Broad `except Exception` (violates project style guide)
+```python
+if not RICH_AVAILABLE:
+    print("Error: 'rich' library not found.")
+    ...
+    sys.exit(1)
+```
 
-The CLAUDE.md says "No bare `except:` — Always use specific exception types." While there are no bare `except:` clauses, many places use `except Exception` where `except OSError` or more specific types would be correct:
+The CLAUDE.md project guidelines explicitly require: *"Rich Library Fallback — UI must work without Rich installed. Provide plain-text fallback for all UI elements."* The TUI still `sys.exit(1)`s without Rich. The message helpfully suggests `--web` as an alternative, but does not meet the documented requirement.
 
-- `mesh_client.py:78, 118, 598`
-- `tui/app.py:834`
-- `configure_bot.py:100, 2249`
-- `message_handler.py:158, 211`
+**Severity:** HIGH (violates project's own design requirements)
 
-### 20. Silent exception swallowing in message filters
+---
 
-`message_handler.py:158-160` — Filter exceptions are silently passed, meaning broken filters never block messages. This fail-open behavior could be a security concern.
+### MEDIUM — 3 remaining
 
-### 21. DRY violations
+#### [R3] Hardcoded MQTT credentials as fallback defaults (was Finding #5)
 
-- `mesh_client.py:568` writes config inline instead of calling `save_config()`
+**Files:** `mqtt_client.py:43-44`, `connection_manager.py:239-240`, `mesh_client.py:298-299`
+
+The public Meshtastic broker credentials (`meshdev`/`large4cats`) are hardcoded in three locations. While these are well-known public credentials, hardcoding them normalizes a dangerous pattern. Config file permissions are now properly restricted (Finding #16 fixed), which mitigates the risk for user-overridden credentials.
+
+**Severity:** MEDIUM (reduced from HIGH — config permissions now set)
+
+#### [R4] Dead code in "both" mode (was Finding #11)
+
+**File:** `mesh_client.py:655-679`
+
+When running in `both` mode, a shared `MeshtasticAPI` instance is created but never passed to either `WebApplication` or `MeshingAroundTUI`. Both create their own connections internally. The shared API is dead code.
+
+**Severity:** MEDIUM
+
+#### [R5] `configure_bot.py` MQTT import fails silently
+
+**File:** `configure_bot.py:100-102`
+
+```python
+try:
+    import paho.mqtt.client as mqtt
+except ImportError:
+    ...
+```
+
+The import failure is caught but execution continues. Later code referencing `mqtt` will crash with `NameError`. The function should either guard all MQTT usage or exit with a clear message.
+
+**Severity:** MEDIUM
+
+---
+
+### LOW — 4 remaining
+
+#### [R6] Broad `except Exception` (was Finding #19)
+
+Multiple files use `except Exception` where more specific types (`OSError`, `ConnectionError`, `ValueError`) would be appropriate per the project style guide:
+
+| File | Line(s) |
+|------|---------|
+| `mesh_client.py` | 78, 118, 598 |
+| `tui/app.py` | 837 |
+| `configure_bot.py` | 100, 2249 |
+
+**Severity:** LOW (logging is now present, but exception types remain broad)
+
+#### [R7] DRY violations (was Finding #21)
+
 - `tui/app.py` duplicates battery/SNR rendering logic between `DashboardScreen` and `NodesScreen`
 - `tui/app.py` duplicates severity-to-color mappings between `DashboardScreen` and `AlertsScreen`
-- `configure_bot.py` duplicates `apt update/upgrade` logic between `system_update()` and `startup_system_check()`
 
-### 22. `QUICK_REFERENCE.md` is stale
+**Severity:** LOW
 
-- References old repo name `meshing_around_config`
-- Lists non-existent file `GITHUB_SETUP_GUIDE.md`
-- Says Python 3.6+ but project requires 3.8+
+#### [R8] QUICK_REFERENCE.md is stale (was Finding #22)
 
-### 23. `.gitignore` missing `.venv/`
+- Lists only 6 files from the original repo; doesn't mention `mesh_client.py`, `setup_headless.sh`, `tui/`, `web/`, or any `core/` modules
+- Says "configure_bot.py (18KB)" — it's now 79KB
+- File sizes and descriptions are outdated
 
-`setup_headless.sh` creates `.venv/` (with a dot prefix), but `.gitignore` only excludes `venv/` (no dot). Running `git add .` after headless setup would track the entire virtual environment.
+**Severity:** LOW
 
-### 24. TUI render loop performance
+#### [R9] TUI render loop inefficiency (was Finding #24, partially fixed)
 
-`tui/app.py:665-670` — The render loop runs at 10Hz (`sleep(0.1)`) while `Rich.Live` refreshes at 2Hz. This wastes ~80% of render calls. The `run_interactive()` method at line 726 also clears and re-renders the full screen every 500ms causing visible flicker.
+`tui/app.py` — `run_interactive()` at line 726 still clears and re-renders the full screen every 500ms, causing visible flicker on slower terminals.
 
-### 25. Error message leaks internal state
+**Severity:** LOW
 
-`message_handler.py:180` — Exception messages (possibly containing file paths and stack traces) are sent back to users over the mesh network via `CommandResponse`.
+---
+
+## New Findings (7)
+
+### HIGH — 2 new
+
+#### [N1] WebSocket endpoint has no authentication
+
+**File:** `web/app.py:400-430`
+
+The `/ws` WebSocket endpoint does not call `_check_api_auth()` or `require_auth`. Even when `enable_auth = true`, any client can connect to the WebSocket and receive all real-time mesh data (messages, node updates, alerts) and send messages. The REST API is properly gated but the WebSocket bypasses all auth checks.
+
+**Severity:** HIGH
+**Fix:** Validate auth credentials during WebSocket handshake (e.g., check query param `?api_key=...` or subprotocol header before `accept()`).
+
+#### [N2] `_schedule_async` has a race condition on initial startup
+
+**File:** `web/app.py:183-191` and `195`
+
+```python
+def _schedule_async(self, coro):
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(coro)
+    except RuntimeError:
+        if self._event_loop:
+            asyncio.run_coroutine_threadsafe(coro, self._event_loop)
+```
+
+`self._event_loop` is set to `None` in `_register_callbacks()` at line 195, then set to the actual loop in the lifespan handler at line 149. If an MQTT/Meshtastic callback fires between object creation and the lifespan startup completing, `self._event_loop` is `None` and the coroutine is silently dropped. Additionally, `_register_callbacks()` defines its own `_schedule_coroutine()` helper (line 197-201) that duplicates `_schedule_async()` but is never called.
+
+**Severity:** HIGH
+**Fix:** Buffer coroutines until the event loop is available, or defer callback registration to the lifespan startup.
+
+---
+
+### MEDIUM — 3 new
+
+#### [N3] `/api/config` endpoint should scrub sensitive fields
+
+**File:** `web/app.py:395-398`
+
+```python
+@app.get("/api/config", dependencies=[Depends(require_auth)])
+async def api_config():
+    return self.config.to_dict()
+```
+
+`Config.to_dict()` (`config.py:210-245`) currently does not include MQTT credentials (they live in the INI `[connection]` section parsed by `mesh_client.py`, not `Config`). However, if the config model is extended to include MQTT or other sensitive settings, they would be exposed via this endpoint. As a defense-in-depth measure, `to_dict()` should explicitly exclude fields like `api_key` and `password_hash`.
+
+**Severity:** MEDIUM
+
+#### [N4] `configure_bot_improved.py` is orphaned
+
+**Files:** `configure_bot_improved.py` (773 lines), `README_IMPROVEMENTS.md`, `UI_IMPROVEMENTS.md`
+
+An alternative version of the bot configurator exists alongside the main `configure_bot.py` with no clear status. `README_IMPROVEMENTS.md` says to copy it over the original (`cp configure_bot_improved.py configure_bot.py`) but this hasn't been done. Neither `mesh_client.py` nor `CLAUDE.md` reference it. This creates confusion about which file is canonical.
+
+**Severity:** MEDIUM (maintenance burden, user confusion)
+**Fix:** Either merge improvements into `configure_bot.py` and delete the `_improved` variant, or remove it from the repository.
+
+#### [N5] No CSRF protection on state-changing POST endpoints
+
+**File:** `web/app.py:375-393`
+
+The API endpoints `/api/connect`, `/api/disconnect`, `/api/messages/send` accept POST requests with JSON bodies. When auth is enabled, they use API key or Basic Auth but there are no CSRF tokens. The current auth mechanism (API key in header) is not vulnerable to CSRF since browsers don't automatically include custom headers. However, if cookie/session-based auth is ever added, CSRF would become exploitable.
+
+**Severity:** MEDIUM (latent — not exploitable with current auth scheme)
+
+---
+
+### LOW — 2 new
+
+#### [N6] `configure_bot.py` is 2,263 lines — should be decomposed
+
+**File:** `configure_bot.py` (79KB, 2,263 lines)
+
+This single file handles: system updates, dependency installation, MQTT configuration, email/SMS alert setup, 12 alert type configurations, INI file generation, and interactive wizards. At 79KB it is 3x larger than any other file in the project. Extracting alert configuration, dependency management, and system setup into separate modules would improve maintainability.
+
+**Severity:** LOW (functional but hard to maintain)
+
+#### [N7] Dead helper function in web callbacks
+
+**File:** `web/app.py:197-201`
+
+```python
+def _schedule_coroutine(coro):
+    """Safely schedule a coroutine from a sync callback thread."""
+    loop = self._event_loop
+    if loop and loop.is_running():
+        asyncio.run_coroutine_threadsafe(coro, loop)
+```
+
+This local function defined inside `_register_callbacks()` is never called. The callbacks at lines 203-225 all use `self._schedule_async()` instead.
+
+**Severity:** LOW (dead code)
 
 ---
 
 ## Documentation Issues
 
-| Issue | Location |
-|-------|----------|
-| `mesh_client.ini` referenced everywhere but not in repo | README.md, CLAUDE.md |
-| Config schema mismatch undocumented | `mesh_client.py` uses `[connection]`/`[features]`; `configure_bot.py` uses `[interface]`/`[general]` |
-| No security warnings about `0.0.0.0` binding | README.md |
-| `ALERT_CONFIG_README.md` links to parent project issues only | Should also link to MeshForge issues |
-| `README_IMPROVEMENTS.md` contains fabricated metrics | "User satisfaction +67%", "Visual appeal +200%" |
-| `config.enhanced.ini` never mentioned in CLAUDE.md | Users cannot find the config template |
+| Issue | Location | Status |
+|-------|----------|--------|
+| Config schema mismatch undocumented (`mesh_client.py` uses `[connection]`/`[features]`; `config.py` uses `[interface]`/`[general]`) | Multiple files | **Open** |
+| No security warning about default `0.0.0.0` binding | README.md | **Open** |
+| `QUICK_REFERENCE.md` is stale | `QUICK_REFERENCE.md` | **Open** |
+| `README_IMPROVEMENTS.md` contains fabricated metrics ("User satisfaction +67%") | `README_IMPROVEMENTS.md` | **Open** |
+| `config.enhanced.ini` never mentioned in CLAUDE.md | `CLAUDE.md` | **Open** |
+| `configure_bot_improved.py` status unclear | Multiple docs | **New** |
+| `Documentation/CLIENTS_README.md:132` still shows `web_host = 0.0.0.0` | `CLIENTS_README.md` | **New** |
+
+---
+
+## Architecture Observations
+
+### Positive
+
+1. **Zero-dependency bootstrap** — `mesh_client.py` starts with stdlib only and guides users through dependency installation. Well-executed pattern.
+2. **Clean data models** — `models.py` uses dataclasses with proper `to_dict()` serialization and now has thread-safe `MeshNetwork`.
+3. **Multi-mode connections** — The `ConnectionManager` abstraction handles serial, TCP, MQTT, BLE, and demo modes uniformly.
+4. **Auth implementation** — `web/app.py` uses constant-time comparison (`hmac.compare_digest`) for credential checks, avoiding timing attacks.
+5. **Shell script safety** — `setup_headless.sh` now uses quoted heredoc and environment variables for config generation, eliminating injection.
+
+### Concerns
+
+1. **Two config systems** — `mesh_client.py` manages its own INI with `[connection]`/`[features]`/`[alerts]` sections, while `core/config.py` reads `[interface]`/`[general]`/`[emergencyHandler]` sections. A config file generated by one cannot be fully consumed by the other.
+2. **No test coverage** — Zero tests, zero CI. Every fix from PRs #13/#14 was made without regression testing.
+3. **Dual bot configurators** — `configure_bot.py` (2,263 lines) and `configure_bot_improved.py` (773 lines) coexist with no clear delineation.
 
 ---
 
 ## Recommendations (Priority Order)
 
-1. **Add authentication middleware** to the web app — the config fields already exist, just implement the checks
-2. **Fix XSS** — apply `escapeHtml()` consistently to all user-controlled data in JavaScript
-3. **Quote the heredoc** in `setup_headless.sh` (`<< 'EOF'`) and pass user input via environment variables
-4. **Add threading locks** to `MeshNetwork` or use `queue.Queue` for cross-thread communication
-5. **Fix `asyncio.create_task`** in web callbacks to use `run_coroutine_threadsafe`
-6. **Default web bind to `127.0.0.1`** and require explicit opt-in for network exposure
-7. **Set `0o600` permissions** on config files after writing
-8. **Add a test suite** — the project has zero tests and no CI/CD
-9. **Fix `check_dependency()`** to handle `paho-mqtt` → `paho` and `python-multipart` → `multipart` mappings
-10. **Add `.venv/` to `.gitignore`**
-11. **Add a Rich-less fallback** for the TUI, or gracefully hand off to web mode
+### Must-fix before deployment
+
+1. **Change `mesh_client.py:329`** default `web_host` from `0.0.0.0` to `127.0.0.1` — [R1]
+2. **Add WebSocket authentication** — check API key or auth during WS handshake — [N1]
+3. **Fix `_schedule_async` startup race** — buffer or defer callbacks until event loop is ready — [N2]
+
+### Should-fix
+
+4. **Add a TUI fallback or graceful redirect** to web mode when Rich is unavailable — [R2]
+5. **Reconcile config systems** — unify `mesh_client.py` INI generation with `core/config.py` parsing
+6. **Remove or merge** `configure_bot_improved.py` — [N4]
+7. **Delete dead `_schedule_coroutine` function** in `web/app.py:197-201` — [N7]
+8. **Add basic smoke tests** — at minimum, test config loading, model serialization, and demo mode startup
+
+### Nice-to-have
+
+9. Decompose `configure_bot.py` into smaller modules — [N6]
+10. Update `QUICK_REFERENCE.md` with current file inventory — [R8]
+11. Narrow `except Exception` blocks to specific exception types — [R6]
+12. Add security warnings to README about `0.0.0.0` binding
 
 ---
 
 ## Overall Assessment
 
-MeshForge is an ambitious beta-stage companion toolkit with solid architecture choices (zero-dep bootstrap, multi-mode connection manager, TUI + web dual interface). The codebase is well-organized and the documentation is extensive.
+PRs #13 and #14 addressed the majority of critical and high-severity findings from the initial review. The shell injection, XSS, API authentication, and thread safety issues are all resolved. The codebase is materially more secure than before.
 
-However, the rapid development pace has left significant security gaps — particularly the unauthenticated web API bound to all interfaces and pervasive XSS vulnerabilities. The shell injection in `setup_headless.sh` is the single most dangerous issue. Thread safety is another systemic concern given the multi-threaded architecture.
+The remaining critical issue is the `0.0.0.0` default bind address combined with auth-disabled-by-default in `mesh_client.py`, and the unauthenticated WebSocket endpoint. These represent the highest-priority fixes needed before any network-facing deployment.
 
-The complete absence of tests and CI/CD means these issues have no automated safety net. Adding even basic smoke tests would catch regressions as development continues.
+The dual config system (`mesh_client.py` vs `core/config.py`) is the most impactful architectural debt — it means the headless setup script and the core library disagree on config format, creating a confusing experience for users who edit the INI manually.
 
-For a v0.1.0-beta, the foundation is reasonable, but the security issues should be addressed before any broader deployment.
+For a 0.1.0-beta, the project has made significant progress. The three must-fix items above would bring it to a defensible security posture for LAN-only use.
