@@ -36,7 +36,7 @@ class AlertConfig:
 @dataclass
 class WebConfig:
     """Web client configuration."""
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
     debug: bool = False
     api_key: str = ""
@@ -125,7 +125,7 @@ class Config:
 
             # Web
             if self._parser.has_section('web'):
-                self.web.host = self._parser.get('web', 'host', fallback='0.0.0.0')
+                self.web.host = self._parser.get('web', 'host', fallback='127.0.0.1')
                 self.web.port = self._parser.getint('web', 'port', fallback=8080)
                 self.web.debug = self._parser.getboolean('web', 'debug', fallback=False)
                 self.web.api_key = self._parser.get('web', 'api_key', fallback='')
@@ -199,6 +199,8 @@ class Config:
             if self.config_path:
                 with open(self.config_path, 'w') as f:
                     self._parser.write(f)
+                # Restrict permissions — config may contain credentials
+                os.chmod(self.config_path, 0o600)
 
             return True
         except Exception as e:

@@ -57,11 +57,11 @@ document.addEventListener('DOMContentLoaded', function() {
 function refreshNodes() {
     fetch('/api/nodes')
         .then(r => r.json())
-        .then(data => updateNodesTable(data.nodes));
+        .then(data => updateFullNodesTable(data.nodes));
 }
 
 function showNodeDetails(nodeId) {
-    fetch(`/api/nodes/${nodeId}`)
+    fetch(`/api/nodes/${encodeURIComponent(nodeId)}`)
         .then(r => r.json())
         .then(node => {
             document.getElementById('modal-node-name').textContent = node.display_name;
@@ -69,23 +69,23 @@ function showNodeDetails(nodeId) {
                 <div class="detail-grid">
                     <div class="detail-item">
                         <span class="detail-label">Node ID</span>
-                        <span class="detail-value">${node.node_id}</span>
+                        <span class="detail-value">${escapeHtml(node.node_id)}</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">Node Number</span>
-                        <span class="detail-value">${node.node_num}</span>
+                        <span class="detail-value">${escapeHtml(String(node.node_num))}</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">Hardware</span>
-                        <span class="detail-value">${node.hardware_model}</span>
+                        <span class="detail-value">${escapeHtml(node.hardware_model)}</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">Role</span>
-                        <span class="detail-value">${node.role}</span>
+                        <span class="detail-value">${escapeHtml(node.role)}</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">Last Heard</span>
-                        <span class="detail-value">${node.time_since_heard}</span>
+                        <span class="detail-value">${escapeHtml(node.time_since_heard)}</span>
                     </div>
                     <div class="detail-item">
                         <span class="detail-label">Battery</span>

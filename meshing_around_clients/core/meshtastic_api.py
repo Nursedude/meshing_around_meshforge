@@ -317,7 +317,7 @@ class MeshtasticAPI:
             text=text,
             message_type=MessageType.TEXT,
             timestamp=datetime.now(),
-            hop_count=packet.get('hopLimit', 0) - packet.get('hopStart', 0),
+            hop_count=packet.get('hopStart', 0) - packet.get('hopLimit', 0),
             snr=packet.get('snr', 0.0),
             rssi=packet.get('rssi', 0),
             is_incoming=True
@@ -352,9 +352,17 @@ class MeshtasticAPI:
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
+            lat = position_data.get('latitude')
+            if lat is None:
+                lat_i = position_data.get('latitudeI', 0)
+                lat = lat_i / 1e7 if lat_i else 0.0
+            lon = position_data.get('longitude')
+            if lon is None:
+                lon_i = position_data.get('longitudeI', 0)
+                lon = lon_i / 1e7 if lon_i else 0.0
             node.position = Position(
-                latitude=position_data.get('latitude', 0.0) / 1e7 if position_data.get('latitudeI') else position_data.get('latitude', 0.0),
-                longitude=position_data.get('longitude', 0.0) / 1e7 if position_data.get('longitudeI') else position_data.get('longitude', 0.0),
+                latitude=lat,
+                longitude=lon,
                 altitude=position_data.get('altitude', 0),
                 time=datetime.now()
             )
@@ -534,7 +542,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
             ("!def67890", 0xDEF67890, "Mobile1", "Field Unit Alpha", "TLORA"),
             ("!fed98765", 0xFED98765, "Relay", "Mountain Repeater", "HELTEC"),
             ("!123abcde", 0x123ABCDE, "Solar1", "Solar Powered Node", "RAK4631"),
-            ("!456fghij", 0x456FGHIJ, "Router", "Community Router", "TBEAM"),
+            ("!456f0e1a", 0x456F0E1A, "Router", "Community Router", "TBEAM"),
         ]
 
         for node_id, node_num, short, long, hw in demo_nodes:

@@ -236,44 +236,58 @@ configure_interface() {
 generate_config() {
     log_info "Generating configuration file..."
 
-    # Run Python to generate config with our settings
-    python3 << EOF
+    # Export variables for safe use in Python (avoids shell injection via heredoc)
+    export _CFG_CONN_TYPE="$CONN_TYPE"
+    export _CFG_TCP_HOST="${TCP_HOST:-}"
+    export _CFG_MQTT_ENABLED="$( [ "$CONN_TYPE" = "mqtt" ] && echo "true" || echo "false" )"
+    export _CFG_MQTT_BROKER="${MQTT_BROKER:-mqtt.meshtastic.org}"
+    export _CFG_MQTT_TOPIC="${MQTT_TOPIC:-msh/US}"
+    export _CFG_MESHTASTIC_ENABLED="$( [ "$INSTALL_MESHTASTIC" = true ] && echo "true" || echo "false" )"
+    export _CFG_INTERFACE_MODE="$INTERFACE_MODE"
+    export _CFG_WEB_SERVER="$( [ "$INTERFACE_MODE" = "web" ] || [ "$INTERFACE_MODE" = "both" ] && echo "true" || echo "false" )"
+    export _CFG_WEB_PORT="${WEB_PORT:-8080}"
+    export _CFG_CONFIG_FILE="$CONFIG_FILE"
+
+    # Run Python with quoted heredoc to prevent shell interpolation
+    python3 << 'EOF'
 import configparser
+import os
+
 config = configparser.ConfigParser()
 
 # Connection
 config['connection'] = {
-    'type': '$CONN_TYPE',
+    'type': os.environ.get('_CFG_CONN_TYPE', 'serial'),
     'serial_port': 'auto',
     'serial_baud': '115200',
-    'tcp_host': '${TCP_HOST:-}',
+    'tcp_host': os.environ.get('_CFG_TCP_HOST', ''),
     'tcp_port': '4403',
-    'mqtt_enabled': '$( [ "$CONN_TYPE" = "mqtt" ] && echo "true" || echo "false" )',
-    'mqtt_broker': '${MQTT_BROKER:-mqtt.meshtastic.org}',
+    'mqtt_enabled': os.environ.get('_CFG_MQTT_ENABLED', 'false'),
+    'mqtt_broker': os.environ.get('_CFG_MQTT_BROKER', 'mqtt.meshtastic.org'),
     'mqtt_port': '1883',
     'mqtt_use_tls': 'false',
     'mqtt_username': 'meshdev',
     'mqtt_password': 'large4cats',
-    'mqtt_topic_root': '${MQTT_TOPIC:-msh/US}',
+    'mqtt_topic_root': os.environ.get('_CFG_MQTT_TOPIC', 'msh/US'),
     'mqtt_channel': 'LongFast',
     'mqtt_node_id': '',
     'ble_address': '',
     'auto_reconnect': 'true',
     'reconnect_delay': '5',
     'connection_timeout': '30',
-    'meshtastic_enabled': '$( [ "$INSTALL_MESHTASTIC" = true ] && echo "true" || echo "false" )',
+    'meshtastic_enabled': os.environ.get('_CFG_MESHTASTIC_ENABLED', 'false'),
 }
 
 # Features
 config['features'] = {
-    'mode': '$INTERFACE_MODE',
+    'mode': os.environ.get('_CFG_INTERFACE_MODE', 'tui'),
     'tui_enabled': 'true',
     'tui_refresh_rate': '1.0',
     'tui_mouse_support': 'false',
     'tui_color_scheme': 'default',
-    'web_server': '$( [ "$INTERFACE_MODE" = "web" ] || [ "$INTERFACE_MODE" = "both" ] && echo "true" || echo "false" )',
-    'web_host': '0.0.0.0',
-    'web_port': '${WEB_PORT:-8080}',
+    'web_server': os.environ.get('_CFG_WEB_SERVER', 'false'),
+    'web_host': '127.0.0.1',
+    'web_port': os.environ.get('_CFG_WEB_PORT', '8080'),
     'web_api_enabled': 'true',
     'web_auth_enabled': 'false',
     'web_username': 'admin',
@@ -347,10 +361,12 @@ config['advanced'] = {
     'verbose': 'false',
 }
 
-with open('$CONFIG_FILE', 'w') as f:
+config_file = os.environ.get('_CFG_CONFIG_FILE', 'mesh_client.ini')
+with open(config_file, 'w') as f:
     config.write(f)
+os.chmod(config_file, 0o600)
 
-print("Configuration saved to $CONFIG_FILE")
+print(f"Configuration saved to {config_file}")
 EOF
 
     log_ok "Configuration file created"

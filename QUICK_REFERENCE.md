@@ -2,9 +2,9 @@
 
 ## Repository Details
 
-- **Repository Name**: `meshing_around_config`
-- **GitHub URL**: `https://github.com/nursedude/meshing_around_config`
-- **Description**: Enhanced alert configuration and interactive setup tool for meshing-around Meshtastic bot
+- **Repository Name**: `meshing_around_meshforge`
+- **GitHub URL**: `https://github.com/Nursedude/meshing_around_meshforge`
+- **Description**: MeshForge — companion toolkit for meshing-around with TUI/Web clients, config wizards, and headless deployment
 - **License**: GPL-3.0
 
 ## Files Included
@@ -32,34 +32,21 @@
 5. **LICENSE** (695 bytes)
    - GPL-3.0 license text
 
-6. **gitignore** (399 bytes)
-   - Rename to `.gitignore` before committing
-   - Excludes config files, logs, etc.
-
-7. **GITHUB_SETUP_GUIDE.md** (4.9KB)
-   - Step-by-step repository creation
-   - Multiple methods (CLI, web, gh)
-   - Troubleshooting tips
+6. **.gitignore** (399 bytes)
+   - Excludes config files, logs, virtual environments, etc.
 
 ## Quick Setup Commands
 
 ```bash
-# Download all files from outputs
-# Create directory
-mkdir meshing_around_config
-cd meshing_around_config
+# Clone the repo
+git clone https://github.com/Nursedude/meshing_around_meshforge.git
+cd meshing_around_meshforge
 
-# Move downloaded files here
-# Rename gitignore to .gitignore
-mv gitignore .gitignore
+# Run the client (auto-detects mode)
+python3 mesh_client.py
 
-# Initialize and push
-git init
-git add .
-git commit -m "Initial commit: Enhanced alert configuration system"
-git remote add origin https://github.com/nursedude/meshing_around_config.git
-git branch -M main
-git push -u origin main
+# Demo mode (no hardware needed)
+python3 mesh_client.py --demo
 ```
 
 ## Repository Features
@@ -77,14 +64,14 @@ git push -u origin main
 
 ```bash
 # Clone the repo
-git clone https://github.com/nursedude/meshing_around_config.git
-cd meshing_around_config
+git clone https://github.com/Nursedude/meshing_around_meshforge.git
+cd meshing_around_meshforge
 
 # Run configurator
 python3 configure_bot.py
 
-# Copy config to meshing-around
-cp config.ini /path/to/meshing-around/
+# Or run the mesh client
+python3 mesh_client.py --setup
 ```
 
 ## Topics to Add (GitHub Settings)
@@ -102,7 +89,7 @@ cp config.ini /path/to/meshing-around/
 
 ```markdown
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Python 3.6+](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Meshtastic](https://img.shields.io/badge/Meshtastic-Compatible-green.svg)](https://meshtastic.org/)
 ```
 

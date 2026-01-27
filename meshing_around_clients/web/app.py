@@ -39,6 +39,10 @@ except ImportError:
     print("  or run: python3 mesh_client.py --install-deps")
     sys.exit(1)
 
+import hashlib
+import hmac
+import secrets
+
 from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,
     Node, Message, Alert, MeshNetwork
@@ -87,12 +91,14 @@ class ConnectionManager:
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients."""
+        dead_connections = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except (WebSocketDisconnect, RuntimeError, ConnectionError):
-                # Client disconnected or connection closed
-                pass
+                dead_connections.append(connection)
+        for dead in dead_connections:
+            self.disconnect(dead)
 
     async def broadcast_update(self, update_type: str, data: dict):
         """Broadcast an update event."""
@@ -125,6 +131,9 @@ class WebApplication:
         # WebSocket manager
         self.ws_manager = ConnectionManager()
 
+        # Event loop reference for cross-thread async scheduling
+        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+
         # Create FastAPI app
         self.app = self._create_app()
 
@@ -136,11 +145,13 @@ class WebApplication:
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
-            # Startup
+            # Startup — capture event loop for cross-thread async scheduling
+            self._event_loop = asyncio.get_running_loop()
             if self.demo_mode:
                 self.api.connect()
             yield
             # Shutdown
+            self._event_loop = None
             self.api.disconnect()
 
         app = FastAPI(
@@ -169,23 +180,33 @@ class WebApplication:
 
         return app
 
+    def _schedule_async(self, coro):
+        """Safely schedule a coroutine from any thread."""
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(coro)
+        except RuntimeError:
+            # Called from a non-async thread — use thread-safe scheduling
+            if self._event_loop:
+                asyncio.run_coroutine_threadsafe(coro, self._event_loop)
+
     def _register_callbacks(self):
         """Register API callbacks for real-time updates."""
 
         def on_message(message: Message):
-            asyncio.create_task(
+            self._schedule_async(
                 self.ws_manager.broadcast_update("message", message.to_dict())
             )
 
         def on_alert(alert: Alert):
-            asyncio.create_task(
+            self._schedule_async(
                 self.ws_manager.broadcast_update("alert", alert.to_dict())
             )
 
         def on_node_update(node_id: str, is_new: bool):
             node = self.api.network.nodes.get(node_id)
             if node:
-                asyncio.create_task(
+                self._schedule_async(
                     self.ws_manager.broadcast_update(
                         "node_new" if is_new else "node_update",
                         node.to_dict()
@@ -196,8 +217,37 @@ class WebApplication:
         self.api.register_callback("on_alert", on_alert)
         self.api.register_callback("on_node_update", on_node_update)
 
+    def _check_api_auth(self, request: Request) -> None:
+        """Check API authentication if enabled in config."""
+        if not self.config.web.enable_auth:
+            return
+        # Check API key in header or query param
+        api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        if self.config.web.api_key and api_key:
+            if hmac.compare_digest(api_key, self.config.web.api_key):
+                return
+        # Check basic auth via username/password_hash
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Basic "):
+            import base64
+            try:
+                decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                username, password = decoded.split(":", 1)
+                pw_hash = hashlib.sha256(password.encode()).hexdigest()
+                if (hmac.compare_digest(username, self.config.web.username) and
+                        self.config.web.password_hash and
+                        hmac.compare_digest(pw_hash, self.config.web.password_hash)):
+                    return
+            except (ValueError, UnicodeDecodeError):
+                pass
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     def _register_routes(self, app: FastAPI, templates):
         """Register all routes."""
+
+        # Auth dependency for API routes
+        async def require_auth(request: Request):
+            self._check_api_auth(request)
 
         # ==================== HTML Routes ====================
 
@@ -293,7 +343,7 @@ class WebApplication:
                 "total": len(messages)
             }
 
-        @app.post("/api/messages/send")
+        @app.post("/api/messages/send", dependencies=[Depends(require_auth)])
         async def api_send_message(request: SendMessageRequest):
             """Send a message."""
             success = self.api.send_message(
@@ -315,7 +365,7 @@ class WebApplication:
                 "unread": len(self.api.network.unread_alerts)
             }
 
-        @app.post("/api/alerts/acknowledge")
+        @app.post("/api/alerts/acknowledge", dependencies=[Depends(require_auth)])
         async def api_acknowledge_alert(request: AlertAcknowledgeRequest):
             """Acknowledge an alert."""
             success = self.api.acknowledge_alert(request.alert_id)
@@ -323,19 +373,19 @@ class WebApplication:
                 return {"status": "acknowledged", "alert_id": request.alert_id}
             raise HTTPException(status_code=404, detail="Alert not found")
 
-        @app.post("/api/connect")
+        @app.post("/api/connect", dependencies=[Depends(require_auth)])
         async def api_connect():
             """Connect to device."""
             success = self.api.connect()
             return {"status": "connected" if success else "failed"}
 
-        @app.post("/api/disconnect")
+        @app.post("/api/disconnect", dependencies=[Depends(require_auth)])
         async def api_disconnect():
             """Disconnect from device."""
             self.api.disconnect()
             return {"status": "disconnected"}
 
-        @app.get("/api/config")
+        @app.get("/api/config", dependencies=[Depends(require_auth)])
         async def api_config():
             """Get current configuration."""
             return self.config.to_dict()
@@ -466,6 +516,13 @@ class WebApplication:
     <script>
         let ws;
 
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
         function connect() {
             ws = new WebSocket(`ws://${window.location.host}/ws`);
 
@@ -511,7 +568,7 @@ class WebApplication:
             Object.values(data.nodes || {}).slice(0, 10).forEach(node => {
                 const div = document.createElement('div');
                 div.className = 'node';
-                div.innerHTML = `<strong>${node.display_name}</strong> - ${node.time_since_heard}`;
+                div.innerHTML = `<strong>${escapeHtml(node.display_name)}</strong> - ${escapeHtml(node.time_since_heard)}`;
                 nodesDiv.appendChild(div);
             });
 
@@ -538,7 +595,7 @@ class WebApplication:
         function addMessageElement(container, msg, prepend = false) {
             const div = document.createElement('div');
             div.className = 'message';
-            div.innerHTML = `<span class="time">${msg.time_formatted}</span> <span class="sender">${msg.sender_name || msg.sender_id}</span>: ${msg.text}`;
+            div.innerHTML = `<span class="time">${escapeHtml(msg.time_formatted)}</span> <span class="sender">${escapeHtml(msg.sender_name || msg.sender_id)}</span>: ${escapeHtml(msg.text)}`;
             if (prepend) {
                 container.insertBefore(div, container.firstChild);
             } else {
@@ -556,7 +613,7 @@ class WebApplication:
         function addAlertElement(container, alert, prepend = false) {
             const div = document.createElement('div');
             div.className = `alert severity-${alert.severity}`;
-            div.innerHTML = `<strong>${alert.title}</strong><br>${alert.message}`;
+            div.innerHTML = `<strong>${escapeHtml(alert.title)}</strong><br>${escapeHtml(alert.message)}`;
             if (prepend) {
                 container.insertBefore(div, container.firstChild);
             } else {
@@ -595,7 +652,7 @@ class WebApplication:
 </html>
         """
 
-    def run(self, host: str = "0.0.0.0", port: int = 8080):
+    def run(self, host: str = "127.0.0.1", port: int = 8080):
         """Run the web application."""
         uvicorn.run(self.app, host=host, port=port)
 
@@ -611,7 +668,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Meshing-Around Web Client")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8080, help="Port to listen on")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode without hardware")
     parser.add_argument("--config", type=str, help="Path to config file")

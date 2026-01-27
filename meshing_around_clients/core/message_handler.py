@@ -3,8 +3,8 @@ Message handler for Meshing-Around Clients.
 Provides message processing, command handling, and game integration.
 """
 
-import re
-import asyncio
+import logging
+import uuid
 from datetime import datetime
 from typing import Optional, Callable, Dict, List, Tuple, Any
 from dataclasses import dataclass
@@ -152,12 +152,13 @@ class MessageHandler:
     def process_message(self, message: Message) -> Optional[CommandResponse]:
         """Process a message and return a response if applicable."""
         # Run through filters
+        logger = logging.getLogger(__name__)
         for filter_func in self._message_filters:
             try:
                 if not filter_func(message):
                     return None
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Message filter %s raised an error: %s", filter_func.__name__, e)
 
         # Parse command
         parsed = self.parse_command(message, self.config.admin_nodes)
@@ -177,7 +178,9 @@ class MessageHandler:
             try:
                 return handler(parsed)
             except Exception as e:
-                return CommandResponse(text=f"Error: {str(e)}")
+                logger = logging.getLogger(__name__)
+                logger.error("Command handler error for %s: %s", parsed.command, e)
+                return CommandResponse(text="An internal error occurred.")
 
         return CommandResponse(text=f"Unknown command: {parsed.command}")
 
@@ -190,7 +193,6 @@ class MessageHandler:
             text_lower = message.text.lower()
             for keyword in self.config.alerts.emergency_keywords:
                 if keyword.lower() in text_lower:
-                    import uuid
                     alert = Alert(
                         id=str(uuid.uuid4()),
                         alert_type=AlertType.EMERGENCY,
@@ -204,13 +206,14 @@ class MessageHandler:
                     break
 
         # Run custom alert handlers
+        logger = logging.getLogger(__name__)
         for handler in self._alert_handlers:
             try:
                 custom_alert = handler(message)
                 if custom_alert:
                     alerts.append(custom_alert)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Alert handler %s raised an error: %s", handler.__name__, e)
 
         return alerts
 

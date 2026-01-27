@@ -40,11 +40,6 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    print("Error: 'rich' library not found.")
-    print("Please install it with: pip install rich")
-    print("  or: python3 -m pip install rich")
-    print("  or run: python3 mesh_client.py --install-deps")
-    sys.exit(1)
 
 from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,
@@ -663,11 +658,9 @@ class MeshingAroundTUI:
                 screen=True
             ) as live:
                 while self._running:
-                    # Update display
+                    # Update display — match Rich.Live refresh rate (2Hz = 0.5s)
                     live.update(self._render())
-
-                    # Check for input (non-blocking)
-                    time.sleep(0.1)
+                    time.sleep(0.5)
 
         except KeyboardInterrupt:
             pass
@@ -805,6 +798,16 @@ class MeshingAroundTUI:
 
 def main():
     """Main entry point for the TUI application."""
+    if not RICH_AVAILABLE:
+        print("Error: 'rich' library not found.")
+        print("The TUI requires the Rich library for terminal rendering.")
+        print("Please install it with: pip install rich")
+        print("  or: python3 -m pip install rich")
+        print("  or run: python3 mesh_client.py --install-deps")
+        print()
+        print("Alternatively, use the web interface: python3 mesh_client.py --web")
+        sys.exit(1)
+
     import argparse
 
     parser = argparse.ArgumentParser(description="Meshing-Around TUI Client")
@@ -831,7 +834,7 @@ def main():
     try:
         # Try interactive mode with keyboard input
         tui.run_interactive()
-    except Exception:
+    except (ImportError, OSError):
         # Fall back to basic mode
         tui.run()
 
