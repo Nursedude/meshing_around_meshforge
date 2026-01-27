@@ -326,7 +326,7 @@ tui_color_scheme = default
 
 # Web server settings
 web_server = false
-web_host = 0.0.0.0
+web_host = 127.0.0.1
 web_port = 8080
 web_api_enabled = true
 web_auth_enabled = false
@@ -701,7 +701,7 @@ def run_application(config: ConfigParser):
         log(f"Import error: {e}", "ERROR")
         log("Try running with --setup or --check", "INFO")
         return False
-    except Exception as e:
+    except (OSError, ConnectionError, RuntimeError, ValueError, TypeError) as e:
         log(f"Application error: {e}", "ERROR")
         import traceback
         traceback.print_exc()

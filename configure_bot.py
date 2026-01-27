@@ -97,7 +97,7 @@ def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: boo
     except FileNotFoundError:
         print_error(f"Command not found: {cmd[0]}")
         return -1, "", "Command not found"
-    except Exception as e:
+    except OSError as e:
         print_error(f"Command failed: {e}")
         return -1, "", str(e)
 
@@ -1416,13 +1416,15 @@ WantedBy=multi-user.target
         return False
 
     # Write service file
+    import tempfile
     service_path = Path(f"/etc/systemd/system/{service_name}.service")
-    temp_path = Path(f"/tmp/{service_name}.service")
 
+    temp_path = None
     try:
-        # Write to temp file first
-        with open(temp_path, 'w') as f:
-            f.write(service_content)
+        # Write to secure temp file (unpredictable path, restricted permissions)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.service', delete=False) as tf:
+            tf.write(service_content)
+            temp_path = Path(tf.name)
 
         # Copy to systemd directory with sudo
         ret, _, stderr = run_command(['cp', str(temp_path), str(service_path)], sudo=True)
@@ -1477,12 +1479,12 @@ Service management commands:
 
         return True
 
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         print_error(f"Failed to create service: {e}")
         return False
     finally:
         # Clean up temp file
-        if temp_path.exists():
+        if temp_path and temp_path.exists():
             temp_path.unlink()
 
 
@@ -1965,7 +1967,7 @@ def save_config(config: configparser.ConfigParser, config_file: str):
         with open(config_file, 'w') as f:
             config.write(f)
         print_success(f"\nConfiguration saved to {config_file}")
-    except Exception as e:
+    except OSError as e:
         print_error(f"Failed to save config: {e}")
         sys.exit(1)
 
@@ -2245,7 +2247,7 @@ def deploy_and_start(config_file: str, meshing_path: Path):
     try:
         shutil.copy(config_file, dest_config)
         print_success(f"Config deployed to {dest_config}")
-    except Exception as e:
+    except OSError as e:
         print_error(f"Failed to copy config: {e}")
         return
 
