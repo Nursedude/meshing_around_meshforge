@@ -133,6 +133,8 @@ class WebApplication:
 
         # Event loop reference for cross-thread async scheduling
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        # Buffer for coroutines scheduled before event loop is available
+        self._pending_coros: List = []
 
         # Create FastAPI app
         self.app = self._create_app()
@@ -147,6 +149,10 @@ class WebApplication:
         async def lifespan(app: FastAPI):
             # Startup — capture event loop for cross-thread async scheduling
             self._event_loop = asyncio.get_running_loop()
+            # Flush any coroutines that were buffered before the loop was ready
+            for coro in self._pending_coros:
+                self._event_loop.create_task(coro)
+            self._pending_coros.clear()
             if self.demo_mode:
                 self.api.connect()
             yield
@@ -181,24 +187,25 @@ class WebApplication:
         return app
 
     def _schedule_async(self, coro):
-        """Safely schedule a coroutine from any thread."""
+        """Safely schedule a coroutine from any thread.
+
+        If the event loop is not yet available (during startup),
+        the coroutine is buffered and will be flushed once the
+        lifespan startup completes.
+        """
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(coro)
         except RuntimeError:
             # Called from a non-async thread — use thread-safe scheduling
-            if self._event_loop:
+            if self._event_loop and self._event_loop.is_running():
                 asyncio.run_coroutine_threadsafe(coro, self._event_loop)
+            else:
+                # Event loop not ready yet — buffer for later
+                self._pending_coros.append(coro)
 
     def _register_callbacks(self):
         """Register API callbacks for real-time updates."""
-        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
-
-        def _schedule_coroutine(coro):
-            """Safely schedule a coroutine from a sync callback thread."""
-            loop = self._event_loop
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(coro, loop)
 
         def on_message(message: Message):
             self._schedule_async(
@@ -402,6 +409,31 @@ class WebApplication:
         @app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint for real-time updates."""
+            # Authenticate before accepting the connection
+            if self.config.web.enable_auth:
+                api_key = websocket.query_params.get("api_key")
+                auth_ok = False
+                if self.config.web.api_key and api_key:
+                    auth_ok = hmac.compare_digest(api_key, self.config.web.api_key)
+                if not auth_ok:
+                    # Check Authorization header (some WS clients support it)
+                    auth_header = websocket.headers.get("authorization", "")
+                    if auth_header.startswith("Basic "):
+                        import base64
+                        try:
+                            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                            username, password = decoded.split(":", 1)
+                            pw_hash = hashlib.sha256(password.encode()).hexdigest()
+                            if (hmac.compare_digest(username, self.config.web.username) and
+                                    self.config.web.password_hash and
+                                    hmac.compare_digest(pw_hash, self.config.web.password_hash)):
+                                auth_ok = True
+                        except (ValueError, UnicodeDecodeError):
+                            pass
+                if not auth_ok:
+                    await websocket.close(code=1008, reason="Unauthorized")
+                    return
+
             await self.ws_manager.connect(websocket)
             try:
                 # Send initial state
