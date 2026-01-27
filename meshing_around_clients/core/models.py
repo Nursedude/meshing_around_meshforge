@@ -302,6 +302,7 @@ class MeshNetwork:
     def add_message(self, message: Message, max_history: int = 1000) -> None:
         with self._lock:
             self.messages.append(message)
+            # Keep message history bounded
             if len(self.messages) > max_history:
                 self.messages = self.messages[-max_history:]
 

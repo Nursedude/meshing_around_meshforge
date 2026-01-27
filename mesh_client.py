@@ -158,6 +158,7 @@ _IMPORT_NAME_MAP = {
 }
 
 
+
 def check_dependency(package: str) -> bool:
     """Check if a Python package is installed."""
     try:
@@ -573,9 +574,7 @@ def interactive_setup():
         config.set("features", "web_port", port)
 
     # Save config with restrictive permissions
-    with open(CONFIG_FILE, 'w') as f:
-        config.write(f)
-    os.chmod(CONFIG_FILE, 0o600)
+    save_config(config)
 
     print(f"\n{Colors.GREEN}Configuration saved to {CONFIG_FILE}{Colors.RESET}")
     print("Run 'python3 mesh_client.py' to start the client.")
@@ -656,6 +655,8 @@ def run_application(config: ConfigParser):
 
         elif mode == "both":
             # Run web in background, TUI in foreground
+            # NOTE: WebApplication and MeshingAroundTUI each create their own
+            # API instances internally. A shared API is not yet supported.
             import threading
             from meshing_around_clients.web.app import WebApplication
             from meshing_around_clients.tui.app import MeshingAroundTUI

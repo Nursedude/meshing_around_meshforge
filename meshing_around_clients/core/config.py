@@ -141,7 +141,7 @@ class Config:
                 self.tui.alert_sound = self._parser.getboolean('tui', 'alert_sound', fallback=True)
 
             return True
-        except Exception as e:
+        except (configparser.Error, OSError) as e:
             print(f"Error loading config: {e}")
             return False
 
@@ -203,7 +203,7 @@ class Config:
                 os.chmod(self.config_path, 0o600)
 
             return True
-        except Exception as e:
+        except (configparser.Error, OSError) as e:
             print(f"Error saving config: {e}")
             return False
 
