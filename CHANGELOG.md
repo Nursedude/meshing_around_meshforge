@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **WebSocket Authentication** - Added token-based authentication for WebSocket connections
+- **Localhost-only Binding** - Web server now binds to 127.0.0.1 by default (configurable)
+- **Secure Temp Files** - Replaced predictable temp file paths with `tempfile.mkstemp()`
+- **Thread-safe Logging** - Added locks to prevent race conditions in log handlers
+- **Input Validation** - Hardened message handling and config parsing
+- **Connection Security** - Fixed race conditions in connection manager
+- **Proper Exception Handling** - Replaced broad exception catches with specific types
+
+### Fixed
+- Fixed 32+ code quality and security issues across 14 files (PRs #13, #14, #16)
+- Race condition in file logging handler
+- Potential security issues in default network bindings
+- Thread safety issues in message handler and connection manager
+- Memory leaks in long-running WebSocket connections
+
+### Changed
+- Comprehensive code review process established
+- Security hardening across all network-facing components
+
 ## [0.1.0-beta] - 2025-01-25
 
 > ⚠️ **Beta Release** - First public beta. Not fully tested.
