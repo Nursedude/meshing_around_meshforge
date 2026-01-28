@@ -6,7 +6,7 @@ Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-aroun
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 
-> ⚠️ **Beta Software** - This is early-stage code. Test thoroughly before deploying!
+> ⚠️ **Beta Software** - Security-hardened but still beta. Test thoroughly before deploying.
 
 ## Architecture Overview
 
@@ -282,6 +282,17 @@ graph LR
 - Dependencies auto-install on first run (or use `--install-deps`)
 - For serial: user in `dialout` group
 
+## Security
+
+MeshForge has undergone security hardening with 32+ issues fixed:
+
+- **Network Security** - Web server binds to localhost by default, WebSocket authentication
+- **Thread Safety** - Proper locking in logging, message handling, and connections
+- **Input Validation** - Hardened config parsing and message handling
+- **Secure Defaults** - No predictable temp files, specific exception handling
+
+See [CHANGELOG.md](CHANGELOG.md) for full details.
+
 ## Contributing
 
 PRs welcome! Please follow these principles:
@@ -290,6 +301,7 @@ PRs welcome! Please follow these principles:
 - **PEP 668** - Don't auto-install outside venv
 - **Rich fallback** - UI should work without Rich library
 - **INI config** - Keep everything configurable
+- **Security first** - Bind to localhost, validate input, use secure temp files
 
 ## Credits
 
