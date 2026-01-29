@@ -24,6 +24,8 @@ graph TB
         subgraph "Core Layer"
             CM[Connection Manager]
             MH[Message Handler]
+            AD[Alert Detector]
+            NM[Notification Manager]
             CFG[Config Manager]
         end
     end
@@ -33,6 +35,11 @@ graph TB
         TCP[TCP/IP]
         MQTT[MQTT Broker]
         BLE[Bluetooth LE]
+    end
+
+    subgraph "Notifications"
+        EMAIL[Email/SMTP]
+        SMS[SMS Gateway]
     end
 
     subgraph "External"
@@ -46,7 +53,12 @@ graph TB
     TUI --> CM
     WEB --> CM
     CM --> MH
+    CM --> AD
+    AD --> NM
     CM --> CFG
+
+    NM --> EMAIL
+    NM --> SMS
 
     CM --> SER
     CM --> TCP
@@ -64,6 +76,8 @@ graph TB
     style ML fill:#4a9eff,color:#fff
     style TUI fill:#9b59b6,color:#fff
     style WEB fill:#27ae60,color:#fff
+    style AD fill:#e67e22,color:#fff
+    style NM fill:#e74c3c,color:#fff
     style MESH fill:#e74c3c,color:#fff
 ```
 
@@ -203,6 +217,110 @@ This sets up:
 | `GET /api/messages` | Message history |
 | `POST /api/messages/send` | Send a message |
 
+## Bot Commands
+
+MeshForge includes a full command handler system for mesh bot interaction:
+
+| Command | Description |
+|---------|-------------|
+| `!ping` | Check bot connectivity (responds with pong) |
+| `!help` | List all available commands |
+| `!info` | Show bot/node information |
+| `!stats` | Display mesh statistics |
+| `!location [node]` | Get position info for a node |
+| `!weather <loc>` | Get weather (requires API config) |
+| `!bbs` | Bulletin board system - post/read messages |
+| `!mail` | Private messaging between nodes |
+| `!game <name>` | Play games (dopewars, blackjack, quiz, lemonade) |
+| `!admin` | Admin commands (restricted to admin nodes) |
+
+### BBS Subcommands
+```
+!bbs list          - List recent messages
+!bbs read <id>     - Read a specific message
+!bbs post <msg>    - Post a new message
+!bbs delete <id>   - Delete message (admin only)
+```
+
+### Mail Subcommands
+```
+!mail check              - Check for new mail
+!mail send <node> <msg>  - Send private message
+!mail read <id>          - Read a message
+```
+
+## Alert System
+
+MeshForge monitors your mesh and generates alerts:
+
+| Alert Type | Trigger | Severity |
+|------------|---------|----------|
+| **Emergency** | Keywords detected (911, SOS, HELP, MAYDAY) | Critical (4) |
+| **Disconnect** | Node not seen for configurable timeout | Medium (2) |
+| **Noisy Node** | Node exceeds message rate threshold | Medium (2) |
+| **Proximity** | Node enters/exits geofenced zone | Medium (2) |
+| **Battery** | Node battery below 20% | Medium (2) |
+| **New Node** | New node joins the mesh | Low (1) |
+| **SNR** | Signal quality drops below threshold | Low (1) |
+
+### Proximity Alerts (Geofencing)
+
+Uses haversine distance calculation for accurate geofencing:
+
+```python
+# Example: Alert when node enters 1km radius of home base
+zone = ProximityZone(
+    name="Home Base",
+    latitude=40.7128,
+    longitude=-74.0060,
+    radius_meters=1000,
+    alert_on_enter=True,
+    alert_on_exit=True
+)
+```
+
+## Notifications
+
+Get alerted via email or SMS when important events occur:
+
+### Email (SMTP)
+```ini
+[email_notifications]
+enabled = true
+smtp_server = smtp.gmail.com
+smtp_port = 587
+username = your@email.com
+from_address = your@email.com
+to_addresses = alert@email.com, backup@email.com
+```
+
+### SMS Gateways
+
+| Gateway Type | Description |
+|--------------|-------------|
+| `email` | Email-to-SMS (AT&T, Verizon, T-Mobile, etc.) |
+| `http` | Generic HTTP API gateway |
+| `twilio` | Twilio API |
+
+```ini
+[sms_notifications]
+enabled = true
+gateway_type = email
+carrier_gateway = txt.att.net
+phone_numbers = 5551234567, 5559876543
+```
+
+**Carrier Gateways:**
+- AT&T: `txt.att.net`
+- Verizon: `vtext.com`
+- T-Mobile: `tmomail.net`
+- Sprint: `messaging.sprintpcs.com`
+
+### Notification Features
+- **Rate limiting** - Prevent notification spam
+- **Quiet hours** - No notifications during sleep (e.g., 22:00-07:00)
+- **Severity filtering** - Only notify for important alerts
+
 ## How It Works
 
 ```mermaid
@@ -250,6 +368,8 @@ graph LR
         H[connection_manager.py]
         I[message_handler.py]
         J[models.py]
+        K[alert_detector.py]
+        L[notifications.py]
     end
 
     A --> D
@@ -259,10 +379,14 @@ graph LR
     D --> H
     D --> I
     D --> J
+    D --> K
+    D --> L
 
     style A fill:#4a9eff,color:#fff
     style B fill:#27ae60,color:#fff
     style C fill:#9b59b6,color:#fff
+    style K fill:#e67e22,color:#fff
+    style L fill:#e74c3c,color:#fff
 ```
 
 ```
@@ -272,6 +396,12 @@ graph LR
 ├── setup_headless.sh       # Pi/headless installer
 └── meshing_around_clients/ # TUI & Web apps
     ├── core/               # Shared code
+    │   ├── config.py           # Configuration management
+    │   ├── connection_manager.py # Multi-mode connections
+    │   ├── message_handler.py  # Bot commands & processing
+    │   ├── alert_detector.py   # Alert detection system
+    │   ├── notifications.py    # Email/SMS notifications
+    │   └── models.py           # Data models
     ├── tui/                # Terminal interface
     └── web/                # Web dashboard
 ```
