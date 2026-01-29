@@ -9,11 +9,13 @@ Supports multiple connection types:
 - BLE (Bluetooth)
 """
 
-from .models import Node, Message, Alert, MeshNetwork, NodeTelemetry
+from .models import Node, Message, Alert, MeshNetwork, NodeTelemetry, Position
 from .meshtastic_api import MeshtasticAPI, MockMeshtasticAPI
 from .message_handler import MessageHandler
 from .config import Config
 from .connection_manager import ConnectionManager, ConnectionType
+from .alert_detector import AlertDetector, AlertDetectorConfig, ProximityZone
+from .notifications import NotificationManager, NotificationConfig, EmailConfig, SMSConfig
 
 # MQTT is optional
 try:
@@ -25,8 +27,10 @@ except ImportError:
     MQTTConfig = None
 
 __all__ = [
-    'Node', 'Message', 'Alert', 'MeshNetwork', 'NodeTelemetry',
+    'Node', 'Message', 'Alert', 'MeshNetwork', 'NodeTelemetry', 'Position',
     'MeshtasticAPI', 'MockMeshtasticAPI', 'MessageHandler', 'Config',
     'ConnectionManager', 'ConnectionType',
+    'AlertDetector', 'AlertDetectorConfig', 'ProximityZone',
+    'NotificationManager', 'NotificationConfig', 'EmailConfig', 'SMSConfig',
     'MQTTMeshtasticClient', 'MQTTConfig', 'MQTT_AVAILABLE'
 ]

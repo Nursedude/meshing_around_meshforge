@@ -15,7 +15,7 @@ import asyncio
 import threading
 import time
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Callable
+from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -40,6 +40,25 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
+    # Provide stub classes for type hints when Rich is not available
+    Panel = Any  # type: ignore
+    Console = Any  # type: ignore
+    Table = Any  # type: ignore
+    Layout = Any  # type: ignore
+    Live = Any  # type: ignore
+    Text = Any  # type: ignore
+    Prompt = Any  # type: ignore
+    Confirm = Any  # type: ignore
+    Progress = Any  # type: ignore
+    SpinnerColumn = Any  # type: ignore
+    TextColumn = Any  # type: ignore
+    box = None  # type: ignore
+    Group = Any  # type: ignore
+    Align = Any  # type: ignore
+    Columns = Any  # type: ignore
+    Markdown = Any  # type: ignore
+    Syntax = Any  # type: ignore
+    Tree = Any  # type: ignore
 
 from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,

@@ -6,7 +6,7 @@ Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-aroun
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 
-> ⚠️ **Beta Software** - Security-hardened but still beta. Test thoroughly before deploying.
+> ⚠️ **UNSTABLE BETA** - This software is under active development and may contain bugs, incomplete features, or breaking changes. **Not recommended for production use.** Test thoroughly in isolated environments before any deployment. Features may change without notice between versions.
 
 ## Architecture Overview
 
