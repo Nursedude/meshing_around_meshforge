@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0-beta] - 2026-02-01
+
+> **Beta Release** - Significant improvements over 0.1.0. See Feature Status in README.
+
+### Added
+- **Alert Detection System** - Emergency keywords, proximity zones, battery alerts
+- **Notification Framework** - Email/SMTP support (untested), SMS gateway structure
+- **Command Handler** - Bot command parsing (!ping, !help, etc.)
+- **Mermaid Diagrams** - Architecture and feature status visualization in README
+- **Upstream Analysis** - Documented interoperability with meshing-around v1.9.9.x
+
+### Changed
+- **Honest Version Bump** - Version now reflects actual development state
+- **README Overhaul** - Feature status table, working/partial/untested indicators
+- **Architecture Docs** - Clear separation of working vs planned features
+
 ### Security
 - **WebSocket Authentication** - Added token-based authentication for WebSocket connections
 - **Localhost-only Binding** - Web server now binds to 127.0.0.1 by default (configurable)
@@ -23,9 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Thread safety issues in message handler and connection manager
 - Memory leaks in long-running WebSocket connections
 
-### Changed
-- Comprehensive code review process established
-- Security hardening across all network-facing components
+### Known Issues
+- Serial/TCP/BLE modes untested with real hardware
+- Web templates may have rendering issues
+- MQTT reconnection has limited retry logic
+- Email/SMS notifications not tested end-to-end
+- Single interface only (upstream supports 9)
 
 ## [0.1.0-beta] - 2025-01-25
 
@@ -73,5 +92,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/Nursedude/meshing_around_meshforge/compare/v0.1.0-beta...HEAD
+[Unreleased]: https://github.com/Nursedude/meshing_around_meshforge/compare/v0.5.0-beta...HEAD
+[0.5.0-beta]: https://github.com/Nursedude/meshing_around_meshforge/compare/v0.1.0-beta...v0.5.0-beta
 [0.1.0-beta]: https://github.com/Nursedude/meshing_around_meshforge/releases/tag/v0.1.0-beta

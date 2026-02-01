@@ -50,7 +50,7 @@ from meshing_around_clients.core import (
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
 
 # Version
-VERSION = "0.1.0-beta"
+VERSION = "0.5.0-beta"
 
 # Get paths
 BASE_DIR = Path(__file__).parent
