@@ -142,10 +142,10 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ## Testing Infrastructure (P1)
 
 ### Unit Tests
-- [ ] Add tests for models.py (Node, Message, Alert)
-- [ ] Add tests for config.py
-- [ ] Add tests for alert_detector.py
-- [ ] Add tests for message_handler.py
+- [x] Add tests for models.py (Node, Message, Alert) - 45+ tests
+- [x] Add tests for config.py - 18+ tests
+- [x] Add tests for alert_detector.py - 36+ tests
+- [x] Add tests for message_handler.py - 70+ tests
 - [ ] Target 80% code coverage
 
 ### Integration Tests
@@ -221,11 +221,12 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Web | 0 | 0 | 3 | 0 | 0% |
 | Notifications | 0 | 0 | 0 | 2 | 0% |
 | Config | 0 | 0 | 2 | 0 | 0% |
-| Testing | 0 | 3 | 0 | 0 | 0% |
+| Testing | 0 | 3 | 0 | 0 | **80%** |
 | Docs | 0 | 0 | 0 | 2 | 0% |
 | Upstream | 0 | 0 | 3 | 0 | 0% |
 
 **Total Items:** 26 (P0: 0, P1: 7, P2: 15, P3: 4)
+**Unit Tests:** 177 tests passing (4 core modules fully tested)
 
 ---
 
