@@ -27,7 +27,7 @@ from typing import Dict, List, Tuple, Any, Optional
 from getpass import getpass
 
 # Version info
-VERSION = "0.1.0-beta"
+VERSION = "0.5.0-beta"
 SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 class Colors:

@@ -4,7 +4,7 @@
 
 MeshForge is a companion toolkit for [meshing-around](https://github.com/SpudGunMan/meshing-around), providing configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for Meshtastic mesh networks.
 
-**Current Version:** 0.1.0-beta
+**Current Version:** 0.5.0-beta
 **License:** GPL-3.0
 **Python:** 3.8+
 

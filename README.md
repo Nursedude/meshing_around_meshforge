@@ -1,449 +1,322 @@
-# MeshForge 🔧
+# MeshForge
 
 Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-around) - configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for your Meshtastic mesh network.
 
-[![Version](https://img.shields.io/badge/version-0.1.0--beta-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.0--beta-orange.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 
-> ⚠️ **UNSTABLE BETA** - This software is under active development and may contain bugs, incomplete features, or breaking changes. **Not recommended for production use.** Test thoroughly in isolated environments before any deployment. Features may change without notice between versions.
+> **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
-## Architecture Overview
+## Feature Status
+
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4a9eff', 'primaryTextColor': '#fff', 'primaryBorderColor': '#2980b9', 'lineColor': '#666', 'secondaryColor': '#27ae60', 'tertiaryColor': '#e74c3c'}}}%%
+graph LR
+    subgraph "Working"
+        TUI[TUI Client]
+        DEMO[Demo Mode]
+        CFG[Config System]
+        MODELS[Data Models]
+        ALERTS[Alert Detection]
+    end
+
+    subgraph "Partial"
+        WEB[Web Client]
+        MQTT[MQTT Mode]
+        NOTIFY[Notifications]
+        CMDS[Bot Commands]
+    end
+
+    subgraph "Untested"
+        SERIAL[Serial Mode]
+        TCP[TCP Mode]
+        BLE[BLE Mode]
+        SMS[SMS Gateway]
+    end
+
+    style TUI fill:#27ae60,color:#fff
+    style DEMO fill:#27ae60,color:#fff
+    style CFG fill:#27ae60,color:#fff
+    style MODELS fill:#27ae60,color:#fff
+    style ALERTS fill:#27ae60,color:#fff
+    style WEB fill:#f39c12,color:#fff
+    style MQTT fill:#f39c12,color:#fff
+    style NOTIFY fill:#f39c12,color:#fff
+    style CMDS fill:#f39c12,color:#fff
+    style SERIAL fill:#e74c3c,color:#fff
+    style TCP fill:#e74c3c,color:#fff
+    style BLE fill:#e74c3c,color:#fff
+    style SMS fill:#e74c3c,color:#fff
+```
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **TUI Client** | Working | 6 screens, keyboard navigation |
+| **Demo Mode** | Working | Simulated data for testing |
+| **Config System** | Working | INI-based configuration |
+| **Data Models** | Working | Node, Message, Alert, MeshNetwork |
+| **Alert Detection** | Working | Emergency keywords, proximity |
+| **Web Client** | Partial | API works, templates need testing |
+| **MQTT Mode** | Partial | Connects but limited testing |
+| **Notifications** | Partial | Email framework exists, untested |
+| **Bot Commands** | Partial | Parser exists, handlers incomplete |
+| **Serial Mode** | Untested | Requires hardware testing |
+| **TCP Mode** | Untested | Requires network device |
+| **BLE Mode** | Untested | Requires Bluetooth setup |
+| **SMS Gateway** | Untested | Requires carrier configuration |
+
+## Architecture
 
 ```mermaid
 graph TB
-    subgraph "MeshForge"
-        ML[mesh_client.py<br/>Launcher]
+    subgraph "Entry Points"
+        MC[mesh_client.py<br/>Zero-dep Launcher]
         CB[configure_bot.py<br/>Setup Wizard]
+        SH[setup_headless.sh<br/>Pi Installer]
+    end
 
-        subgraph "Interfaces"
-            TUI[TUI Client<br/>Terminal]
-            WEB[Web Client<br/>Browser]
+    subgraph "meshing_around_clients"
+        subgraph "core/"
+            CFG[config.py]
+            CONN[connection_manager.py]
+            API[meshtastic_api.py]
+            MSG[message_handler.py]
+            ALERT[alert_detector.py]
+            NOTIF[notifications.py]
+            MDL[models.py]
         end
 
-        subgraph "Core Layer"
-            CM[Connection Manager]
-            MH[Message Handler]
-            AD[Alert Detector]
-            NM[Notification Manager]
-            CFG[Config Manager]
+        subgraph "tui/"
+            TUIAPP[app.py<br/>Rich Terminal UI]
+        end
+
+        subgraph "web/"
+            WEBAPP[app.py<br/>FastAPI Server]
+            TPL[templates/]
+            STATIC[static/]
         end
     end
 
     subgraph "Connections"
         SER[Serial/USB]
-        TCP[TCP/IP]
-        MQTT[MQTT Broker]
-        BLE[Bluetooth LE]
+        TCPCON[TCP/IP]
+        MQTTCON[MQTT Broker]
+        BLECON[Bluetooth LE]
     end
 
-    subgraph "Notifications"
-        EMAIL[Email/SMTP]
-        SMS[SMS Gateway]
-    end
+    MC --> TUIAPP
+    MC --> WEBAPP
+    CB --> CFG
+    SH --> MC
 
-    subgraph "External"
-        RADIO[Meshtastic Radio]
-        BROKER[mqtt.meshtastic.org]
-        MESH((Mesh Network))
-    end
+    TUIAPP --> API
+    WEBAPP --> API
+    API --> CONN
+    API --> MSG
+    API --> ALERT
+    ALERT --> NOTIF
+    CONN --> CFG
 
-    ML --> TUI
-    ML --> WEB
-    TUI --> CM
-    WEB --> CM
-    CM --> MH
-    CM --> AD
-    AD --> NM
-    CM --> CFG
+    CONN --> SER
+    CONN --> TCPCON
+    CONN --> MQTTCON
+    CONN --> BLECON
 
-    NM --> EMAIL
-    NM --> SMS
-
-    CM --> SER
-    CM --> TCP
-    CM --> MQTT
-    CM --> BLE
-
-    SER --> RADIO
-    TCP --> RADIO
-    BLE --> RADIO
-    MQTT --> BROKER
-
-    RADIO --> MESH
-    BROKER --> MESH
-
-    style ML fill:#4a9eff,color:#fff
-    style TUI fill:#9b59b6,color:#fff
-    style WEB fill:#27ae60,color:#fff
-    style AD fill:#e67e22,color:#fff
-    style NM fill:#e74c3c,color:#fff
-    style MESH fill:#e74c3c,color:#fff
+    style MC fill:#4a9eff,color:#fff
+    style TUIAPP fill:#9b59b6,color:#fff
+    style WEBAPP fill:#27ae60,color:#fff
+    style ALERT fill:#e67e22,color:#fff
+    style NOTIF fill:#e74c3c,color:#fff
 ```
-
-## TLDR
-
-- **Configure meshing-around bot**: `python3 configure_bot.py`
-- **Monitor your mesh (TUI)**: `python3 mesh_client.py --demo`
-- **Web dashboard**: `python3 mesh_client.py --web --demo`
-- **No radio? Use MQTT**: Works with mqtt.meshtastic.org
-
-## What's This For?
-
-Whether you're setting up a new meshing-around bot, want to monitor your mesh from SSH, or need a web dashboard for your Pi Zero 2W (no radio attached) - MeshForge has you covered.
-
-**🔧 Configuration Tool** - Interactive setup wizard for meshing-around bot with 12 alert types, email/SMS notifications, and Pi auto-detection.
-
-**📺 TUI Client** - Rich terminal interface that works great over SSH. See nodes, messages, alerts in real-time.
-
-**🌐 Web Client** - Browser-based dashboard with WebSocket updates and REST API for automation.
-
-**📡 MQTT Mode** - No radio required! Connect via mqtt.meshtastic.org and monitor the mesh from anywhere.
 
 ## Quick Start
 
-```sh
-# Clone it
+```bash
+# Clone
 git clone https://github.com/Nursedude/meshing_around_meshforge.git
 cd meshing_around_meshforge
 
-# Try demo mode first (no hardware needed)
+# Install dependencies
+pip install rich paho-mqtt
+
+# Try demo mode (no hardware needed)
 python3 mesh_client.py --demo
 
-# Or dive into setup
+# Interactive setup
 python3 mesh_client.py --setup
 ```
 
-### Connection Options
+## Connection Modes
 
 ```mermaid
 flowchart TD
-    START{Do you have a<br/>Meshtastic radio?}
+    START{Have a<br/>Meshtastic radio?}
 
-    START -->|Yes| LOCAL{Is it connected<br/>to THIS machine?}
-    START -->|No| MQTT_MODE[Use MQTT Mode<br/>Connect via broker]
+    START -->|Yes| LOCAL{Connected to<br/>THIS machine?}
+    START -->|No| MQTT[MQTT Mode<br/>via broker]
 
     LOCAL -->|Yes, USB| SERIAL[Serial Mode]
-    LOCAL -->|Yes, Bluetooth| BLE[BLE Mode]
-    LOCAL -->|No, on network| TCP[TCP Mode]
+    LOCAL -->|Yes, BT| BLE[BLE Mode]
+    LOCAL -->|No, network| TCP[TCP Mode]
 
-    SERIAL --> READY[Ready to monitor!]
+    SERIAL --> READY[Monitor mesh]
     BLE --> READY
     TCP --> READY
-    MQTT_MODE --> READY
+    MQTT --> READY
 
-    TEST{Just want to<br/>test things?}
-    START -.->|"Not sure"| TEST
-    TEST -->|Yes| DEMO[Demo Mode]
+    START -.->|Testing?| DEMO[Demo Mode]
     DEMO --> READY
 
     style START fill:#f39c12,color:#fff
     style READY fill:#27ae60,color:#fff
-    style MQTT_MODE fill:#3498db,color:#fff
+    style MQTT fill:#3498db,color:#fff
     style DEMO fill:#9b59b6,color:#fff
+    style SERIAL fill:#e74c3c,color:#fff
+    style BLE fill:#e74c3c,color:#fff
+    style TCP fill:#e74c3c,color:#fff
 ```
 
-| Mode | Need Radio? | Use Case |
-|------|-------------|----------|
-| Serial | Yes (USB) | Radio plugged into this machine |
-| TCP | No | Radio on another machine (network) |
-| MQTT | No | No radio at all - broker only |
-| BLE | Yes | Bluetooth connection |
-| Demo | No | Testing/development |
+| Mode | Radio Required | Status |
+|------|----------------|--------|
+| Demo | No | **Working** |
+| MQTT | No | Partial |
+| Serial | Yes (USB) | Untested |
+| TCP | No | Untested |
+| BLE | Yes | Untested |
 
 ## Configuration
 
-Everything lives in `mesh_client.ini`:
+All settings in `mesh_client.ini`:
 
 ```ini
 [connection]
-type = mqtt                    # or serial, tcp, ble, auto
+type = mqtt                    # demo, mqtt, serial, tcp, ble
 mqtt_broker = mqtt.meshtastic.org
 mqtt_topic_root = msh/US
 
 [features]
-mode = tui                     # tui, web, both, headless
+mode = tui                     # tui, web, both
 web_port = 8080
 ```
 
-Run `python3 mesh_client.py --setup` for interactive configuration.
-
-## Pi Zero 2W Setup (Headless, No Radio)
-
-Perfect for a monitoring station using MQTT:
+## TUI Screens
 
 ```mermaid
-flowchart LR
-    A[Run setup_headless.sh] --> B[Install Dependencies]
-    B --> C[Create Virtual Env]
-    C --> D[Configure MQTT]
-    D --> E{Install as Service?}
-    E -->|Yes| F[Enable systemd]
-    E -->|No| G[Manual Start]
-    F --> H[Auto-start on boot]
-    G --> H
-    H --> I[Access Web UI<br/>:8080]
+graph LR
+    D[Dashboard<br/>Key: 1] --> N[Nodes<br/>Key: 2]
+    N --> M[Messages<br/>Key: 3]
+    M --> A[Alerts<br/>Key: 4]
+    A --> H[Help<br/>Key: ?]
+    H --> D
 
+    style D fill:#4a9eff,color:#fff
+    style N fill:#27ae60,color:#fff
+    style M fill:#9b59b6,color:#fff
     style A fill:#e74c3c,color:#fff
-    style I fill:#27ae60,color:#fff
+    style H fill:#f39c12,color:#fff
 ```
-
-```sh
-chmod +x setup_headless.sh
-./setup_headless.sh
-```
-
-This sets up:
-- Virtual environment (PEP 668 compliant)
-- MQTT connection to public broker
-- Optional systemd service for auto-start
-- Web interface on port 8080
-
-## Keyboard Shortcuts (TUI)
 
 | Key | Action |
 |-----|--------|
 | `1-4` | Switch screens |
 | `s` | Send message |
+| `r` | Refresh |
 | `?` | Help |
 | `q` | Quit |
 
-## API Endpoints (Web)
-
-| Endpoint | What it does |
-|----------|--------------|
-| `GET /api/status` | Connection info |
-| `GET /api/nodes` | Node list |
-| `GET /api/messages` | Message history |
-| `POST /api/messages/send` | Send a message |
-
-## Bot Commands
-
-MeshForge includes a full command handler system for mesh bot interaction:
-
-| Command | Description |
-|---------|-------------|
-| `!ping` | Check bot connectivity (responds with pong) |
-| `!help` | List all available commands |
-| `!info` | Show bot/node information |
-| `!stats` | Display mesh statistics |
-| `!location [node]` | Get position info for a node |
-| `!weather <loc>` | Get weather (requires API config) |
-| `!bbs` | Bulletin board system - post/read messages |
-| `!mail` | Private messaging between nodes |
-| `!game <name>` | Play games (dopewars, blackjack, quiz, lemonade) |
-| `!admin` | Admin commands (restricted to admin nodes) |
-
-### BBS Subcommands
-```
-!bbs list          - List recent messages
-!bbs read <id>     - Read a specific message
-!bbs post <msg>    - Post a new message
-!bbs delete <id>   - Delete message (admin only)
-```
-
-### Mail Subcommands
-```
-!mail check              - Check for new mail
-!mail send <node> <msg>  - Send private message
-!mail read <id>          - Read a message
-```
-
 ## Alert System
-
-MeshForge monitors your mesh and generates alerts:
 
 | Alert Type | Trigger | Severity |
 |------------|---------|----------|
-| **Emergency** | Keywords detected (911, SOS, HELP, MAYDAY) | Critical (4) |
-| **Disconnect** | Node not seen for configurable timeout | Medium (2) |
-| **Noisy Node** | Node exceeds message rate threshold | Medium (2) |
-| **Proximity** | Node enters/exits geofenced zone | Medium (2) |
-| **Battery** | Node battery below 20% | Medium (2) |
-| **New Node** | New node joins the mesh | Low (1) |
-| **SNR** | Signal quality drops below threshold | Low (1) |
+| Emergency | Keywords (911, SOS, HELP) | Critical |
+| Disconnect | Node timeout | Medium |
+| New Node | First seen | Low |
+| Battery | Below 20% | Medium |
+| Proximity | Geofence enter/exit | Medium |
 
-### Proximity Alerts (Geofencing)
+## API Endpoints (Web)
 
-Uses haversine distance calculation for accurate geofencing:
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/status` | GET | Connection info |
+| `/api/nodes` | GET | Node list |
+| `/api/messages` | GET | Message history |
+| `/api/messages/send` | POST | Send message |
+| `/ws` | WebSocket | Real-time updates |
 
-```python
-# Example: Alert when node enters 1km radius of home base
-zone = ProximityZone(
-    name="Home Base",
-    latitude=40.7128,
-    longitude=-74.0060,
-    radius_meters=1000,
-    alert_on_enter=True,
-    alert_on_exit=True
-)
-```
-
-## Notifications
-
-Get alerted via email or SMS when important events occur:
-
-### Email (SMTP)
-```ini
-[email_notifications]
-enabled = true
-smtp_server = smtp.gmail.com
-smtp_port = 587
-username = your@email.com
-from_address = your@email.com
-to_addresses = alert@email.com, backup@email.com
-```
-
-### SMS Gateways
-
-| Gateway Type | Description |
-|--------------|-------------|
-| `email` | Email-to-SMS (AT&T, Verizon, T-Mobile, etc.) |
-| `http` | Generic HTTP API gateway |
-| `twilio` | Twilio API |
-
-```ini
-[sms_notifications]
-enabled = true
-gateway_type = email
-carrier_gateway = txt.att.net
-phone_numbers = 5551234567, 5559876543
-```
-
-**Carrier Gateways:**
-- AT&T: `txt.att.net`
-- Verizon: `vtext.com`
-- T-Mobile: `tmomail.net`
-- Sprint: `messaging.sprintpcs.com`
-
-### Notification Features
-- **Rate limiting** - Prevent notification spam
-- **Quiet hours** - No notifications during sleep (e.g., 22:00-07:00)
-- **Severity filtering** - Only notify for important alerts
-
-## How It Works
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant MeshForge
-    participant Connection
-    participant Mesh as Mesh Network
-
-    User->>MeshForge: Start client
-    MeshForge->>MeshForge: Load config
-    MeshForge->>Connection: Initialize (Serial/TCP/MQTT/BLE)
-    Connection->>Mesh: Connect
-
-    loop Real-time Updates
-        Mesh->>Connection: New message/node data
-        Connection->>MeshForge: Process & format
-        MeshForge->>User: Display in TUI/Web
-    end
-
-    User->>MeshForge: Send message
-    MeshForge->>Connection: Route message
-    Connection->>Mesh: Transmit
-    Mesh-->>User: Delivery confirmed
-```
-
-## Project Layout
-
-```mermaid
-graph LR
-    subgraph "Entry Points"
-        A[mesh_client.py]
-        B[configure_bot.py]
-        C[setup_headless.sh]
-    end
-
-    subgraph "Clients Package"
-        D[core/]
-        E[tui/]
-        F[web/]
-    end
-
-    subgraph "Core Modules"
-        G[config.py]
-        H[connection_manager.py]
-        I[message_handler.py]
-        J[models.py]
-        K[alert_detector.py]
-        L[notifications.py]
-    end
-
-    A --> D
-    A --> E
-    A --> F
-    D --> G
-    D --> H
-    D --> I
-    D --> J
-    D --> K
-    D --> L
-
-    style A fill:#4a9eff,color:#fff
-    style B fill:#27ae60,color:#fff
-    style C fill:#9b59b6,color:#fff
-    style K fill:#e67e22,color:#fff
-    style L fill:#e74c3c,color:#fff
-```
+## Project Structure
 
 ```
-├── mesh_client.py          # Start here - main launcher
-├── mesh_client.ini         # Your configuration
+meshing_around_meshforge/
+├── mesh_client.py          # Main launcher (zero-dep bootstrap)
+├── mesh_client.ini         # Configuration
 ├── configure_bot.py        # Bot setup wizard
 ├── setup_headless.sh       # Pi/headless installer
-└── meshing_around_clients/ # TUI & Web apps
-    ├── core/               # Shared code
-    │   ├── config.py           # Configuration management
-    │   ├── connection_manager.py # Multi-mode connections
-    │   ├── message_handler.py  # Bot commands & processing
-    │   ├── alert_detector.py   # Alert detection system
-    │   ├── notifications.py    # Email/SMS notifications
-    │   └── models.py           # Data models
-    ├── tui/                # Terminal interface
-    └── web/                # Web dashboard
+└── meshing_around_clients/
+    ├── core/               # Shared modules
+    │   ├── config.py       # Config management
+    │   ├── connection_manager.py
+    │   ├── meshtastic_api.py
+    │   ├── message_handler.py
+    │   ├── alert_detector.py
+    │   ├── notifications.py
+    │   └── models.py       # Node, Message, Alert
+    ├── tui/
+    │   └── app.py          # Rich terminal UI
+    └── web/
+        ├── app.py          # FastAPI server
+        ├── templates/
+        └── static/
 ```
 
-## Requirements
+## Known Issues
 
-- Python 3.8+
-- Dependencies auto-install on first run (or use `--install-deps`)
-- For serial: user in `dialout` group
+- **Serial/TCP/BLE modes**: Not tested with real hardware
+- **Web templates**: May have rendering issues
+- **MQTT reconnection**: Limited retry logic
+- **Notifications**: Email/SMS sending untested
+- **Multi-interface**: Only single connection supported (upstream supports 9)
 
-## Security
+## Dependencies
 
-MeshForge has undergone security hardening with 32+ issues fixed:
+**Core:**
+- `rich` - TUI interface
+- `paho-mqtt` - MQTT client
 
-- **Network Security** - Web server binds to localhost by default, WebSocket authentication
-- **Thread Safety** - Proper locking in logging, message handling, and connections
-- **Input Validation** - Hardened config parsing and message handling
-- **Secure Defaults** - No predictable temp files, specific exception handling
+**Web (optional):**
+- `fastapi` - Web framework
+- `uvicorn` - ASGI server
+- `jinja2` - Templates
 
-See [CHANGELOG.md](CHANGELOG.md) for full details.
+**Hardware (optional):**
+- `meshtastic` - Device API
 
 ## Contributing
 
-PRs welcome! Please follow these principles:
+Issues and PRs welcome. Please:
+- Use specific exception types (no bare `except:`)
+- Maintain PEP 668 compliance
+- Provide Rich library fallbacks
+- Test with `--demo` before hardware
 
-- **No bare `except:`** - Use specific exception types
-- **PEP 668** - Don't auto-install outside venv
-- **Rich fallback** - UI should work without Rich library
-- **INI config** - Keep everything configurable
-- **Security first** - Bind to localhost, validate input, use secure temp files
+## Upstream Compatibility
 
-## Credits
+MeshForge is designed to work with [meshing-around](https://github.com/SpudGunMan/meshing-around) (v1.9.9.x). Key differences:
 
-- [SpudGunMan](https://github.com/SpudGunMan) - meshing-around creator
-- [Meshtastic](https://meshtastic.org) - The platform that makes this possible
+| Feature | meshing-around | MeshForge |
+|---------|---------------|-----------|
+| Purpose | Bot server | Monitoring client |
+| Interfaces | Up to 9 | Single |
+| Config | `config.ini` | `mesh_client.ini` |
+| Focus | Commands/games | Visualization |
 
 ## Links
 
-- 📦 [meshing-around](https://github.com/SpudGunMan/meshing-around) - The bot this tools supports
-- 📚 [Meshtastic Docs](https://meshtastic.org/docs/)
-- 🐛 [Report Issues](https://github.com/Nursedude/meshing_around_meshforge/issues)
+- [meshing-around](https://github.com/SpudGunMan/meshing-around) - Parent project
+- [Meshtastic](https://meshtastic.org) - Platform
+- [Issues](https://github.com/Nursedude/meshing_around_meshforge/issues)
 
 ---
 
-🥔 *Built with care for the Meshtastic community*
+*Built for the Meshtastic community*
