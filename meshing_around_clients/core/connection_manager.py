@@ -119,8 +119,11 @@ class ConnectionManager:
         if self.config.interface.hostname:
             return ConnectionType.TCP
 
-        # Fall back to MQTT if configured
-        # Check config file for mqtt_enabled
+        # Check if MQTT is enabled in config
+        if self.config.mqtt.enabled:
+            return ConnectionType.MQTT
+
+        # Fall back to demo mode
         return ConnectionType.DEMO
 
     def connect(self, connection_type: Optional[ConnectionType] = None) -> bool:
@@ -232,15 +235,8 @@ class ConnectionManager:
         try:
             from .mqtt_client import MQTTMeshtasticClient, MQTTConfig
 
-            # Build MQTT config from settings
-            mqtt_config = MQTTConfig(
-                broker=getattr(self.config, 'mqtt_broker', 'mqtt.meshtastic.org'),
-                port=getattr(self.config, 'mqtt_port', 1883),
-                username=getattr(self.config, 'mqtt_username', 'meshdev'),
-                password=getattr(self.config, 'mqtt_password', 'large4cats'),
-                topic_root=getattr(self.config, 'mqtt_topic_root', 'msh/US'),
-                channel=getattr(self.config, 'mqtt_channel', 'LongFast'),
-            )
+            # Build MQTT config from Config object's mqtt settings
+            mqtt_config = MQTTConfig.from_config(self.config)
 
             self._api = MQTTMeshtasticClient(self.config, mqtt_config)
 
@@ -395,3 +391,30 @@ class ConnectionManager:
         if self._api and hasattr(self._api, 'acknowledge_alert'):
             return self._api.acknowledge_alert(alert_id)
         return False
+
+    @property
+    def connection_health(self) -> Dict[str, Any]:
+        """Get connection health metrics."""
+        health = {
+            "status": "disconnected",
+            "connection_type": self._status.connection_type.value,
+            "device_info": self._status.device_info,
+            "reconnect_attempts": self._status.reconnect_attempts,
+            "last_connected": self._status.last_connected.isoformat() if self._status.last_connected else None
+        }
+
+        if self._api and hasattr(self._api, 'connection_health'):
+            # Get detailed health from the underlying API
+            api_health = self._api.connection_health
+            health.update(api_health)
+        elif self._status.connected:
+            health["status"] = "connected"
+
+        return health
+
+    @property
+    def mesh_health(self) -> Dict[str, Any]:
+        """Get overall mesh network health metrics."""
+        if self.network:
+            return self.network.mesh_health
+        return {"status": "unknown", "score": 0}

@@ -1,5 +1,26 @@
 # CLAUDE.md - MeshForge Project Context
 
+## Repository Ownership & Workflow
+
+**Owner:** Nursedude ([@Nursedude](https://github.com/Nursedude))
+**Repository:** `Nursedude/meshing_around_meshforge`
+
+### Session Workflow
+
+1. **Pull to Sync:** User will ask to "pull from meshforge/nursedude" to sync new features
+2. **Analyze & Improve:** Review changes, implement improvements for mesh networking domain
+3. **MQTT Integration:** This project connects to Meshtastic MQTT brokers to integrate with mesh channels
+4. **Session Entropy:** Watch for context degradation - stop and create session notes when this happens
+5. **Systematic Work:** Always maintain a task list using TodoWrite
+
+### Key Understanding
+
+- This is Nursedude's repository - not affiliated with external meshforge.org
+- Primary focus: Meshtastic mesh network monitoring and integration
+- MQTT mode allows participation in mesh networks without radio hardware
+
+---
+
 ## Project Overview
 
 MeshForge is a companion toolkit for [meshing-around](https://github.com/SpudGunMan/meshing-around), providing configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for Meshtastic mesh networks.

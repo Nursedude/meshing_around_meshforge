@@ -55,6 +55,28 @@ class TuiConfig:
     alert_sound: bool = True
 
 
+@dataclass
+class MQTTConfig:
+    """MQTT connection configuration for radio-less operation."""
+    enabled: bool = False
+    broker: str = "mqtt.meshtastic.org"
+    port: int = 1883
+    use_tls: bool = False
+    username: str = "meshdev"
+    password: str = "large4cats"
+    topic_root: str = "msh/US"
+    channel: str = "LongFast"
+    node_id: str = ""  # Virtual node ID for sending
+    client_id: str = ""  # MQTT client ID (auto-generated if empty)
+    # Encryption key for decrypting channel messages (base64 encoded)
+    encryption_key: str = ""
+    # QoS level for subscriptions (0, 1, or 2)
+    qos: int = 1
+    # Reconnect settings
+    reconnect_delay: int = 5
+    max_reconnect_attempts: int = 10
+
+
 class Config:
     """Main configuration class for Meshing-Around Clients."""
 
@@ -73,6 +95,7 @@ class Config:
         self.alerts = AlertConfig()
         self.web = WebConfig()
         self.tui = TuiConfig()
+        self.mqtt = MQTTConfig()
 
         # Bot connection info
         self.bot_name = "MeshBot"
@@ -140,6 +163,23 @@ class Config:
                 self.tui.message_history = self._parser.getint('tui', 'message_history', fallback=500)
                 self.tui.alert_sound = self._parser.getboolean('tui', 'alert_sound', fallback=True)
 
+            # MQTT
+            if self._parser.has_section('mqtt'):
+                self.mqtt.enabled = self._parser.getboolean('mqtt', 'enabled', fallback=False)
+                self.mqtt.broker = self._parser.get('mqtt', 'broker', fallback='mqtt.meshtastic.org')
+                self.mqtt.port = self._parser.getint('mqtt', 'port', fallback=1883)
+                self.mqtt.use_tls = self._parser.getboolean('mqtt', 'use_tls', fallback=False)
+                self.mqtt.username = self._parser.get('mqtt', 'username', fallback='meshdev')
+                self.mqtt.password = self._parser.get('mqtt', 'password', fallback='large4cats')
+                self.mqtt.topic_root = self._parser.get('mqtt', 'topic_root', fallback='msh/US')
+                self.mqtt.channel = self._parser.get('mqtt', 'channel', fallback='LongFast')
+                self.mqtt.node_id = self._parser.get('mqtt', 'node_id', fallback='')
+                self.mqtt.client_id = self._parser.get('mqtt', 'client_id', fallback='')
+                self.mqtt.encryption_key = self._parser.get('mqtt', 'encryption_key', fallback='')
+                self.mqtt.qos = self._parser.getint('mqtt', 'qos', fallback=1)
+                self.mqtt.reconnect_delay = self._parser.getint('mqtt', 'reconnect_delay', fallback=5)
+                self.mqtt.max_reconnect_attempts = self._parser.getint('mqtt', 'max_reconnect_attempts', fallback=10)
+
             return True
         except (configparser.Error, OSError) as e:
             print(f"Error loading config: {e}")
@@ -196,6 +236,24 @@ class Config:
             self._parser.set('tui', 'message_history', str(self.tui.message_history))
             self._parser.set('tui', 'alert_sound', str(self.tui.alert_sound))
 
+            # MQTT
+            if not self._parser.has_section('mqtt'):
+                self._parser.add_section('mqtt')
+            self._parser.set('mqtt', 'enabled', str(self.mqtt.enabled))
+            self._parser.set('mqtt', 'broker', self.mqtt.broker)
+            self._parser.set('mqtt', 'port', str(self.mqtt.port))
+            self._parser.set('mqtt', 'use_tls', str(self.mqtt.use_tls))
+            self._parser.set('mqtt', 'username', self.mqtt.username)
+            self._parser.set('mqtt', 'password', self.mqtt.password)
+            self._parser.set('mqtt', 'topic_root', self.mqtt.topic_root)
+            self._parser.set('mqtt', 'channel', self.mqtt.channel)
+            self._parser.set('mqtt', 'node_id', self.mqtt.node_id)
+            self._parser.set('mqtt', 'client_id', self.mqtt.client_id)
+            self._parser.set('mqtt', 'encryption_key', self.mqtt.encryption_key)
+            self._parser.set('mqtt', 'qos', str(self.mqtt.qos))
+            self._parser.set('mqtt', 'reconnect_delay', str(self.mqtt.reconnect_delay))
+            self._parser.set('mqtt', 'max_reconnect_attempts', str(self.mqtt.max_reconnect_attempts))
+
             if self.config_path:
                 with open(self.config_path, 'w') as f:
                     self._parser.write(f)
@@ -241,5 +299,15 @@ class Config:
                 "show_timestamps": self.tui.show_timestamps,
                 "message_history": self.tui.message_history,
                 "alert_sound": self.tui.alert_sound
+            },
+            "mqtt": {
+                "enabled": self.mqtt.enabled,
+                "broker": self.mqtt.broker,
+                "port": self.mqtt.port,
+                "use_tls": self.mqtt.use_tls,
+                "topic_root": self.mqtt.topic_root,
+                "channel": self.mqtt.channel,
+                "node_id": self.mqtt.node_id,
+                "qos": self.mqtt.qos
             }
         }
