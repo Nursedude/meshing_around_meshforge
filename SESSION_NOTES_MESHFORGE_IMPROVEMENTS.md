@@ -3,6 +3,23 @@
 **Date:** 2026-02-03
 **Branch:** `claude/improve-meshforge-nursedude-6ZP4q`
 **Session ID:** 01NPh83Mzrb6nCFxFSF8UVVj
+**Owner:** Nursedude
+
+## Repository Context
+
+- **This is Nursedude's repository** (`Nursedude/meshing_around_meshforge`)
+- Not affiliated with external meshforge.org
+- Connects to Meshtastic MQTT brokers to integrate with mesh channels
+- User will ask to "pull from meshforge/nursedude" to sync new features
+
+### Session Workflow (for future sessions)
+
+1. User requests pull to sync features
+2. Analyze codebase, implement mesh networking improvements
+3. Watch for session entropy - stop and make notes when context degrades
+4. Work systematically with task lists (TodoWrite)
+
+---
 
 ## Overview
 
