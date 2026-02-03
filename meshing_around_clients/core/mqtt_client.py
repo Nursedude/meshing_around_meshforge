@@ -22,9 +22,9 @@ import struct
 
 from .models import (
     Node, Message, Alert, MeshNetwork, Position, NodeTelemetry,
-    NodeRole, MessageType, AlertType
+    NodeRole, MessageType, AlertType, LinkQuality, RouteHop, MeshRoute
 )
-from .config import Config
+from .config import Config, MQTTConfig as ConfigMQTTConfig
 
 # Try to import paho-mqtt
 try:
@@ -46,6 +46,29 @@ class MQTTConfig:
     channel: str = "LongFast"
     node_id: str = ""  # Our node ID for sending
     client_id: str = ""
+    encryption_key: str = ""  # Base64 encoded encryption key
+    qos: int = 1  # MQTT QoS level
+    reconnect_delay: int = 5
+    max_reconnect_attempts: int = 10
+
+    @classmethod
+    def from_config(cls, config: Config) -> "MQTTConfig":
+        """Create MQTTConfig from Config object."""
+        return cls(
+            broker=config.mqtt.broker,
+            port=config.mqtt.port,
+            use_tls=config.mqtt.use_tls,
+            username=config.mqtt.username,
+            password=config.mqtt.password,
+            topic_root=config.mqtt.topic_root,
+            channel=config.mqtt.channel,
+            node_id=config.mqtt.node_id,
+            client_id=config.mqtt.client_id,
+            encryption_key=config.mqtt.encryption_key,
+            qos=config.mqtt.qos,
+            reconnect_delay=config.mqtt.reconnect_delay,
+            max_reconnect_attempts=config.mqtt.max_reconnect_attempts
+        )
 
 
 class MQTTMeshtasticClient:
@@ -54,16 +77,24 @@ class MQTTMeshtasticClient:
     Allows monitoring and participating in mesh without a radio.
     """
 
+    # Supported region prefixes for topic parsing
+    REGIONS = ["US", "EU_868", "EU_433", "CN", "JP", "ANZ", "KR", "TW", "RU", "IN", "NZ_865", "TH", "LORA_24"]
+
     def __init__(self, config: Config, mqtt_config: Optional[MQTTConfig] = None):
         if not MQTT_AVAILABLE:
             raise ImportError("paho-mqtt not installed. Run: pip install paho-mqtt")
 
         self.config = config
-        self.mqtt_config = mqtt_config or MQTTConfig()
+        # Use provided config or build from Config object
+        if mqtt_config:
+            self.mqtt_config = mqtt_config
+        else:
+            self.mqtt_config = MQTTConfig.from_config(config)
 
         # MQTT client
         self._client: Optional[mqtt.Client] = None
         self._connected = False
+        self._reconnect_count = 0
 
         # Network state
         self.network = MeshNetwork()
@@ -75,11 +106,18 @@ class MQTTMeshtasticClient:
             "on_message": [],
             "on_node_update": [],
             "on_alert": [],
+            "on_position": [],
+            "on_telemetry": [],
         }
+
+        # Connection health tracking
+        self._last_message_time: Optional[datetime] = None
+        self._message_count = 0
+        self._connection_start: Optional[datetime] = None
 
         # Generate client ID if not set
         if not self.mqtt_config.client_id:
-            self.mqtt_config.client_id = f"mesh-client-{uuid.uuid4().hex[:8]}"
+            self.mqtt_config.client_id = f"meshforge-{uuid.uuid4().hex[:8]}"
 
     @property
     def is_connected(self) -> bool:
@@ -142,6 +180,8 @@ class MQTTMeshtasticClient:
             if self._connected:
                 self.network.connection_status = "connected (MQTT)"
                 self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
+                self._connection_start = datetime.now()
+                self._message_count = 0
                 return True
             else:
                 # Connection timed out — stop the background loop thread
@@ -185,18 +225,33 @@ class MQTTMeshtasticClient:
         """Subscribe to Meshtastic MQTT topics."""
         root = self.mqtt_config.topic_root
         channel = self.mqtt_config.channel
+        qos = self.mqtt_config.qos
 
-        # Subscribe to various topics
+        # Build comprehensive topic list
         topics = [
-            f"{root}/{channel}/#",  # All messages on channel
-            f"{root}/+/+/json/#",   # JSON formatted messages
-            f"{root}/2/json/#",     # JSON on channel 2
-            f"{root}/2/e/#",        # Encrypted on channel 2
+            # Primary channel topics
+            f"{root}/{channel}/#",  # All messages on configured channel
+            # JSON formatted messages (easier to parse)
+            f"{root}/2/json/#",  # JSON on default public channel
+            f"{root}/+/json/#",  # JSON on any channel
+            # Encrypted messages (channel 2 is often public)
+            f"{root}/2/e/#",
+            # Stats and service messages
+            f"{root}/2/stat/#",
         ]
 
+        # If using a specific channel, also subscribe to it explicitly
+        if channel and channel != "LongFast":
+            topics.append(f"{root}/{channel}/json/#")
+            topics.append(f"{root}/{channel}/e/#")
+
+        # Deduplicate and subscribe
+        seen = set()
         for topic in topics:
-            self._client.subscribe(topic)
-            print(f"Subscribed to: {topic}")
+            if topic not in seen:
+                seen.add(topic)
+                result = self._client.subscribe(topic, qos=qos)
+                print(f"Subscribed to: {topic} (qos={qos})")
 
     def _on_message(self, client, userdata, msg):
         """Handle incoming MQTT message."""
@@ -204,55 +259,141 @@ class MQTTMeshtasticClient:
             topic = msg.topic
             payload = msg.payload
 
+            # Update message stats
+            self._last_message_time = datetime.now()
+            self._message_count += 1
+            self.network.last_update = datetime.now()
+
+            # Parse topic to extract metadata
+            topic_info = self._parse_topic(topic)
+
             # Determine message type from topic
             if "/json/" in topic or topic.endswith("/json"):
-                self._handle_json_message(topic, payload)
+                self._handle_json_message(topic, payload, topic_info)
             elif "/e/" in topic:
-                self._handle_encrypted_message(topic, payload)
+                self._handle_encrypted_message(topic, payload, topic_info)
+            elif "/stat/" in topic:
+                self._handle_stat_message(topic, payload, topic_info)
             else:
-                self._handle_protobuf_message(topic, payload)
+                self._handle_protobuf_message(topic, payload, topic_info)
 
         except Exception as e:
             print(f"Error handling MQTT message: {e}")
 
-    def _handle_json_message(self, topic: str, payload: bytes):
+    def _parse_topic(self, topic: str) -> Dict[str, Any]:
+        """Parse MQTT topic to extract metadata."""
+        # Topic format: msh/REGION/CHANNEL/TYPE/NODE_ID
+        # Examples:
+        #   msh/US/LongFast/json/!12345678
+        #   msh/US/2/e/!abcdef12
+        #   msh/EU_868/2/json/!fedcba98
+        parts = topic.split("/")
+        info = {
+            "region": "",
+            "channel": "",
+            "msg_type": "",
+            "node_id": "",
+            "raw_topic": topic
+        }
+
+        if len(parts) >= 2:
+            info["region"] = parts[1] if parts[1] in self.REGIONS else ""
+        if len(parts) >= 3:
+            info["channel"] = parts[2]
+        if len(parts) >= 4:
+            info["msg_type"] = parts[3]  # json, e, stat, etc.
+        if len(parts) >= 5:
+            info["node_id"] = parts[4]
+
+        return info
+
+    def _handle_stat_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any]):
+        """Handle statistics/status messages."""
+        try:
+            # Stat messages often contain node online/offline status
+            data = json.loads(payload.decode('utf-8'))
+            # These can indicate node presence
+            node_id = topic_info.get("node_id", "")
+            if node_id and node_id.startswith("!"):
+                if node_id in self.network.nodes:
+                    self.network.nodes[node_id].last_heard = datetime.now()
+                    self.network.nodes[node_id].is_online = True
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+
+    def _handle_json_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
         """Handle JSON formatted Meshtastic message."""
         try:
             data = json.loads(payload.decode('utf-8'))
+            topic_info = topic_info or {}
 
             # Extract message info
             sender = data.get("from", 0)
             sender_id = f"!{sender:08x}" if isinstance(sender, int) else str(sender)
             msg_type = data.get("type", "")
 
-            # Update node last seen
-            if sender_id not in self.network.nodes:
+            # Generate a message ID for deduplication
+            msg_id = data.get("id", "")
+            if not msg_id:
+                # Generate from sender + timestamp + content hash
+                import hashlib
+                content = json.dumps(data.get("payload", {}), sort_keys=True)
+                msg_id = hashlib.md5(f"{sender_id}{content}".encode()).hexdigest()[:16]
+
+            # Check for duplicate
+            if self.network.is_duplicate_message(msg_id):
+                return  # Skip duplicate
+
+            # Extract SNR/RSSI if available (for link quality)
+            snr = data.get("snr", data.get("rxSnr", 0.0))
+            rssi = data.get("rssi", data.get("rxRssi", 0))
+            hop_limit = data.get("hopLimit", 3)
+            hop_start = data.get("hopStart", 3)
+            hop_count = max(0, hop_start - hop_limit)
+
+            # Update node last seen and link quality
+            is_new_node = sender_id not in self.network.nodes
+            if is_new_node:
                 node = Node(
                     node_id=sender_id,
                     node_num=sender if isinstance(sender, int) else 0,
-                    last_heard=datetime.now()
+                    last_heard=datetime.now(),
+                    first_seen=datetime.now()
                 )
                 self.network.add_node(node)
                 self._trigger_callbacks("on_node_update", sender_id, True)
             else:
                 self.network.nodes[sender_id].last_heard = datetime.now()
+                self.network.nodes[sender_id].is_online = True
+
+            # Update link quality
+            if snr or rssi:
+                self.network.update_link_quality(sender_id, float(snr), int(rssi), hop_count)
+
+            # Track via node for routing info
+            via = data.get("via", data.get("relay", ""))
+            if via and sender_id in self.network.nodes:
+                via_id = f"!{via:08x}" if isinstance(via, int) else str(via)
+                self.network.update_neighbor_relationship(via_id, sender_id)
 
             # Handle different message types
             if msg_type == "text" or "text" in data.get("payload", {}):
-                self._handle_text_from_json(data, sender_id)
+                self._handle_text_from_json(data, sender_id, msg_id)
             elif msg_type == "position" or "position" in data.get("payload", {}):
                 self._handle_position_from_json(data, sender_id)
             elif msg_type == "telemetry" or "telemetry" in data.get("payload", {}):
                 self._handle_telemetry_from_json(data, sender_id)
             elif msg_type == "nodeinfo" or "user" in data.get("payload", {}):
                 self._handle_nodeinfo_from_json(data, sender_id)
+            elif msg_type == "traceroute":
+                self._handle_traceroute_from_json(data, sender_id)
 
         except json.JSONDecodeError:
             pass
         except Exception as e:
             print(f"JSON message error: {e}")
 
-    def _handle_text_from_json(self, data: dict, sender_id: str):
+    def _handle_text_from_json(self, data: dict, sender_id: str, msg_id: str = ""):
         """Handle text message from JSON."""
         payload = data.get("payload", {})
         text = payload.get("text", "") if isinstance(payload, dict) else str(payload)
@@ -264,8 +405,15 @@ class MQTTMeshtasticClient:
         if sender_id in self.network.nodes:
             sender_name = self.network.nodes[sender_id].display_name
 
+        # Extract signal info for the message
+        snr = data.get("snr", data.get("rxSnr", 0.0))
+        rssi = data.get("rssi", data.get("rxRssi", 0))
+        hop_limit = data.get("hopLimit", 3)
+        hop_start = data.get("hopStart", 3)
+        hop_count = max(0, hop_start - hop_limit)
+
         message = Message(
-            id=str(uuid.uuid4()),
+            id=msg_id or str(uuid.uuid4()),
             sender_id=sender_id,
             sender_name=sender_name,
             recipient_id=str(data.get("to", "")),
@@ -273,6 +421,9 @@ class MQTTMeshtasticClient:
             text=text,
             message_type=MessageType.TEXT,
             timestamp=datetime.now(),
+            hop_count=hop_count,
+            snr=float(snr) if snr else 0.0,
+            rssi=int(rssi) if rssi else 0,
             is_incoming=True
         )
 
@@ -281,6 +432,44 @@ class MQTTMeshtasticClient:
 
         # Check for emergency keywords
         self._check_emergency_keywords(message)
+
+    def _handle_traceroute_from_json(self, data: dict, sender_id: str):
+        """Handle traceroute response message."""
+        try:
+            payload = data.get("payload", {})
+            route_data = payload.get("route", payload.get("traceroute", []))
+
+            if not route_data:
+                return
+
+            # Build route from traceroute response
+            hops = []
+            for hop in route_data:
+                if isinstance(hop, dict):
+                    hop_id = hop.get("node", hop.get("from", ""))
+                    hop_snr = hop.get("snr", 0.0)
+                else:
+                    hop_id = f"!{hop:08x}" if isinstance(hop, int) else str(hop)
+                    hop_snr = 0.0
+
+                hops.append(RouteHop(
+                    node_id=hop_id,
+                    snr=hop_snr,
+                    timestamp=datetime.now()
+                ))
+
+            if hops:
+                route = MeshRoute(
+                    destination_id=sender_id,
+                    hops=hops,
+                    discovered=datetime.now(),
+                    last_used=datetime.now(),
+                    is_preferred=True
+                )
+                self.network.update_route(sender_id, route)
+
+        except Exception as e:
+            print(f"Traceroute handling error: {e}")
 
     def _handle_position_from_json(self, data: dict, sender_id: str):
         """Handle position update from JSON."""
@@ -356,24 +545,72 @@ class MQTTMeshtasticClient:
 
         self._trigger_callbacks("on_node_update", sender_id, False)
 
-    def _handle_encrypted_message(self, topic: str, payload: bytes):
+    def _handle_encrypted_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
         """Handle encrypted Meshtastic message (limited processing)."""
         # Encrypted messages can't be fully decoded without the key
-        # But we can still extract metadata from the topic
+        # But we can still extract metadata from the topic and packet header
         try:
-            parts = topic.split("/")
-            # Topic format: msh/region/channel/e/nodeId
-            if len(parts) >= 5:
-                # Just log that we received something
-                pass
-        except Exception:
+            topic_info = topic_info or self._parse_topic(topic)
+            node_id = topic_info.get("node_id", "")
+
+            if node_id and node_id.startswith("!"):
+                # Update that we've seen this node
+                if node_id in self.network.nodes:
+                    self.network.nodes[node_id].last_heard = datetime.now()
+                    self.network.nodes[node_id].is_online = True
+                else:
+                    # Create minimal node entry
+                    try:
+                        node_num = int(node_id[1:], 16)
+                    except ValueError:
+                        node_num = 0
+                    node = Node(
+                        node_id=node_id,
+                        node_num=node_num,
+                        last_heard=datetime.now(),
+                        first_seen=datetime.now()
+                    )
+                    self.network.add_node(node)
+                    self._trigger_callbacks("on_node_update", node_id, True)
+
+            # Try to extract basic packet info from protobuf header
+            if len(payload) >= 16:
+                self._parse_encrypted_header(payload, node_id)
+
+        except Exception as e:
+            print(f"Encrypted message handling error: {e}")
+
+    def _parse_encrypted_header(self, payload: bytes, node_id: str):
+        """Parse the unencrypted header of an encrypted message."""
+        # Meshtastic packet structure has some unencrypted fields
+        # First 4 bytes: destination node (little-endian)
+        # Next 4 bytes: sender node (little-endian)
+        # Next 4 bytes: packet id
+        try:
+            if len(payload) < 12:
+                return
+
+            dest = struct.unpack('<I', payload[0:4])[0]
+            sender = struct.unpack('<I', payload[4:8])[0]
+            packet_id = struct.unpack('<I', payload[8:12])[0]
+
+            sender_id = f"!{sender:08x}"
+            if sender_id in self.network.nodes:
+                self.network.nodes[sender_id].last_heard = datetime.now()
+
+        except struct.error:
             pass
 
-    def _handle_protobuf_message(self, topic: str, payload: bytes):
+    def _handle_protobuf_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
         """Handle protobuf Meshtastic message."""
-        # Would need meshtastic protobuf definitions to fully decode
-        # For now, just acknowledge receipt
-        pass
+        # Extract what we can from unencrypted protobuf fields
+        topic_info = topic_info or self._parse_topic(topic)
+        node_id = topic_info.get("node_id", "")
+
+        if node_id and node_id.startswith("!"):
+            if node_id in self.network.nodes:
+                self.network.nodes[node_id].last_heard = datetime.now()
+                self.network.nodes[node_id].is_online = True
 
     def _check_emergency_keywords(self, message: Message):
         """Check message for emergency keywords."""
@@ -457,6 +694,49 @@ class MQTTMeshtasticClient:
         if unread_only:
             return self.network.unread_alerts
         return self.network.alerts
+
+    @property
+    def connection_health(self) -> Dict[str, Any]:
+        """Get connection health metrics."""
+        now = datetime.now()
+
+        # Calculate uptime
+        uptime_seconds = 0
+        if self._connection_start and self._connected:
+            uptime_seconds = (now - self._connection_start).total_seconds()
+
+        # Calculate message rate (messages per minute)
+        msg_rate = 0.0
+        if uptime_seconds > 0:
+            msg_rate = (self._message_count / uptime_seconds) * 60
+
+        # Time since last message
+        last_msg_ago = None
+        if self._last_message_time:
+            last_msg_ago = (now - self._last_message_time).total_seconds()
+
+        # Determine health status
+        if not self._connected:
+            status = "disconnected"
+        elif last_msg_ago is None:
+            status = "connected_no_traffic"
+        elif last_msg_ago > 300:  # 5 minutes
+            status = "stale"
+        elif last_msg_ago > 60:
+            status = "slow"
+        else:
+            status = "healthy"
+
+        return {
+            "status": status,
+            "connected": self._connected,
+            "broker": self.mqtt_config.broker,
+            "uptime_seconds": int(uptime_seconds),
+            "message_count": self._message_count,
+            "messages_per_minute": round(msg_rate, 2),
+            "last_message_ago_seconds": int(last_msg_ago) if last_msg_ago else None,
+            "reconnect_count": self._reconnect_count
+        }
 
 
 class MQTTConnectionManager:
