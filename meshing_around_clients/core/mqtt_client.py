@@ -33,6 +33,18 @@ try:
 except ImportError:
     MQTT_AVAILABLE = False
 
+# Try to import mesh crypto module
+try:
+    from .mesh_crypto import (
+        MeshCrypto, ProtobufDecoder, MeshPacketProcessor,
+        node_id_to_num, node_num_to_id, CRYPTO_AVAILABLE, PROTOBUF_AVAILABLE
+    )
+    MESH_CRYPTO_AVAILABLE = True
+except ImportError:
+    MESH_CRYPTO_AVAILABLE = False
+    CRYPTO_AVAILABLE = False
+    PROTOBUF_AVAILABLE = False
+
 
 @dataclass
 class MQTTConfig:
@@ -118,6 +130,13 @@ class MQTTMeshtasticClient:
         # Generate client ID if not set
         if not self.mqtt_config.client_id:
             self.mqtt_config.client_id = f"meshforge-{uuid.uuid4().hex[:8]}"
+
+        # Initialize packet processor for encryption/protobuf decoding
+        self._packet_processor: Optional[MeshPacketProcessor] = None
+        if MESH_CRYPTO_AVAILABLE:
+            self._packet_processor = MeshPacketProcessor(
+                encryption_key=self.mqtt_config.encryption_key
+            )
 
     @property
     def is_connected(self) -> bool:
@@ -546,13 +565,22 @@ class MQTTMeshtasticClient:
         self._trigger_callbacks("on_node_update", sender_id, False)
 
     def _handle_encrypted_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
-        """Handle encrypted Meshtastic message (limited processing)."""
-        # Encrypted messages can't be fully decoded without the key
-        # But we can still extract metadata from the topic and packet header
+        """Handle encrypted Meshtastic message with full decryption support."""
         try:
             topic_info = topic_info or self._parse_topic(topic)
             node_id = topic_info.get("node_id", "")
 
+            # Try to decrypt and decode using packet processor
+            if self._packet_processor and CRYPTO_AVAILABLE:
+                result = self._packet_processor.process_encrypted_packet(payload)
+
+                if result.success and result.decoded:
+                    # Successfully decrypted - process the decoded content
+                    sender_id = node_num_to_id(result.sender) if result.sender else node_id
+                    self._process_decoded_packet(result, sender_id, topic_info)
+                    return
+
+            # Fallback: Extract metadata from topic and header
             if node_id and node_id.startswith("!"):
                 # Update that we've seen this node
                 if node_id in self.network.nodes:
@@ -602,15 +630,198 @@ class MQTTMeshtasticClient:
             pass
 
     def _handle_protobuf_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
-        """Handle protobuf Meshtastic message."""
-        # Extract what we can from unencrypted protobuf fields
+        """Handle protobuf Meshtastic message with full decoding."""
         topic_info = topic_info or self._parse_topic(topic)
         node_id = topic_info.get("node_id", "")
 
+        # Try full protobuf decoding
+        if self._packet_processor and PROTOBUF_AVAILABLE:
+            result = self._packet_processor.process_encrypted_packet(payload)
+
+            if result.success and result.decoded:
+                sender_id = node_num_to_id(result.sender) if result.sender else node_id
+                self._process_decoded_packet(result, sender_id, topic_info)
+                return
+
+        # Fallback: update node last seen
         if node_id and node_id.startswith("!"):
             if node_id in self.network.nodes:
                 self.network.nodes[node_id].last_heard = datetime.now()
                 self.network.nodes[node_id].is_online = True
+            else:
+                # Create minimal node entry
+                try:
+                    node_num = int(node_id[1:], 16)
+                except ValueError:
+                    node_num = 0
+                node = Node(
+                    node_id=node_id,
+                    node_num=node_num,
+                    last_heard=datetime.now(),
+                    first_seen=datetime.now()
+                )
+                self.network.add_node(node)
+                self._trigger_callbacks("on_node_update", node_id, True)
+
+    def _process_decoded_packet(self, result, sender_id: str, topic_info: Dict[str, Any]):
+        """Process a fully decoded packet from the packet processor."""
+        decoded = result.decoded
+        portnum = result.portnum
+        msg_type = decoded.get("type", "")
+
+        # Generate message ID for deduplication
+        msg_id = str(result.packet_id) if result.packet_id else ""
+        if msg_id and self.network.is_duplicate_message(msg_id):
+            return  # Skip duplicate
+
+        # Update/create node
+        is_new_node = sender_id not in self.network.nodes
+        if is_new_node:
+            node = Node(
+                node_id=sender_id,
+                node_num=result.sender,
+                last_heard=datetime.now(),
+                first_seen=datetime.now()
+            )
+            self.network.add_node(node)
+            self._trigger_callbacks("on_node_update", sender_id, True)
+        else:
+            self.network.nodes[sender_id].last_heard = datetime.now()
+            self.network.nodes[sender_id].is_online = True
+
+        # Extract SNR/RSSI if available
+        snr = decoded.get("rx_snr", 0)
+        rssi = decoded.get("rx_rssi", 0)
+        hop_limit = decoded.get("hop_limit", 3)
+        hop_count = max(0, 3 - hop_limit)  # Estimate hops
+
+        if snr or rssi:
+            self.network.update_link_quality(sender_id, float(snr), int(rssi), hop_count)
+
+        # Handle by type
+        if msg_type == "text" or portnum == 1:
+            text = decoded.get("text", "")
+            if text:
+                self._handle_decoded_text(text, sender_id, msg_id, decoded, topic_info)
+
+        elif msg_type == "position" or portnum == 3:
+            pos_data = decoded.get("position", {})
+            if pos_data and sender_id in self.network.nodes:
+                node = self.network.nodes[sender_id]
+                node.position = Position(
+                    latitude=pos_data.get("latitude", 0),
+                    longitude=pos_data.get("longitude", 0),
+                    altitude=pos_data.get("altitude", 0),
+                    time=datetime.now()
+                )
+                self._trigger_callbacks("on_position", sender_id)
+
+        elif msg_type == "telemetry" or portnum == 67:
+            telemetry_data = decoded.get("telemetry", {})
+            device_metrics = telemetry_data.get("device_metrics", {})
+            if device_metrics and sender_id in self.network.nodes:
+                node = self.network.nodes[sender_id]
+                node.telemetry = NodeTelemetry(
+                    battery_level=device_metrics.get("battery_level", 0),
+                    voltage=device_metrics.get("voltage", 0),
+                    channel_utilization=device_metrics.get("channel_utilization", 0),
+                    air_util_tx=device_metrics.get("air_util_tx", 0),
+                    uptime_seconds=device_metrics.get("uptime_seconds", 0),
+                    last_updated=datetime.now()
+                )
+                self._trigger_callbacks("on_telemetry", sender_id)
+
+                # Battery alert
+                if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
+                    alert = Alert(
+                        id=str(uuid.uuid4()),
+                        alert_type=AlertType.BATTERY,
+                        title="Low Battery",
+                        message=f"{node.display_name} at {node.telemetry.battery_level}%",
+                        severity=2,
+                        source_node=sender_id
+                    )
+                    self.network.add_alert(alert)
+                    self._trigger_callbacks("on_alert", alert)
+
+        elif msg_type == "nodeinfo" or portnum == 4:
+            user_data = decoded.get("user", {})
+            if user_data and sender_id in self.network.nodes:
+                node = self.network.nodes[sender_id]
+                node.short_name = user_data.get("short_name", node.short_name)
+                node.long_name = user_data.get("long_name", node.long_name)
+                hw_model = user_data.get("hw_model", 0)
+                if hw_model:
+                    node.hardware_model = str(hw_model)
+                self._trigger_callbacks("on_node_update", sender_id, False)
+
+        elif msg_type == "traceroute" or portnum == 70:
+            traceroute_data = decoded.get("traceroute", {})
+            route_list = traceroute_data.get("route", [])
+            snr_list = traceroute_data.get("snr_towards", [])
+            if route_list:
+                hops = []
+                for i, hop_id in enumerate(route_list):
+                    hop_snr = snr_list[i] if i < len(snr_list) else 0.0
+                    hop_node_id = node_num_to_id(hop_id) if isinstance(hop_id, int) else str(hop_id)
+                    hops.append(RouteHop(
+                        node_id=hop_node_id,
+                        snr=float(hop_snr),
+                        timestamp=datetime.now()
+                    ))
+                if hops:
+                    route = MeshRoute(
+                        destination_id=sender_id,
+                        hops=hops,
+                        discovered=datetime.now(),
+                        last_used=datetime.now(),
+                        is_preferred=True
+                    )
+                    self.network.update_route(sender_id, route)
+
+        elif msg_type == "neighborinfo" or portnum == 71:
+            neighbor_data = decoded.get("neighborinfo", {})
+            neighbors = neighbor_data.get("neighbors", [])
+            for neighbor in neighbors:
+                neighbor_id = neighbor.get("node_id", 0)
+                if neighbor_id:
+                    neighbor_node_id = node_num_to_id(neighbor_id) if isinstance(neighbor_id, int) else str(neighbor_id)
+                    self.network.update_neighbor_relationship(sender_id, neighbor_node_id)
+                    # Update link quality between sender and neighbor
+                    neighbor_snr = neighbor.get("snr", 0)
+                    if neighbor_snr and neighbor_node_id in self.network.nodes:
+                        self.network.update_link_quality(neighbor_node_id, float(neighbor_snr), 0, 1)
+
+    def _handle_decoded_text(self, text: str, sender_id: str, msg_id: str, decoded: Dict, topic_info: Dict):
+        """Handle decoded text message."""
+        sender_name = ""
+        if sender_id in self.network.nodes:
+            sender_name = self.network.nodes[sender_id].display_name
+
+        snr = decoded.get("rx_snr", 0)
+        rssi = decoded.get("rx_rssi", 0)
+        hop_limit = decoded.get("hop_limit", 3)
+        hop_count = max(0, 3 - hop_limit)
+        channel = decoded.get("channel", 0)
+
+        message = Message(
+            id=msg_id or str(uuid.uuid4()),
+            sender_id=sender_id,
+            sender_name=sender_name,
+            recipient_id=str(decoded.get("to", "")),
+            channel=channel,
+            text=text,
+            message_type=MessageType.TEXT,
+            timestamp=datetime.now(),
+            hop_count=hop_count,
+            snr=float(snr) if snr else 0.0,
+            rssi=int(rssi) if rssi else 0,
+            is_incoming=True
+        )
+
+        self.network.add_message(message)
+        self._trigger_callbacks("on_message", message)
+        self._check_emergency_keywords(message)
 
     def _check_emergency_keywords(self, message: Message):
         """Check message for emergency keywords."""

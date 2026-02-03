@@ -470,6 +470,257 @@ class AlertsScreen(Screen):
         )
 
 
+class TopologyScreen(Screen):
+    """Mesh topology and health visualization screen."""
+
+    def render(self) -> Panel:
+        layout = Layout()
+
+        # Create mesh health panel
+        health_panel = self._create_health_panel()
+
+        # Create topology tree
+        topology_panel = self._create_topology_panel()
+
+        # Create routes panel
+        routes_panel = self._create_routes_panel()
+
+        # Create channels panel
+        channels_panel = self._create_channels_panel()
+
+        # Layout: Health at top, then topology/routes, channels at bottom
+        layout.split_column(
+            Layout(health_panel, name="health", size=7),
+            Layout(name="main"),
+            Layout(channels_panel, name="channels", size=10)
+        )
+        layout["main"].split_row(
+            Layout(topology_panel, name="topology"),
+            Layout(routes_panel, name="routes")
+        )
+
+        return Panel(
+            layout,
+            title="[bold cyan]Mesh Topology[/bold cyan]",
+            subtitle="[dim]Press 'q' to return to dashboard[/dim]",
+            border_style="cyan"
+        )
+
+    def _create_health_panel(self) -> Panel:
+        """Create mesh health overview panel."""
+        health = self.app.api.network.mesh_health
+
+        # Status color mapping
+        status_colors = {
+            "excellent": "green bold",
+            "good": "green",
+            "fair": "yellow",
+            "poor": "orange1",
+            "critical": "red bold",
+            "unknown": "dim"
+        }
+        status_style = status_colors.get(health["status"], "white")
+
+        # Create health bar visualization
+        score = health.get("score", 0)
+        bar_width = 30
+        filled = int((score / 100) * bar_width)
+        health_bar = "[green]" + "" * filled + "[/green][dim]" + "" * (bar_width - filled) + "[/dim]"
+
+        table = Table(show_header=False, box=None, padding=(0, 3))
+        table.add_column("Label", style="cyan")
+        table.add_column("Value")
+
+        table.add_row("Status", f"[{status_style}]{health['status'].upper()}[/{status_style}]")
+        table.add_row("Health Score", f"{health_bar} {score}%")
+        table.add_row("Online Nodes", f"[green]{health.get('online_nodes', 0)}[/green] / {health.get('total_nodes', 0)}")
+        table.add_row("Avg SNR", f"{health.get('avg_snr', 0):.1f} dB")
+        table.add_row("Channel Util", f"{health.get('avg_channel_utilization', 0):.1f}%")
+
+        return Panel(table, title="[bold]Mesh Health[/bold]", border_style="green")
+
+    def _create_topology_panel(self) -> Panel:
+        """Create mesh topology tree visualization."""
+        network = self.app.api.network
+
+        # Build tree showing node relationships
+        tree = Tree("[bold cyan]Mesh Network[/bold cyan]")
+
+        # Group nodes by hop count
+        direct_nodes = []
+        one_hop = []
+        multi_hop = []
+
+        for node in network.nodes.values():
+            if node.hop_count == 0:
+                direct_nodes.append(node)
+            elif node.hop_count == 1:
+                one_hop.append(node)
+            else:
+                multi_hop.append(node)
+
+        # Add direct nodes
+        if direct_nodes:
+            direct_branch = tree.add("[green]Direct (0 hops)[/green]")
+            for node in sorted(direct_nodes, key=lambda n: n.display_name):
+                self._add_node_to_tree(direct_branch, node)
+
+        # Add 1-hop nodes
+        if one_hop:
+            one_hop_branch = tree.add("[yellow]1 Hop[/yellow]")
+            for node in sorted(one_hop, key=lambda n: n.display_name):
+                self._add_node_to_tree(one_hop_branch, node)
+
+        # Add multi-hop nodes
+        if multi_hop:
+            multi_branch = tree.add("[orange1]Multi-hop[/orange1]")
+            for node in sorted(multi_hop, key=lambda n: n.display_name):
+                self._add_node_to_tree(multi_branch, node)
+
+        # Add nodes with unknown hops
+        unknown_hop = [n for n in network.nodes.values()
+                       if n not in direct_nodes and n not in one_hop and n not in multi_hop]
+        if unknown_hop:
+            unknown_branch = tree.add("[dim]Unknown[/dim]")
+            for node in sorted(unknown_hop, key=lambda n: n.display_name)[:10]:
+                self._add_node_to_tree(unknown_branch, node)
+
+        return Panel(tree, title="[bold]Topology[/bold]", border_style="blue")
+
+    def _add_node_to_tree(self, parent, node) -> None:
+        """Add a node entry to the tree."""
+        # Build node label with quality info
+        quality = ""
+        if node.link_quality and node.link_quality.packet_count > 0:
+            q_pct = node.link_quality.quality_percent
+            if q_pct >= 70:
+                q_color = "green"
+            elif q_pct >= 40:
+                q_color = "yellow"
+            else:
+                q_color = "red"
+            quality = f" [{q_color}]{q_pct}%[/{q_color}]"
+
+        online = "[green][/green]" if node.is_online else "[red][/red]"
+        label = f"{online} {node.display_name[:20]}{quality}"
+
+        node_branch = parent.add(label)
+
+        # Add neighbor info if available
+        if node.neighbors:
+            neighbors_str = ", ".join(n[-6:] for n in node.neighbors[:5])
+            if len(node.neighbors) > 5:
+                neighbors_str += f" +{len(node.neighbors) - 5} more"
+            node_branch.add(f"[dim]Hears: {neighbors_str}[/dim]")
+
+        if node.heard_by:
+            heard_str = ", ".join(h[-6:] for h in node.heard_by[:5])
+            if len(node.heard_by) > 5:
+                heard_str += f" +{len(node.heard_by) - 5} more"
+            node_branch.add(f"[dim]Heard by: {heard_str}[/dim]")
+
+    def _create_routes_panel(self) -> Panel:
+        """Create known routes panel."""
+        network = self.app.api.network
+
+        table = Table(
+            show_header=True,
+            header_style="bold cyan",
+            box=box.SIMPLE,
+            expand=True
+        )
+
+        table.add_column("Destination", style="white")
+        table.add_column("Hops", justify="center")
+        table.add_column("Avg SNR", justify="right")
+        table.add_column("Via", style="dim")
+
+        routes = list(network.routes.values())[:15]
+
+        for route in routes:
+            dest_name = route.destination_id[-8:]
+            if route.destination_id in network.nodes:
+                dest_name = network.nodes[route.destination_id].display_name[:15]
+
+            hop_count = route.hop_count
+            hop_style = "green" if hop_count <= 1 else "yellow" if hop_count <= 3 else "orange1"
+
+            avg_snr = route.avg_snr
+            snr_style = "green" if avg_snr > 0 else "yellow" if avg_snr > -10 else "red"
+
+            via = ""
+            if route.hops:
+                first_hop = route.hops[0].node_id[-6:]
+                via = f"via {first_hop}"
+                if len(route.hops) > 1:
+                    via += f" (+{len(route.hops)-1})"
+
+            table.add_row(
+                dest_name,
+                f"[{hop_style}]{hop_count}[/{hop_style}]",
+                f"[{snr_style}]{avg_snr:.1f}[/{snr_style}]",
+                via
+            )
+
+        if not routes:
+            table.add_row("[dim]No routes discovered[/dim]", "", "", "")
+
+        return Panel(table, title="[bold]Known Routes[/bold]", border_style="magenta")
+
+    def _create_channels_panel(self) -> Panel:
+        """Create channels overview panel."""
+        network = self.app.api.network
+
+        table = Table(
+            show_header=True,
+            header_style="bold cyan",
+            box=box.SIMPLE,
+            expand=True
+        )
+
+        table.add_column("Ch", justify="center", width=3)
+        table.add_column("Name", style="white")
+        table.add_column("Role", style="blue")
+        table.add_column("Encrypted", justify="center")
+        table.add_column("Messages", justify="right")
+        table.add_column("Last Activity", style="dim")
+        table.add_column("Uplink", justify="center")
+        table.add_column("Downlink", justify="center")
+
+        for idx, channel in sorted(network.channels.items()):
+            if channel.role.value == "DISABLED":
+                continue
+
+            role_style = "green" if channel.role.value == "PRIMARY" else "blue"
+            encrypted = "[green]Yes[/green]" if channel.is_encrypted else "[yellow]No[/yellow]"
+
+            last_activity = "-"
+            if channel.last_activity:
+                delta = datetime.now() - channel.last_activity
+                if delta.total_seconds() < 60:
+                    last_activity = f"{int(delta.total_seconds())}s ago"
+                elif delta.total_seconds() < 3600:
+                    last_activity = f"{int(delta.total_seconds() / 60)}m ago"
+                else:
+                    last_activity = f"{int(delta.total_seconds() / 3600)}h ago"
+
+            uplink = "[green]Y[/green]" if channel.uplink_enabled else "[dim]N[/dim]"
+            downlink = "[green]Y[/green]" if channel.downlink_enabled else "[dim]N[/dim]"
+
+            table.add_row(
+                str(idx),
+                channel.display_name,
+                f"[{role_style}]{channel.role.value}[/{role_style}]",
+                encrypted,
+                str(channel.message_count),
+                last_activity,
+                uplink,
+                downlink
+            )
+
+        return Panel(table, title="[bold]Channels[/bold]", border_style="yellow")
+
+
 class SendMessageScreen(Screen):
     """Screen for composing and sending messages."""
 
@@ -509,6 +760,7 @@ class HelpScreen(Screen):
 - **2** - Nodes view
 - **3** - Messages view
 - **4** - Alerts view
+- **5** - Topology view
 - **q** - Return to dashboard / Quit
 
 ## Actions
@@ -520,6 +772,11 @@ class HelpScreen(Screen):
 ## Message View
 - **0-7** - Filter by channel
 - **a** - Show all channels
+
+## Topology View
+- Shows mesh health, node relationships, routes, and channels
+- Displays link quality percentages and hop counts
+- Visualizes neighbor relationships
 
 ## Dashboard
 - **Enter** - Select highlighted item
@@ -559,6 +816,7 @@ class MeshingAroundTUI:
             "nodes": NodesScreen(self),
             "messages": MessagesScreen(self),
             "alerts": AlertsScreen(self),
+            "topology": TopologyScreen(self),
             "send": SendMessageScreen(self),
             "help": HelpScreen(self),
         }
@@ -595,6 +853,8 @@ class MeshingAroundTUI:
         shortcuts.append("Messages ", style="dim")
         shortcuts.append("[4]", style="cyan bold")
         shortcuts.append("Alerts ", style="dim")
+        shortcuts.append("[5]", style="cyan bold")
+        shortcuts.append("Topology ", style="dim")
         shortcuts.append("[s]", style="green bold")
         shortcuts.append("Send ", style="dim")
         shortcuts.append("[?]", style="yellow bold")
@@ -778,6 +1038,8 @@ class MeshingAroundTUI:
             self.current_screen = "messages"
         elif key == '4':
             self.current_screen = "alerts"
+        elif key == '5':
+            self.current_screen = "topology"
         elif key == 's':
             self._send_message_prompt()
         elif key == '?' or key == 'h':

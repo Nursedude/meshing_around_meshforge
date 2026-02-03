@@ -309,6 +309,16 @@ class WebApplication:
                 )
             return HTMLResponse(self._get_embedded_html())
 
+        @app.get("/topology", response_class=HTMLResponse)
+        async def topology_page(request: Request):
+            """Topology visualization page."""
+            if templates:
+                return templates.TemplateResponse(
+                    "topology.html",
+                    {"request": request, "version": VERSION}
+                )
+            return HTMLResponse(self._get_topology_html())
+
         # ==================== API Routes ====================
 
         @app.get("/api/status")
@@ -403,6 +413,90 @@ class WebApplication:
         async def api_config():
             """Get current configuration."""
             return self.config.to_dict()
+
+        # ==================== Topology API ====================
+
+        @app.get("/api/topology")
+        async def api_topology():
+            """Get mesh topology data including nodes, routes, and relationships."""
+            network = self.api.network
+            nodes_data = []
+
+            for node in network.nodes.values():
+                node_info = {
+                    "id": node.node_id,
+                    "name": node.display_name,
+                    "is_online": node.is_online,
+                    "hop_count": node.hop_count,
+                    "neighbors": node.neighbors,
+                    "heard_by": node.heard_by,
+                    "link_quality": node.link_quality.to_dict() if node.link_quality else None,
+                }
+                nodes_data.append(node_info)
+
+            routes_data = [route.to_dict() for route in network.routes.values()]
+
+            # Build edges from neighbor relationships
+            edges = []
+            seen_edges = set()
+            for node in network.nodes.values():
+                for neighbor_id in node.neighbors:
+                    edge_key = tuple(sorted([node.node_id, neighbor_id]))
+                    if edge_key not in seen_edges:
+                        seen_edges.add(edge_key)
+                        edges.append({
+                            "source": node.node_id,
+                            "target": neighbor_id,
+                            "type": "neighbor"
+                        })
+
+            return {
+                "nodes": nodes_data,
+                "routes": routes_data,
+                "edges": edges,
+                "total_nodes": len(network.nodes),
+                "online_nodes": len(network.online_nodes)
+            }
+
+        @app.get("/api/health")
+        async def api_mesh_health():
+            """Get mesh network health metrics."""
+            return self.api.network.mesh_health
+
+        @app.get("/api/channels")
+        async def api_channels():
+            """Get channel configurations and activity."""
+            network = self.api.network
+            channels_data = []
+
+            for idx, channel in sorted(network.channels.items()):
+                channels_data.append(channel.to_dict())
+
+            return {
+                "channels": channels_data,
+                "active_count": len(network.get_active_channels())
+            }
+
+        @app.get("/api/routes")
+        async def api_routes():
+            """Get known mesh routes."""
+            return {
+                "routes": [route.to_dict() for route in self.api.network.routes.values()],
+                "total": len(self.api.network.routes)
+            }
+
+        @app.get("/api/nodes/{node_id}/neighbors")
+        async def api_node_neighbors(node_id: str):
+            """Get neighbors for a specific node."""
+            node = self.api.network.get_node(node_id)
+            if not node:
+                raise HTTPException(status_code=404, detail="Node not found")
+            return {
+                "node_id": node_id,
+                "neighbors": node.neighbors,
+                "heard_by": node.heard_by,
+                "link_quality": node.link_quality.to_dict() if node.link_quality else None
+            }
 
         # ==================== WebSocket ====================
 
@@ -686,6 +780,288 @@ class WebApplication:
         });
 
         connect();
+    </script>
+</body>
+</html>
+        """
+
+    def _get_topology_html(self) -> str:
+        """Return embedded HTML for topology visualization."""
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesh Topology - Meshing-Around</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        header { background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { color: #00d4ff; font-size: 24px; }
+        nav a { color: #00d4ff; text-decoration: none; margin-left: 20px; }
+        nav a:hover { text-decoration: underline; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
+        .card { background: #1a1a2e; border-radius: 8px; padding: 20px; border: 1px solid #2a2a4e; }
+        .card h2 { color: #00d4ff; font-size: 16px; margin-bottom: 15px; border-bottom: 1px solid #2a2a4e; padding-bottom: 10px; }
+        .health-bar { height: 20px; background: #0a0a1a; border-radius: 10px; overflow: hidden; margin: 10px 0; }
+        .health-fill { height: 100%; transition: width 0.3s; }
+        .health-excellent { background: linear-gradient(90deg, #00ff88, #00cc66); }
+        .health-good { background: linear-gradient(90deg, #00cc66, #88cc00); }
+        .health-fair { background: linear-gradient(90deg, #ffcc00, #ff8800); }
+        .health-poor { background: linear-gradient(90deg, #ff8800, #ff4444); }
+        .health-critical { background: linear-gradient(90deg, #ff4444, #cc0000); }
+        .stat { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a1a2e; }
+        .stat-label { color: #888; }
+        .stat-value { color: #00d4ff; font-weight: bold; }
+        .node-tree { font-family: monospace; font-size: 13px; }
+        .node-tree .branch { margin-left: 20px; border-left: 1px solid #2a2a4e; padding-left: 15px; }
+        .node-tree .node { padding: 5px 0; display: flex; align-items: center; gap: 8px; }
+        .node-tree .online { color: #00ff88; }
+        .node-tree .offline { color: #ff4444; }
+        .node-tree .quality { font-size: 11px; padding: 2px 6px; border-radius: 4px; }
+        .quality-high { background: #00442244; color: #00ff88; }
+        .quality-med { background: #44440022; color: #ffcc00; }
+        .quality-low { background: #44000022; color: #ff4444; }
+        .hop-label { font-size: 12px; color: #888; font-weight: bold; margin: 10px 0 5px 0; }
+        .hop-0 { color: #00ff88; }
+        .hop-1 { color: #ffcc00; }
+        .hop-multi { color: #ff8844; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #2a2a4e; }
+        th { color: #00d4ff; font-weight: 600; }
+        .channel-primary { color: #00ff88; }
+        .channel-secondary { color: #00d4ff; }
+        .encrypted { color: #00ff88; }
+        .unencrypted { color: #ffcc00; }
+        #routes-list, #channels-list { max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Mesh Topology</h1>
+            <nav>
+                <a href="/">Dashboard</a>
+                <a href="/nodes">Nodes</a>
+                <a href="/messages">Messages</a>
+                <a href="/alerts">Alerts</a>
+                <a href="/topology">Topology</a>
+            </nav>
+        </header>
+
+        <div class="grid">
+            <div class="card">
+                <h2>Mesh Health</h2>
+                <div id="health-status">Loading...</div>
+                <div class="health-bar">
+                    <div id="health-fill" class="health-fill health-good" style="width: 0%"></div>
+                </div>
+                <div id="health-stats">
+                    <div class="stat"><span class="stat-label">Online Nodes</span><span class="stat-value" id="online-nodes">-</span></div>
+                    <div class="stat"><span class="stat-label">Average SNR</span><span class="stat-value" id="avg-snr">-</span></div>
+                    <div class="stat"><span class="stat-label">Channel Utilization</span><span class="stat-value" id="channel-util">-</span></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Network Topology</h2>
+                <div id="topology-tree" class="node-tree">Loading...</div>
+            </div>
+
+            <div class="card">
+                <h2>Known Routes</h2>
+                <div id="routes-list">
+                    <table>
+                        <thead>
+                            <tr><th>Destination</th><th>Hops</th><th>Avg SNR</th><th>Via</th></tr>
+                        </thead>
+                        <tbody id="routes-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Channels</h2>
+                <div id="channels-list">
+                    <table>
+                        <thead>
+                            <tr><th>Ch</th><th>Name</th><th>Role</th><th>Encrypted</th><th>Messages</th></tr>
+                        </thead>
+                        <tbody id="channels-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function loadHealth() {
+            try {
+                const resp = await fetch('/api/health');
+                const health = await resp.json();
+
+                document.getElementById('health-status').innerHTML =
+                    `<span style="font-size: 24px; font-weight: bold; color: ${getStatusColor(health.status)}">${health.status.toUpperCase()}</span>
+                     <span style="color: #888; margin-left: 10px;">${health.score}%</span>`;
+
+                const fill = document.getElementById('health-fill');
+                fill.style.width = health.score + '%';
+                fill.className = 'health-fill health-' + health.status;
+
+                document.getElementById('online-nodes').textContent = `${health.online_nodes} / ${health.total_nodes}`;
+                document.getElementById('avg-snr').textContent = `${health.avg_snr.toFixed(1)} dB`;
+                document.getElementById('channel-util').textContent = `${health.avg_channel_utilization.toFixed(1)}%`;
+            } catch (e) {
+                console.error('Failed to load health:', e);
+            }
+        }
+
+        function getStatusColor(status) {
+            const colors = {
+                'excellent': '#00ff88',
+                'good': '#00cc66',
+                'fair': '#ffcc00',
+                'poor': '#ff8800',
+                'critical': '#ff4444',
+                'unknown': '#888'
+            };
+            return colors[status] || '#888';
+        }
+
+        async function loadTopology() {
+            try {
+                const resp = await fetch('/api/topology');
+                const data = await resp.json();
+
+                const tree = document.getElementById('topology-tree');
+                tree.innerHTML = '';
+
+                // Group nodes by hop count
+                const groups = { 0: [], 1: [], multi: [] };
+                data.nodes.forEach(node => {
+                    if (node.hop_count === 0) groups[0].push(node);
+                    else if (node.hop_count === 1) groups[1].push(node);
+                    else groups.multi.push(node);
+                });
+
+                if (groups[0].length > 0) {
+                    tree.innerHTML += '<div class="hop-label hop-0">Direct (0 hops)</div>';
+                    tree.innerHTML += '<div class="branch">' + groups[0].map(n => renderNode(n)).join('') + '</div>';
+                }
+                if (groups[1].length > 0) {
+                    tree.innerHTML += '<div class="hop-label hop-1">1 Hop</div>';
+                    tree.innerHTML += '<div class="branch">' + groups[1].map(n => renderNode(n)).join('') + '</div>';
+                }
+                if (groups.multi.length > 0) {
+                    tree.innerHTML += '<div class="hop-label hop-multi">Multi-hop</div>';
+                    tree.innerHTML += '<div class="branch">' + groups.multi.map(n => renderNode(n)).join('') + '</div>';
+                }
+
+                if (data.nodes.length === 0) {
+                    tree.innerHTML = '<div style="color: #888;">No nodes discovered yet</div>';
+                }
+            } catch (e) {
+                console.error('Failed to load topology:', e);
+            }
+        }
+
+        function renderNode(node) {
+            const status = node.is_online ? '<span class="online">●</span>' : '<span class="offline">●</span>';
+            let quality = '';
+            if (node.link_quality && node.link_quality.packet_count > 0) {
+                const pct = node.link_quality.quality_percent;
+                const cls = pct >= 70 ? 'quality-high' : pct >= 40 ? 'quality-med' : 'quality-low';
+                quality = `<span class="quality ${cls}">${pct}%</span>`;
+            }
+            let neighbors = '';
+            if (node.neighbors && node.neighbors.length > 0) {
+                const list = node.neighbors.slice(0, 3).map(n => n.slice(-6)).join(', ');
+                const more = node.neighbors.length > 3 ? ` +${node.neighbors.length - 3}` : '';
+                neighbors = `<div style="font-size: 11px; color: #666; margin-left: 28px;">Hears: ${escapeHtml(list)}${more}</div>`;
+            }
+            return `<div class="node">${status} ${escapeHtml(node.name)} ${quality}</div>${neighbors}`;
+        }
+
+        async function loadRoutes() {
+            try {
+                const resp = await fetch('/api/routes');
+                const data = await resp.json();
+                const tbody = document.getElementById('routes-body');
+                tbody.innerHTML = '';
+
+                if (data.routes.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="4" style="color: #888;">No routes discovered</td></tr>';
+                    return;
+                }
+
+                data.routes.forEach(route => {
+                    const hopStyle = route.hop_count <= 1 ? 'color: #00ff88' : route.hop_count <= 3 ? 'color: #ffcc00' : 'color: #ff8844';
+                    const snrStyle = route.avg_snr > 0 ? 'color: #00ff88' : route.avg_snr > -10 ? 'color: #ffcc00' : 'color: #ff4444';
+                    const via = route.hops && route.hops.length > 0 ? `via ${route.hops[0].node_id.slice(-6)}` : '-';
+
+                    tbody.innerHTML += `<tr>
+                        <td>${escapeHtml(route.destination_id.slice(-8))}</td>
+                        <td style="${hopStyle}">${route.hop_count}</td>
+                        <td style="${snrStyle}">${route.avg_snr.toFixed(1)} dB</td>
+                        <td style="color: #888;">${escapeHtml(via)}</td>
+                    </tr>`;
+                });
+            } catch (e) {
+                console.error('Failed to load routes:', e);
+            }
+        }
+
+        async function loadChannels() {
+            try {
+                const resp = await fetch('/api/channels');
+                const data = await resp.json();
+                const tbody = document.getElementById('channels-body');
+                tbody.innerHTML = '';
+
+                data.channels.filter(ch => ch.role !== 'DISABLED').forEach(ch => {
+                    const roleClass = ch.role === 'PRIMARY' ? 'channel-primary' : 'channel-secondary';
+                    const encClass = ch.is_encrypted ? 'encrypted' : 'unencrypted';
+                    const encText = ch.is_encrypted ? 'Yes' : 'No';
+
+                    tbody.innerHTML += `<tr>
+                        <td>${ch.index}</td>
+                        <td>${escapeHtml(ch.display_name)}</td>
+                        <td class="${roleClass}">${ch.role}</td>
+                        <td class="${encClass}">${encText}</td>
+                        <td>${ch.message_count}</td>
+                    </tr>`;
+                });
+
+                if (tbody.innerHTML === '') {
+                    tbody.innerHTML = '<tr><td colspan="5" style="color: #888;">No active channels</td></tr>';
+                }
+            } catch (e) {
+                console.error('Failed to load channels:', e);
+            }
+        }
+
+        // Initial load
+        loadHealth();
+        loadTopology();
+        loadRoutes();
+        loadChannels();
+
+        // Refresh periodically
+        setInterval(() => {
+            loadHealth();
+            loadTopology();
+            loadRoutes();
+            loadChannels();
+        }, 5000);
     </script>
 </body>
 </html>
