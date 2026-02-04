@@ -172,23 +172,30 @@ class SentryConfig:
 
     @classmethod
     def from_upstream(cls, data: Dict[str, Any]) -> 'SentryConfig':
-        """Create from upstream [sentry] section format."""
-        ignore_str = data.get('sentryIgnoreList', '')
-        watch_str = data.get('sentryWatchList', '')
+        """Create from upstream [sentry] section format.
+
+        Note: ConfigParser lowercases all keys, so we check both cases.
+        """
+        # Helper to get value with case-insensitive key lookup
+        def get_ci(key: str, default: Any = '') -> Any:
+            return data.get(key.lower(), data.get(key, default))
+
+        ignore_str = get_ci('sentryIgnoreList', '')
+        watch_str = get_ci('sentryWatchList', '')
 
         return cls(
-            enabled=_str_to_bool(data.get('SentryEnabled', False)),
-            interface=int(data.get('SentryInterface', 1)),
-            channel=int(data.get('SentryChannel', 2)),
-            radius_meters=int(data.get('SentryRadius', 100)),
-            holdoff_multiplier=int(data.get('SentryHoldoff', 9)),
+            enabled=_str_to_bool(get_ci('SentryEnabled', False)),
+            interface=int(get_ci('SentryInterface', 1)),
+            channel=int(get_ci('SentryChannel', 2)),
+            radius_meters=int(get_ci('SentryRadius', 100)),
+            holdoff_multiplier=int(get_ci('SentryHoldoff', 9)),
             ignore_list=_str_to_list(ignore_str),
             watch_list=_str_to_list(watch_str),
-            email_alerts=_str_to_bool(data.get('emailSentryAlerts', False)),
-            detection_sensor=_str_to_bool(data.get('detectionSensorAlert', False)),
-            run_script=_str_to_bool(data.get('cmdShellSentryAlerts', False)),
-            script_near=str(data.get('sentryAlertNear', 'sentry_alert_near.sh')),
-            script_away=str(data.get('sentryAlertAway', 'sentry_alert_away.sh'))
+            email_alerts=_str_to_bool(get_ci('emailSentryAlerts', False)),
+            detection_sensor=_str_to_bool(get_ci('detectionSensorAlert', False)),
+            run_script=_str_to_bool(get_ci('cmdShellSentryAlerts', False)),
+            script_near=str(get_ci('sentryAlertNear', 'sentry_alert_near.sh')),
+            script_away=str(get_ci('sentryAlertAway', 'sentry_alert_away.sh'))
         )
 
     @classmethod
@@ -229,15 +236,22 @@ class AltitudeAlertConfig:
 
     @classmethod
     def from_upstream(cls, sentry_data: Dict[str, Any]) -> 'AltitudeAlertConfig':
-        """Create from upstream [sentry] section (high flying fields)."""
-        ignore_str = sentry_data.get('highFlyingIgnoreList', '')
+        """Create from upstream [sentry] section (high flying fields).
+
+        Note: ConfigParser lowercases all keys, so we check both cases.
+        """
+        # Helper to get value with case-insensitive key lookup
+        def get_ci(key: str, default: Any = '') -> Any:
+            return sentry_data.get(key.lower(), sentry_data.get(key, default))
+
+        ignore_str = get_ci('highFlyingIgnoreList', '')
 
         return cls(
-            enabled=_str_to_bool(sentry_data.get('highFlyingAlert', False)),
-            min_altitude=int(sentry_data.get('highFlyingAlertAltitude', 2000)),
-            check_openskynetwork=_str_to_bool(sentry_data.get('highflyOpenskynetwork', True)),
-            interface=int(sentry_data.get('highFlyingAlertInterface', 1)),
-            channel=int(sentry_data.get('highFlyingAlertChannel', 2)),
+            enabled=_str_to_bool(get_ci('highFlyingAlert', False)),
+            min_altitude=int(get_ci('highFlyingAlertAltitude', 2000)),
+            check_openskynetwork=_str_to_bool(get_ci('highflyOpenskynetwork', True)),
+            interface=int(get_ci('highFlyingAlertInterface', 1)),
+            channel=int(get_ci('highFlyingAlertChannel', 2)),
             ignore_list=_str_to_list(ignore_str)
         )
 
@@ -614,13 +628,32 @@ class ConfigLoader:
 
     @staticmethod
     def _load_meshforge(parser: configparser.ConfigParser, path: Path) -> UnifiedConfig:
-        """Load MeshForge config format."""
+        """Load MeshForge config format.
+
+        Supports multi-interface with sections:
+        - [interface] or [interface.1] for first interface
+        - [interface.2], [interface.3], ..., [interface.9] for additional
+        """
         config = UnifiedConfig(config_path=path, config_format="meshforge")
 
-        # Load interface
-        if parser.has_section('interface'):
-            data = dict(parser.items('interface'))
-            config.interfaces = [InterfaceConfig.from_dict(data)]
+        # Load interfaces (supports interface, interface.1, interface.2, ..., interface.9)
+        interfaces = []
+        for i in range(1, 10):
+            # Check both formats: [interface] or [interface.1] for first, [interface.N] for rest
+            if i == 1:
+                sections = ['interface', 'interface.1']
+            else:
+                sections = [f'interface.{i}']
+
+            for section in sections:
+                if parser.has_section(section):
+                    data = dict(parser.items(section))
+                    iface = InterfaceConfig.from_dict(data)
+                    interfaces.append(iface)
+                    break  # Found this interface, move to next
+
+        if interfaces:
+            config.interfaces = interfaces
 
         # Load general
         if parser.has_section('general'):
@@ -697,16 +730,19 @@ class ConfigLoader:
 
     @staticmethod
     def save(config: UnifiedConfig, path: Optional[Path] = None) -> bool:
-        """Save configuration to file."""
+        """Save configuration to file in MeshForge format.
+
+        Uses [interface.1], [interface.2], etc. for multi-interface support.
+        """
         path = path or config.config_path
         if not path:
             return False
 
         parser = configparser.ConfigParser()
 
-        # Save interfaces
+        # Save interfaces (use interface.1, interface.2, etc. for MeshForge format)
         for i, iface in enumerate(config.interfaces):
-            section = 'interface' if i == 0 else f'interface{i+1}'
+            section = f'interface.{i+1}'
             parser.add_section(section)
             for key, value in iface.to_dict().items():
                 parser.set(section, key, str(value))
@@ -714,8 +750,12 @@ class ConfigLoader:
         # Save general
         parser.add_section('general')
         parser.set('general', 'bot_name', config.general.bot_name)
+        parser.set('general', 'respond_by_dm_only', str(config.general.respond_by_dm_only))
+        parser.set('general', 'default_channel', str(config.general.default_channel))
         parser.set('general', 'favoriteNodeList', ','.join(config.general.favorite_nodes))
         parser.set('general', 'bbs_admin_list', ','.join(config.general.admin_nodes))
+        parser.set('general', 'motd', config.general.motd)
+        parser.set('general', 'log_messages', str(config.general.log_messages))
 
         # Save emergency handler
         parser.add_section('emergencyHandler')
@@ -723,16 +763,56 @@ class ConfigLoader:
         parser.set('emergencyHandler', 'emergency_keywords', ','.join(config.emergency.keywords))
         parser.set('emergencyHandler', 'alert_channel', str(config.emergency.alert_channel))
         parser.set('emergencyHandler', 'cooldown_period', str(config.emergency.cooldown_period))
+        parser.set('emergencyHandler', 'send_email', str(config.emergency.send_email))
+        parser.set('emergencyHandler', 'log_to_file', str(config.emergency.log_to_file))
+
+        # Save proximity alert (sentry)
+        parser.add_section('proximityAlert')
+        parser.set('proximityAlert', 'enabled', str(config.sentry.enabled))
+        parser.set('proximityAlert', 'target_latitude', str(config.sentry.target_latitude))
+        parser.set('proximityAlert', 'target_longitude', str(config.sentry.target_longitude))
+        parser.set('proximityAlert', 'radius_meters', str(config.sentry.radius_meters))
+        parser.set('proximityAlert', 'alert_channel', str(config.sentry.channel))
+        parser.set('proximityAlert', 'check_interval', str(config.sentry.check_interval))
+        parser.set('proximityAlert', 'log_to_file', str(config.sentry.log_to_file))
+
+        # Save altitude alert
+        parser.add_section('altitudeAlert')
+        parser.set('altitudeAlert', 'enabled', str(config.altitude.enabled))
+        parser.set('altitudeAlert', 'min_altitude', str(config.altitude.min_altitude))
+        parser.set('altitudeAlert', 'alert_channel', str(config.altitude.channel))
+        parser.set('altitudeAlert', 'check_interval', str(config.altitude.check_interval))
+        parser.set('altitudeAlert', 'log_to_file', str(config.altitude.log_to_file))
 
         # Save MQTT
         parser.add_section('mqtt')
         parser.set('mqtt', 'enabled', str(config.mqtt.enabled))
         parser.set('mqtt', 'broker', config.mqtt.broker)
         parser.set('mqtt', 'port', str(config.mqtt.port))
+        parser.set('mqtt', 'use_tls', str(config.mqtt.use_tls))
         parser.set('mqtt', 'username', config.mqtt.username)
         parser.set('mqtt', 'password', config.mqtt.password)
         parser.set('mqtt', 'topic_root', config.mqtt.topic_root)
         parser.set('mqtt', 'channel', config.mqtt.channel)
+        parser.set('mqtt', 'encryption_key', config.mqtt.encryption_key)
+
+        # Save TUI config
+        parser.add_section('tui')
+        parser.set('tui', 'refresh_rate', str(config.tui.refresh_rate))
+        parser.set('tui', 'color_scheme', config.tui.color_scheme)
+        parser.set('tui', 'show_timestamps', str(config.tui.show_timestamps))
+        parser.set('tui', 'message_history', str(config.tui.message_history))
+        parser.set('tui', 'alert_sound', str(config.tui.alert_sound))
+
+        # Save Web config
+        parser.add_section('web')
+        parser.set('web', 'host', config.web.host)
+        parser.set('web', 'port', str(config.web.port))
+        parser.set('web', 'debug', str(config.web.debug))
+        parser.set('web', 'enable_auth', str(config.web.enable_auth))
+        parser.set('web', 'username', config.web.username)
+        if config.web.api_key:
+            parser.set('web', 'api_key', config.web.api_key)
 
         # Save auto-update
         parser.add_section('auto_update')

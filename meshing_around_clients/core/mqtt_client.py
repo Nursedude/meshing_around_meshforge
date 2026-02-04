@@ -40,7 +40,8 @@ try:
         node_id_to_num, node_num_to_id, CRYPTO_AVAILABLE, PROTOBUF_AVAILABLE
     )
     MESH_CRYPTO_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError, Exception):
+    # Catch any exception including pyo3 panics from cryptography backend
     MESH_CRYPTO_AVAILABLE = False
     CRYPTO_AVAILABLE = False
     PROTOBUF_AVAILABLE = False

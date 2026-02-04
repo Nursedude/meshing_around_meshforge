@@ -334,6 +334,53 @@ class TestMQTTConnectionManager(unittest.TestCase):
         self.assertTrue(callable(MQTTConnectionManager))
 
 
+class TestMQTTConnectivity(unittest.TestCase):
+    """Test MQTT broker connectivity using socket (no paho-mqtt required)."""
+
+    def test_socket_connectivity_to_broker(self):
+        """Test basic TCP connectivity to mqtt.meshtastic.org."""
+        import socket
+
+        brokers = [
+            ("mqtt.meshtastic.org", 1883),
+        ]
+
+        for host, port in brokers:
+            try:
+                sock = socket.create_connection((host, port), timeout=5)
+                sock.close()
+                # Connection successful
+                return
+            except (socket.error, OSError, socket.timeout) as e:
+                continue
+
+        self.skipTest("No network connectivity to MQTT broker")
+
+    def test_dns_resolution(self):
+        """Test DNS resolution for mqtt.meshtastic.org."""
+        import socket
+
+        try:
+            ip = socket.gethostbyname("mqtt.meshtastic.org")
+            self.assertTrue(len(ip) > 0)
+        except socket.gaierror:
+            self.skipTest("DNS resolution failed - no network")
+
+    def test_default_credentials_format(self):
+        """Verify default MQTT credentials are properly formatted."""
+        from meshing_around_clients.core.mqtt_client import MQTTConfig
+        cfg = MQTTConfig()
+
+        # Credentials should be non-empty strings
+        self.assertIsInstance(cfg.username, str)
+        self.assertIsInstance(cfg.password, str)
+        self.assertTrue(len(cfg.username) > 0, "Username should not be empty")
+        self.assertTrue(len(cfg.password) > 0, "Password should not be empty")
+
+        # Topic root should be valid
+        self.assertTrue(cfg.topic_root.startswith("msh/"))
+
+
 # Integration tests - require network and paho-mqtt
 @unittest.skipUnless(
     __import__('importlib.util').util.find_spec('paho'),

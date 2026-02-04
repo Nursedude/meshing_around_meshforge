@@ -1,0 +1,202 @@
+{% extends "base.html" %}
+
+{% block title %}Topology{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Mesh Network Topology</h1>
+    <div class="page-actions">
+        <button class="btn btn-secondary" onclick="refreshTopology()">Refresh</button>
+    </div>
+</div>
+
+<div class="topology-page">
+    <div class="topology-grid">
+        <!-- Mesh Health Card -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Mesh Health</h2>
+            </div>
+            <div class="panel-content">
+                <div id="health-status" class="health-status">Loading...</div>
+                <div class="health-bar">
+                    <div id="health-fill" class="health-fill" style="width: 0%"></div>
+                </div>
+                <div class="health-metrics" id="health-metrics">
+                    <div class="metric">
+                        <span class="metric-label">Online Nodes</span>
+                        <span class="metric-value" id="metric-online">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg SNR</span>
+                        <span class="metric-value" id="metric-snr">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Channel Util</span>
+                        <span class="metric-value" id="metric-util">-</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Network Tree View -->
+        <div class="panel panel-wide">
+            <div class="panel-header">
+                <h2>Network Topology</h2>
+            </div>
+            <div class="panel-content">
+                <div id="topology-tree" class="node-tree">
+                    Loading topology...
+                </div>
+            </div>
+        </div>
+
+        <!-- Routes Table -->
+        <div class="panel full-width">
+            <div class="panel-header">
+                <h2>Known Routes</h2>
+            </div>
+            <div class="panel-content">
+                <table class="data-table data-table-full">
+                    <thead>
+                        <tr>
+                            <th>Destination</th>
+                            <th>Hops</th>
+                            <th>Avg SNR</th>
+                            <th>Via</th>
+                            <th>Last Updated</th>
+                        </tr>
+                    </thead>
+                    <tbody id="routes-body">
+                        <tr><td colspan="5" class="empty-message">Loading routes...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Neighbor Relationships -->
+        <div class="panel full-width">
+            <div class="panel-header">
+                <h2>Node Relationships</h2>
+            </div>
+            <div class="panel-content">
+                <div id="relationships" class="relationships-grid">
+                    Loading relationships...
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    loadTopology();
+    setInterval(loadTopology, 30000);  // Refresh every 30 seconds
+});
+
+function refreshTopology() {
+    loadTopology();
+}
+
+async function loadTopology() {
+    try {
+        const resp = await fetch('/api/topology');
+        const data = await resp.json();
+
+        // Update health status
+        const health = data.health;
+        document.getElementById('health-status').textContent = health.status.toUpperCase();
+        document.getElementById('health-fill').style.width = health.score + '%';
+        document.getElementById('health-fill').className = 'health-fill health-' + health.status;
+        document.getElementById('metric-online').textContent = health.online_nodes + '/' + health.total_nodes;
+        document.getElementById('metric-snr').textContent = (health.avg_snr || 0).toFixed(1) + ' dB';
+        document.getElementById('metric-util').textContent = (health.avg_channel_utilization || 0).toFixed(0) + '%';
+
+        // Update topology tree
+        const tree = document.getElementById('topology-tree');
+        tree.innerHTML = '';
+
+        // Group nodes by hop count
+        const groups = { direct: [], oneHop: [], multiHop: [] };
+        data.nodes.forEach(node => {
+            if (node.hop_count === 0) groups.direct.push(node);
+            else if (node.hop_count === 1) groups.oneHop.push(node);
+            else groups.multiHop.push(node);
+        });
+
+        // Render groups
+        if (groups.direct.length > 0) {
+            tree.innerHTML += '<div class="node-group"><h3>Direct Connection (0 hops)</h3><div class="node-list">' +
+                groups.direct.map(renderNode).join('') + '</div></div>';
+        }
+        if (groups.oneHop.length > 0) {
+            tree.innerHTML += '<div class="node-group"><h3>1 Hop Away</h3><div class="node-list">' +
+                groups.oneHop.map(renderNode).join('') + '</div></div>';
+        }
+        if (groups.multiHop.length > 0) {
+            tree.innerHTML += '<div class="node-group"><h3>Multi-Hop</h3><div class="node-list">' +
+                groups.multiHop.map(renderNode).join('') + '</div></div>';
+        }
+
+        if (data.nodes.length === 0) {
+            tree.innerHTML = '<div class="empty-message">No nodes discovered yet</div>';
+        }
+
+        // Update routes
+        const routesBody = document.getElementById('routes-body');
+        if (data.routes && data.routes.length > 0) {
+            routesBody.innerHTML = data.routes.map(route => `
+                <tr>
+                    <td>${escapeHtml(route.destination_id)}</td>
+                    <td>${route.hop_count}</td>
+                    <td>${(route.snr_avg || 0).toFixed(1)} dB</td>
+                    <td>${route.hops ? route.hops.map(h => escapeHtml(h.node_id || '')).join(' → ') : 'Direct'}</td>
+                    <td>${route.last_update ? new Date(route.last_update).toLocaleTimeString() : '-'}</td>
+                </tr>
+            `).join('');
+        } else {
+            routesBody.innerHTML = '<tr><td colspan="5" class="empty-message">No routes discovered</td></tr>';
+        }
+
+        // Update relationships
+        const relDiv = document.getElementById('relationships');
+        const nodesWithNeighbors = data.nodes.filter(n => n.neighbors && n.neighbors.length > 0);
+        if (nodesWithNeighbors.length > 0) {
+            relDiv.innerHTML = nodesWithNeighbors.map(node => `
+                <div class="relationship-card">
+                    <div class="rel-node">${escapeHtml(node.name)}</div>
+                    <div class="rel-label">hears</div>
+                    <div class="rel-neighbors">${node.neighbors.map(n => escapeHtml(n)).join(', ')}</div>
+                </div>
+            `).join('');
+        } else {
+            relDiv.innerHTML = '<div class="empty-message">No neighbor relationships discovered</div>';
+        }
+
+    } catch (e) {
+        console.error('Failed to load topology:', e);
+        document.getElementById('topology-tree').innerHTML = '<div class="empty-message">Failed to load topology data</div>';
+    }
+}
+
+function renderNode(node) {
+    const status = node.is_online ? '<span class="status-online">●</span>' : '<span class="status-offline">●</span>';
+    let quality = '';
+    if (node.link_quality && node.link_quality.packet_count > 0) {
+        const pct = node.link_quality.quality_percent || 0;
+        const cls = pct >= 70 ? 'quality-high' : pct >= 40 ? 'quality-med' : 'quality-low';
+        quality = `<span class="quality ${cls}">${pct}%</span>`;
+    }
+    return `
+        <div class="topology-node" onclick="showNodeDetails('${escapeHtml(node.id)}')">
+            ${status}
+            <span class="node-name">${escapeHtml(node.name)}</span>
+            ${quality}
+            ${node.hop_count > 0 ? `<span class="hop-count">${node.hop_count} hop${node.hop_count > 1 ? 's' : ''}</span>` : ''}
+        </div>
+    `;
+}
+</script>
+{% endblock %}

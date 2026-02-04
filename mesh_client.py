@@ -512,6 +512,94 @@ def detect_connection_type(config: ConfigParser) -> str:
 
 
 # =============================================================================
+# CONFIG IMPORT
+# =============================================================================
+
+def import_upstream_config(source_path: str):
+    """Import configuration from upstream meshing-around config.ini.
+
+    Converts upstream format to MeshForge format and saves to mesh_client.ini.
+
+    Args:
+        source_path: Path to upstream config.ini file
+    """
+    from pathlib import Path
+
+    source = Path(source_path)
+    if not source.exists():
+        log(f"Config file not found: {source_path}", "ERROR")
+        return
+
+    log(f"Importing config from: {source_path}", "INFO")
+
+    try:
+        # Try to use the config_schema module for proper conversion
+        from meshing_around_clients.core.config_schema import ConfigLoader, UnifiedConfig
+        SCHEMA_AVAILABLE = True
+    except ImportError:
+        SCHEMA_AVAILABLE = False
+
+    if SCHEMA_AVAILABLE:
+        # Use schema-based import
+        config = ConfigLoader.load(source)
+
+        if config.config_format == "upstream":
+            log("Detected upstream meshing-around format", "OK")
+        else:
+            log("Config appears to be MeshForge format already", "WARN")
+
+        # Save to MeshForge format
+        dest = Path(CONFIG_PATH)
+        config.config_format = "meshforge"
+
+        if ConfigLoader.save(config, dest):
+            log(f"Config imported to: {dest}", "OK")
+            log(f"  Interfaces: {len(config.interfaces)}", "INFO")
+            log(f"  Bot name: {config.general.bot_name}", "INFO")
+            log(f"  MQTT enabled: {config.mqtt.enabled}", "INFO")
+            log("Run 'python3 mesh_client.py' to start with imported config", "INFO")
+        else:
+            log("Failed to save imported config", "ERROR")
+    else:
+        # Fallback: simple INI copy with minimal conversion
+        import configparser
+
+        parser = configparser.ConfigParser()
+        parser.read(source)
+
+        # Create new config with basic conversion
+        new_parser = configparser.ConfigParser()
+
+        # Copy interface section
+        if parser.has_section('interface'):
+            new_parser.add_section('interface.1')
+            for key, value in parser.items('interface'):
+                new_parser.set('interface.1', key, value)
+
+        # Copy general section
+        if parser.has_section('general'):
+            new_parser.add_section('general')
+            for key, value in parser.items('general'):
+                new_parser.set('general', key, value)
+
+        # Copy MQTT if present
+        for section in ['mqtt', 'emergencyHandler']:
+            if parser.has_section(section):
+                new_parser.add_section(section)
+                for key, value in parser.items(section):
+                    new_parser.set(section, key, value)
+
+        # Save
+        dest = Path(CONFIG_PATH)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, 'w') as f:
+            new_parser.write(f)
+
+        log(f"Config imported (basic) to: {dest}", "OK")
+        log("Note: Install dependencies for full format conversion", "INFO")
+
+
+# =============================================================================
 # INTERACTIVE SETUP
 # =============================================================================
 
@@ -725,6 +813,7 @@ Examples:
   python3 mesh_client.py --setup      # Interactive setup
   python3 mesh_client.py --demo       # Demo mode (no hardware)
   python3 mesh_client.py --check      # Check dependencies only
+  python3 mesh_client.py --import-config /path/to/config.ini  # Import upstream config
         """
     )
 
@@ -735,6 +824,8 @@ Examples:
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
+    parser.add_argument("--import-config", metavar="PATH",
+                        help="Import config from upstream meshing-around config.ini")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     args = parser.parse_args()
@@ -754,6 +845,11 @@ Examples:
     # Interactive setup
     if args.setup:
         interactive_setup()
+        sys.exit(0)
+
+    # Import upstream config
+    if args.import_config:
+        import_upstream_config(args.import_config)
         sys.exit(0)
 
     # Load config
