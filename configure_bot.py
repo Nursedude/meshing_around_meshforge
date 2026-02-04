@@ -13,65 +13,106 @@ Features:
 - Virtual environment setup for PEP 668 compliance
 - Serial port detection and configuration
 - raspi-config integration for Raspberry Pi
+
+Now uses modular components from meshing_around_clients.core:
+- cli_utils: Terminal colors, printing, user input
+- pi_utils: Pi detection, serial ports, venv management
+- system_maintenance: Updates, git operations, systemd services
+- alert_configurators: Alert configuration wizards
 """
 
 import os
 import sys
 import subprocess
 import shutil
-import re
 import time
 import configparser
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
-from getpass import getpass
 
 # Version info
 VERSION = "0.5.0-beta"
 SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
-class Colors:
-    """ANSI color codes for terminal output"""
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+# Try to import modular components - fallback to inline if not available
+try:
+    from meshing_around_clients.core.cli_utils import (
+        Colors, print_header, print_section, print_success, print_warning,
+        print_error, print_info, print_step, get_input, get_yes_no,
+        validate_mac_address, validate_coordinates
+    )
+    from meshing_around_clients.core.pi_utils import (
+        is_raspberry_pi, get_pi_model, get_os_info, is_bookworm_or_newer,
+        check_pep668_environment, get_serial_ports, get_serial_port_list,
+        check_user_groups, add_user_to_dialout, get_default_venv_path,
+        check_venv_exists, create_venv, get_pip_command, get_pip_install_flags,
+        get_python_command, get_pi_config_path, check_serial_enabled,
+        configure_serial_via_raspi_config, get_pi_info, is_pi_zero_2w,
+        get_recommended_connection_mode
+    )
+    from meshing_around_clients.core.system_maintenance import (
+        run_command, system_update as do_system_update, find_meshing_around,
+        git_pull, update_upstream, update_meshforge, check_for_updates,
+        install_python_dependencies, create_systemd_service as create_service,
+        manage_service, check_service_status, clone_meshing_around,
+        install_package, check_required_packages
+    )
+    from meshing_around_clients.core.alert_configurators import (
+        configure_interface, configure_general, configure_emergency_alerts,
+        configure_proximity_alerts, configure_altitude_alerts,
+        configure_weather_alerts, configure_battery_alerts,
+        configure_noisy_node_alerts, configure_new_node_alerts,
+        configure_disconnect_alerts, configure_email_sms,
+        configure_global_settings, create_basic_config, ALERT_CONFIGURATORS
+    )
+    MODULES_AVAILABLE = True
+except ImportError:
+    MODULES_AVAILABLE = False
+    # Fallback: define inline versions (legacy support)
+    from getpass import getpass
 
-def print_header(text: str):
-    """Print a formatted header"""
-    print(f"\n{Colors.HEADER}{Colors.BOLD}{'='*70}{Colors.ENDC}")
-    print(f"{Colors.HEADER}{Colors.BOLD}{text:^70}{Colors.ENDC}")
-    print(f"{Colors.HEADER}{Colors.BOLD}{'='*70}{Colors.ENDC}\n")
+    class Colors:
+        """ANSI color codes for terminal output"""
+        HEADER = '\033[95m'
+        OKBLUE = '\033[94m'
+        OKCYAN = '\033[96m'
+        OKGREEN = '\033[92m'
+        WARNING = '\033[93m'
+        FAIL = '\033[91m'
+        ENDC = '\033[0m'
+        BOLD = '\033[1m'
+        UNDERLINE = '\033[4m'
 
-def print_section(text: str):
-    """Print a section header"""
-    print(f"\n{Colors.OKCYAN}{Colors.BOLD}{text}{Colors.ENDC}")
-    print(f"{Colors.OKCYAN}{'-'*len(text)}{Colors.ENDC}")
+    def print_header(text: str):
+        """Print a formatted header"""
+        print(f"\n{Colors.HEADER}{Colors.BOLD}{'='*70}{Colors.ENDC}")
+        print(f"{Colors.HEADER}{Colors.BOLD}{text:^70}{Colors.ENDC}")
+        print(f"{Colors.HEADER}{Colors.BOLD}{'='*70}{Colors.ENDC}\n")
 
-def print_success(text: str):
-    """Print success message"""
-    print(f"{Colors.OKGREEN}✓ {text}{Colors.ENDC}")
+    def print_section(text: str):
+        """Print a section header"""
+        print(f"\n{Colors.OKCYAN}{Colors.BOLD}{text}{Colors.ENDC}")
+        print(f"{Colors.OKCYAN}{'-'*len(text)}{Colors.ENDC}")
 
-def print_warning(text: str):
-    """Print warning message"""
-    print(f"{Colors.WARNING}⚠ {text}{Colors.ENDC}")
+    def print_success(text: str):
+        """Print success message"""
+        print(f"{Colors.OKGREEN}✓ {text}{Colors.ENDC}")
 
-def print_error(text: str):
-    """Print error message"""
-    print(f"{Colors.FAIL}✗ {text}{Colors.ENDC}")
+    def print_warning(text: str):
+        """Print warning message"""
+        print(f"{Colors.WARNING}⚠ {text}{Colors.ENDC}")
 
-def print_info(text: str):
-    """Print info message"""
-    print(f"{Colors.OKBLUE}ℹ {text}{Colors.ENDC}")
+    def print_error(text: str):
+        """Print error message"""
+        print(f"{Colors.FAIL}✗ {text}{Colors.ENDC}")
 
-def print_step(current: int, total: int, text: str):
-    """Print step progress"""
-    print(f"{Colors.OKCYAN}[{current}/{total}] {text}{Colors.ENDC}")
+    def print_info(text: str):
+        """Print info message"""
+        print(f"{Colors.OKBLUE}ℹ {text}{Colors.ENDC}")
+
+    def print_step(current: int, total: int, text: str):
+        """Print step progress"""
+        print(f"{Colors.OKCYAN}[{current}/{total}] {text}{Colors.ENDC}")
 
 def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False) -> Tuple[int, str, str]:
     """Run a shell command with optional sudo and output"""

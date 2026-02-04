@@ -9,6 +9,7 @@ This module provides:
 """
 
 import base64
+import binascii
 import hashlib
 import struct
 from typing import Optional, Dict, Any, Tuple
@@ -121,7 +122,10 @@ class MeshCrypto:
             self._derived_key = self._derive_key(raw_key)
             return True
 
-        except Exception:
+        except (binascii.Error, ValueError, TypeError):
+            # binascii.Error: Invalid base64 padding/characters
+            # ValueError: Invalid base64 string
+            # TypeError: Non-string/bytes input
             return False
 
     def _derive_key(self, raw_key: bytes) -> bytes:
@@ -186,7 +190,10 @@ class MeshCrypto:
             decryptor = cipher.decryptor()
             return decryptor.update(encrypted_data) + decryptor.finalize()
 
-        except Exception:
+        except (ValueError, TypeError, struct.error):
+            # ValueError: Invalid key/nonce size or cipher error
+            # TypeError: Invalid input types
+            # struct.error: Nonce packing error
             return b""
 
     def encrypt(self, plaintext: bytes, packet_id: int, sender: int) -> bytes:
@@ -217,7 +224,10 @@ class MeshCrypto:
             encryptor = cipher.encryptor()
             return encryptor.update(plaintext) + encryptor.finalize()
 
-        except Exception:
+        except (ValueError, TypeError, struct.error):
+            # ValueError: Invalid key/nonce size or cipher error
+            # TypeError: Invalid input types
+            # struct.error: Nonce packing error
             return b""
 
 
@@ -305,7 +315,11 @@ class ProtobufDecoder:
 
             return result
 
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # KeyError: Missing expected fields
+            # AttributeError: Protobuf structure mismatch
             return {"error": str(e)}
 
     def _decode_data_payload(self, data) -> Dict[str, Any]:
@@ -345,7 +359,12 @@ class ProtobufDecoder:
                 result.update(self._decode_routing(data.payload))
                 result["type"] = "routing"
 
-        except Exception as e:
+        except (ValueError, TypeError, KeyError, AttributeError, UnicodeDecodeError) as e:
+            # ValueError: Invalid payload data
+            # TypeError: Unexpected data types
+            # KeyError: Missing expected keys
+            # AttributeError: Missing protobuf fields
+            # UnicodeDecodeError: Invalid UTF-8 in text messages
             result["decode_error"] = str(e)
 
         return result
@@ -371,7 +390,10 @@ class ProtobufDecoder:
                     "precision_bits": pos.precision_bits if hasattr(pos, 'precision_bits') else 0,
                 }
             }
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return {"position_error": str(e)}
 
     def _decode_nodeinfo(self, payload: bytes) -> Dict[str, Any]:
@@ -393,7 +415,10 @@ class ProtobufDecoder:
                     "role": user.role if hasattr(user, 'role') else 0,
                 }
             }
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return {"nodeinfo_error": str(e)}
 
     def _decode_telemetry(self, payload: bytes) -> Dict[str, Any]:
@@ -430,7 +455,10 @@ class ProtobufDecoder:
 
             return result
 
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return {"telemetry_error": str(e)}
 
     def _decode_traceroute(self, payload: bytes) -> Dict[str, Any]:
@@ -450,7 +478,10 @@ class ProtobufDecoder:
                     "snr_back": list(route.snr_back) if hasattr(route, 'snr_back') else [],
                 }
             }
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return {"traceroute_error": str(e)}
 
     def _decode_neighborinfo(self, payload: bytes) -> Dict[str, Any]:
@@ -478,7 +509,10 @@ class ProtobufDecoder:
                     "neighbors": neighbors,
                 }
             }
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return {"neighborinfo_error": str(e)}
 
     def _decode_routing(self, payload: bytes) -> Dict[str, Any]:
@@ -508,7 +542,10 @@ class ProtobufDecoder:
 
             return result
 
-        except Exception as e:
+        except (ValueError, TypeError, AttributeError) as e:
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return {"routing_error": str(e)}
 
 
@@ -625,7 +662,11 @@ class MeshPacketProcessor:
 
                 return result
 
-        except Exception:
+        except (ValueError, TypeError, AttributeError, KeyError):
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
+            # KeyError: Missing expected keys
             pass
 
         return None
@@ -639,7 +680,10 @@ class MeshPacketProcessor:
             data_msg = mesh_pb2.Data()
             data_msg.ParseFromString(data)
             return self.decoder._decode_data_payload(data_msg)
-        except Exception:
+        except (ValueError, TypeError, AttributeError):
+            # ValueError: Invalid protobuf data
+            # TypeError: Unexpected field types
+            # AttributeError: Missing protobuf fields
             return None
 
 

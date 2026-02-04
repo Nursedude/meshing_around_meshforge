@@ -51,6 +51,16 @@ from .cli_utils import (
     validate_mac_address, validate_ip_address, validate_email, ProgressBar, Menu
 )
 
+# Alert configuration wizards
+from .alert_configurators import (
+    configure_interface, configure_general, configure_emergency_alerts,
+    configure_proximity_alerts, configure_altitude_alerts,
+    configure_weather_alerts, configure_battery_alerts,
+    configure_noisy_node_alerts, configure_new_node_alerts,
+    configure_disconnect_alerts, configure_email_sms,
+    configure_global_settings, create_basic_config, ALERT_CONFIGURATORS
+)
+
 # MQTT is optional
 try:
     from .mqtt_client import MQTTMeshtasticClient, MQTTConfig
@@ -89,5 +99,12 @@ __all__ = [
     # New: CLI Utils
     'Colors', 'print_header', 'print_section', 'print_success', 'print_warning',
     'print_error', 'print_info', 'print_step', 'get_input', 'get_yes_no', 'get_choice',
-    'validate_mac_address', 'validate_ip_address', 'validate_email', 'ProgressBar', 'Menu'
+    'validate_mac_address', 'validate_ip_address', 'validate_email', 'ProgressBar', 'Menu',
+    # New: Alert Configurators
+    'configure_interface', 'configure_general', 'configure_emergency_alerts',
+    'configure_proximity_alerts', 'configure_altitude_alerts',
+    'configure_weather_alerts', 'configure_battery_alerts',
+    'configure_noisy_node_alerts', 'configure_new_node_alerts',
+    'configure_disconnect_alerts', 'configure_email_sms',
+    'configure_global_settings', 'create_basic_config', 'ALERT_CONFIGURATORS'
 ]
