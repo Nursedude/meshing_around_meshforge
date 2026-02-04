@@ -96,7 +96,12 @@ class ConnectionManager:
         for callback in self._callbacks.get(event, []):
             try:
                 callback(*args, **kwargs)
-            except Exception as e:
+            except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as e:
+                # ValueError: Invalid data in callback
+                # TypeError: Type mismatch in callback arguments
+                # AttributeError: Missing attributes on callback objects
+                # KeyError: Missing expected keys in data
+                # RuntimeError: General runtime issues in callback
                 print(f"Callback error ({event}): {e}")
 
     def _detect_connection_type(self) -> ConnectionType:
@@ -188,7 +193,12 @@ class ConnectionManager:
                 return self._connect_demo()
             else:
                 return False
-        except Exception as e:
+        except (OSError, ConnectionError, TimeoutError, ValueError, AttributeError) as e:
+            # OSError: Network/device access errors
+            # ConnectionError: Connection refused, reset, etc.
+            # TimeoutError: Connection timeout
+            # ValueError: Invalid configuration values
+            # AttributeError: API mismatch or missing attributes
             self._status.error_message = str(e)
             print(f"Connection error: {e}")
             return False

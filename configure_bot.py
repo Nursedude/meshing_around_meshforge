@@ -14,7 +14,7 @@ Features:
 - Serial port detection and configuration
 - raspi-config integration for Raspberry Pi
 
-Now uses modular components from meshing_around_clients.core:
+Uses modular components from meshing_around_clients.core:
 - cli_utils: Terminal colors, printing, user input
 - pi_utils: Pi detection, serial ports, venv management
 - system_maintenance: Updates, git operations, systemd services
@@ -26,9 +26,11 @@ import sys
 import subprocess
 import shutil
 import time
+import re
 import configparser
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
+from getpass import getpass
 
 # Version info
 VERSION = "0.5.0-beta"
@@ -43,19 +45,12 @@ try:
     )
     from meshing_around_clients.core.pi_utils import (
         is_raspberry_pi, get_pi_model, get_os_info, is_bookworm_or_newer,
-        check_pep668_environment, get_serial_ports, get_serial_port_list,
-        check_user_groups, add_user_to_dialout, get_default_venv_path,
-        check_venv_exists, create_venv, get_pip_command, get_pip_install_flags,
-        get_python_command, get_pi_config_path, check_serial_enabled,
-        configure_serial_via_raspi_config, get_pi_info, is_pi_zero_2w,
-        get_recommended_connection_mode
+        check_pep668_environment, get_serial_ports,
+        check_user_groups, get_pip_command, get_pip_install_flags,
+        get_pi_config_path, check_serial_enabled
     )
     from meshing_around_clients.core.system_maintenance import (
-        run_command, system_update as do_system_update, find_meshing_around,
-        git_pull, update_upstream, update_meshforge, check_for_updates,
-        install_python_dependencies, create_systemd_service as create_service,
-        manage_service, check_service_status, clone_meshing_around,
-        install_package, check_required_packages
+        run_command, find_meshing_around
     )
     from meshing_around_clients.core.alert_configurators import (
         configure_interface, configure_general, configure_emergency_alerts,
@@ -63,14 +58,18 @@ try:
         configure_weather_alerts, configure_battery_alerts,
         configure_noisy_node_alerts, configure_new_node_alerts,
         configure_disconnect_alerts, configure_email_sms,
-        configure_global_settings, create_basic_config, ALERT_CONFIGURATORS
+        configure_global_settings, create_basic_config
     )
     MODULES_AVAILABLE = True
 except ImportError:
     MODULES_AVAILABLE = False
-    # Fallback: define inline versions (legacy support)
-    from getpass import getpass
 
+
+# =============================================================================
+# FALLBACK DEFINITIONS (used when modules are not available)
+# =============================================================================
+
+if not MODULES_AVAILABLE:
     class Colors:
         """ANSI color codes for terminal output"""
         HEADER = '\033[95m'
@@ -114,180 +113,311 @@ except ImportError:
         """Print step progress"""
         print(f"{Colors.OKCYAN}[{current}/{total}] {text}{Colors.ENDC}")
 
-def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False) -> Tuple[int, str, str]:
-    """Run a shell command with optional sudo and output"""
-    if sudo:
-        cmd = ['sudo'] + cmd
+    def get_input(prompt: str, default: str = "", input_type: type = str, password: bool = False) -> Any:
+        """Get user input with optional default value and password masking"""
+        if default:
+            full_prompt = f"{prompt} [{'****' if password else default}]: "
+        else:
+            full_prompt = f"{prompt}: "
 
-    if desc:
-        print_info(f"{desc}...")
+        while True:
+            try:
+                value = getpass(full_prompt) if password else input(full_prompt).strip()
+                if not value and default:
+                    value = str(default)
 
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=capture,
-            text=True,
-            timeout=600  # 10 minute timeout
-        )
-        stdout = result.stdout if capture else ""
-        stderr = result.stderr if capture else ""
-        return result.returncode, stdout, stderr
-    except subprocess.TimeoutExpired:
-        print_error(f"Command timed out: {' '.join(cmd)}")
-        return -1, "", "Timeout"
-    except FileNotFoundError:
-        print_error(f"Command not found: {cmd[0]}")
-        return -1, "", "Command not found"
-    except OSError as e:
-        print_error(f"Command failed: {e}")
-        return -1, "", str(e)
+                if input_type == bool:
+                    if str(value).lower() in ['true', 'yes', 'y', '1', 'on']:
+                        return True
+                    elif str(value).lower() in ['false', 'no', 'n', '0', 'off']:
+                        return False
+                    print_error("Please enter yes/no (y/n) or true/false")
+                    continue
+                elif input_type == int:
+                    return int(value) if value else int(default) if default else 0
+                elif input_type == float:
+                    return float(value) if value else float(default) if default else 0.0
+                return value
+            except ValueError:
+                print_error(f"Invalid input. Expected {input_type.__name__}")
 
-def find_meshing_around() -> Optional[Path]:
-    """Find the meshing-around installation directory"""
-    common_paths = [
-        Path.home() / "meshing-around",
-        Path.home() / "mesh-bot",
-        Path("/opt/meshing-around"),
-        Path("/opt/mesh-bot"),
-        Path.cwd().parent / "meshing-around",
-        Path.cwd() / "meshing-around",
-    ]
+    def get_yes_no(prompt: str, default: bool = False) -> bool:
+        """Get yes/no input from user"""
+        default_str = "Y/n" if default else "y/N"
+        response = get_input(f"{prompt} ({default_str})", "y" if default else "n")
+        return response.lower() in ['y', 'yes', 'true', '1']
 
-    for path in common_paths:
-        if path.exists() and (path / "mesh_bot.py").exists():
-            return path
+    def validate_mac_address(mac: str) -> bool:
+        """Validate BLE MAC address format"""
+        return bool(re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac))
 
-    # Try to find it with locate or find
-    try:
-        result = subprocess.run(
-            ['find', str(Path.home()), '-name', 'mesh_bot.py', '-type', 'f'],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            bot_path = Path(result.stdout.strip().split('\n')[0]).parent
-            return bot_path
-    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
-        pass
+    def validate_coordinates(lat: float, lon: float) -> bool:
+        """Validate latitude and longitude values"""
+        return -90 <= lat <= 90 and -180 <= lon <= 180
 
-    return None
-
-def validate_mac_address(mac: str) -> bool:
-    """Validate BLE MAC address format"""
-    pattern = r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
-    return bool(re.match(pattern, mac))
-
-def validate_coordinates(lat: float, lon: float) -> bool:
-    """Validate latitude and longitude values"""
-    return -90 <= lat <= 90 and -180 <= lon <= 180
-
-def validate_port(port: str) -> bool:
-    """Validate serial port exists"""
-    return os.path.exists(port) or port.startswith('/dev/')
-
-
-# ============================================================================
-# RASPBERRY PI COMPATIBILITY FUNCTIONS
-# ============================================================================
-
-def is_raspberry_pi() -> bool:
-    """Detect if running on a Raspberry Pi"""
-    try:
-        with open('/proc/cpuinfo', 'r') as f:
-            cpuinfo = f.read()
-            if 'Raspberry Pi' in cpuinfo or 'BCM' in cpuinfo:
-                return True
-    except (FileNotFoundError, PermissionError, IOError):
-        pass
-
-    # Check for Pi-specific files
-    if os.path.exists('/sys/firmware/devicetree/base/model'):
+    def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False) -> Tuple[int, str, str]:
+        """Run a shell command with optional sudo and output"""
+        if sudo:
+            cmd = ['sudo'] + cmd
+        if desc:
+            print_info(f"{desc}...")
         try:
-            with open('/sys/firmware/devicetree/base/model', 'r') as f:
-                if 'Raspberry Pi' in f.read():
+            result = subprocess.run(cmd, capture_output=capture, text=True, timeout=600)
+            return result.returncode, result.stdout if capture else "", result.stderr if capture else ""
+        except subprocess.TimeoutExpired:
+            return -1, "", "Timeout"
+        except FileNotFoundError:
+            return -1, "", "Command not found"
+
+    def find_meshing_around() -> Optional[Path]:
+        """Find the meshing-around installation directory"""
+        common_paths = [
+            Path.home() / "meshing-around", Path.home() / "mesh-bot",
+            Path("/opt/meshing-around"), Path("/opt/mesh-bot"),
+            Path.cwd().parent / "meshing-around", Path.cwd() / "meshing-around",
+        ]
+        for path in common_paths:
+            if path.exists() and (path / "mesh_bot.py").exists():
+                return path
+        return None
+
+    def is_raspberry_pi() -> bool:
+        """Detect if running on a Raspberry Pi"""
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                if 'Raspberry Pi' in f.read() or 'BCM' in f.read():
                     return True
         except (FileNotFoundError, PermissionError, IOError):
             pass
+        return os.path.exists('/sys/firmware/devicetree/base/model')
 
-    return False
+    def get_pi_model() -> str:
+        """Get Raspberry Pi model information"""
+        try:
+            with open('/sys/firmware/devicetree/base/model', 'r') as f:
+                return f.read().strip().rstrip('\x00')
+        except (FileNotFoundError, PermissionError, IOError):
+            return "Unknown"
+
+    def get_os_info() -> Tuple[str, str]:
+        """Get OS name and version (codename)"""
+        os_name, os_version = "Unknown", "Unknown"
+        try:
+            with open('/etc/os-release', 'r') as f:
+                for line in f:
+                    if line.startswith('PRETTY_NAME='):
+                        os_name = line.split('=')[1].strip().strip('"')
+                    elif line.startswith('VERSION_CODENAME='):
+                        os_version = line.split('=')[1].strip().strip('"')
+        except (FileNotFoundError, PermissionError, IOError):
+            pass
+        return os_name, os_version
+
+    def is_bookworm_or_newer() -> bool:
+        """Check if running Debian Bookworm (12) or newer"""
+        _, codename = get_os_info()
+        return codename.lower() in ['bookworm', 'trixie', 'forky', 'sid']
+
+    def check_pep668_environment() -> bool:
+        """Check if PEP 668 externally managed environment is in effect"""
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        return Path(f"/usr/lib/python{python_version}/EXTERNALLY-MANAGED").exists()
+
+    def get_serial_ports() -> List[str]:
+        """Get available serial ports"""
+        import glob
+        ports = []
+        for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*']:
+            ports.extend(glob.glob(pattern))
+        for port in ['/dev/ttyAMA0', '/dev/serial0', '/dev/serial1', '/dev/ttyS0']:
+            if os.path.exists(port):
+                ports.append(port)
+        return list(set(ports))
+
+    def check_user_groups() -> Tuple[bool, bool]:
+        """Check if user is in dialout and gpio groups"""
+        try:
+            groups = subprocess.run(['groups'], capture_output=True, text=True).stdout
+            return 'dialout' in groups, 'gpio' in groups
+        except (subprocess.SubprocessError, FileNotFoundError):
+            return False, False
+
+    def get_pip_command(venv_path: Optional[Path] = None) -> List[str]:
+        """Get the appropriate pip command"""
+        if venv_path and venv_path.exists():
+            return [str(venv_path / "bin" / "pip3")]
+        return ['pip3']
+
+    def get_pip_install_flags() -> List[str]:
+        """Get extra flags needed for pip install"""
+        return ['--break-system-packages'] if check_pep668_environment() else []
+
+    def get_pi_config_path() -> Path:
+        """Get the correct config.txt path"""
+        bookworm_path = Path("/boot/firmware/config.txt")
+        return bookworm_path if bookworm_path.exists() else Path("/boot/config.txt")
+
+    def check_serial_enabled() -> Tuple[bool, bool]:
+        """Check if serial port is enabled"""
+        config_path = get_pi_config_path()
+        if not config_path.exists():
+            return False, False
+        try:
+            with open(config_path, 'r') as f:
+                content = f.read()
+            uart_enabled = 'enable_uart=1' in content
+            cmdline_path = config_path.parent / "cmdline.txt"
+            console_enabled = False
+            if cmdline_path.exists():
+                with open(cmdline_path, 'r') as f:
+                    console_enabled = 'console=serial' in f.read() or 'console=ttyAMA' in f.read()
+            return uart_enabled, console_enabled
+        except (FileNotFoundError, PermissionError, IOError):
+            return False, False
+
+    # Inline alert configurators for fallback mode
+    def configure_interface(config: configparser.ConfigParser):
+        """Configure interface settings"""
+        print_section("Interface Configuration")
+        print("\nConnection types:\n  1. Serial\n  2. TCP\n  3. BLE")
+        conn_type = get_input("Select connection type (1-3)", "1")
+        type_map = {"1": "serial", "2": "tcp", "3": "ble"}
+        conn_type_str = type_map.get(conn_type, "serial")
+        if 'interface' not in config:
+            config.add_section('interface')
+        config['interface']['type'] = conn_type_str
+        if conn_type_str == "serial":
+            if not get_yes_no("Use auto-detect for serial port?", True):
+                config['interface']['port'] = get_input("Enter serial port", "/dev/ttyUSB0")
+        elif conn_type_str == "tcp":
+            config['interface']['hostname'] = get_input("Enter TCP hostname/IP", "192.168.1.100")
+        elif conn_type_str == "ble":
+            config['interface']['mac'] = get_input("Enter BLE MAC address", "AA:BB:CC:DD:EE:FF")
+        print_success(f"Interface configured: {conn_type_str}")
+
+    def configure_general(config: configparser.ConfigParser):
+        """Configure general settings"""
+        print_section("General Settings")
+        if 'general' not in config:
+            config.add_section('general')
+        config['general']['bot_name'] = get_input("Bot name", "MeshBot")
+        if get_yes_no("Configure admin nodes?", False):
+            config['general']['bbs_admin_list'] = get_input("Admin node numbers (comma-separated)")
+        print_success("General settings configured")
+
+    def configure_emergency_alerts(config: configparser.ConfigParser):
+        """Configure emergency alert settings"""
+        print_section("Emergency Alert Configuration")
+        if 'emergencyHandler' not in config:
+            config.add_section('emergencyHandler')
+        if not get_yes_no("Enable emergency keyword detection?", True):
+            config['emergencyHandler']['enabled'] = 'False'
+            return
+        config['emergencyHandler']['enabled'] = 'True'
+        config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,police,fire,ambulance,rescue,help,sos,mayday'
+        config['emergencyHandler']['alert_channel'] = str(get_input("Alert channel number", "2", int))
+        print_success("Emergency alerts configured")
+
+    def configure_proximity_alerts(config: configparser.ConfigParser):
+        """Configure proximity alerts"""
+        print_section("Proximity Alert Configuration")
+        if 'proximityAlert' not in config:
+            config.add_section('proximityAlert')
+        config['proximityAlert']['enabled'] = 'False'
+        print_info("Proximity alerts disabled (use full module for detailed config)")
+
+    def configure_altitude_alerts(config: configparser.ConfigParser):
+        """Configure altitude alerts"""
+        print_section("Altitude Alert Configuration")
+        if 'altitudeAlert' not in config:
+            config.add_section('altitudeAlert')
+        config['altitudeAlert']['enabled'] = 'False'
+        print_info("Altitude alerts disabled (use full module for detailed config)")
+
+    def configure_weather_alerts(config: configparser.ConfigParser):
+        """Configure weather alerts"""
+        print_section("Weather Alert Configuration")
+        if 'weatherAlert' not in config:
+            config.add_section('weatherAlert')
+        config['weatherAlert']['enabled'] = 'False'
+        print_info("Weather alerts disabled (use full module for detailed config)")
+
+    def configure_battery_alerts(config: configparser.ConfigParser):
+        """Configure battery alerts"""
+        print_section("Battery Alert Configuration")
+        if 'batteryAlert' not in config:
+            config.add_section('batteryAlert')
+        config['batteryAlert']['enabled'] = 'False'
+        print_info("Battery alerts disabled (use full module for detailed config)")
+
+    def configure_noisy_node_alerts(config: configparser.ConfigParser):
+        """Configure noisy node alerts"""
+        print_section("Noisy Node Alert Configuration")
+        if 'noisyNodeAlert' not in config:
+            config.add_section('noisyNodeAlert')
+        config['noisyNodeAlert']['enabled'] = 'False'
+        print_info("Noisy node alerts disabled (use full module for detailed config)")
+
+    def configure_new_node_alerts(config: configparser.ConfigParser):
+        """Configure new node alerts"""
+        print_section("New Node Alert Configuration")
+        if 'newNodeAlert' not in config:
+            config.add_section('newNodeAlert')
+        if get_yes_no("Enable new node welcomes?", True):
+            config['newNodeAlert']['enabled'] = 'True'
+            config['newNodeAlert']['welcome_message'] = 'Welcome to the mesh!'
+        else:
+            config['newNodeAlert']['enabled'] = 'False'
+        print_success("New node alerts configured")
+
+    def configure_disconnect_alerts(config: configparser.ConfigParser):
+        """Configure disconnect alerts"""
+        print_section("Disconnect Alert Configuration")
+        if 'disconnectAlert' not in config:
+            config.add_section('disconnectAlert')
+        config['disconnectAlert']['enabled'] = 'False'
+        print_info("Disconnect alerts disabled (use full module for detailed config)")
+
+    def configure_email_sms(config: configparser.ConfigParser):
+        """Configure email/SMS settings"""
+        print_section("Email/SMS Configuration")
+        if 'smtp' not in config:
+            config.add_section('smtp')
+        if 'sms' not in config:
+            config.add_section('sms')
+        print_info("Email/SMS not configured (use full module for detailed config)")
+
+    def configure_global_settings(config: configparser.ConfigParser):
+        """Configure global alert settings"""
+        print_section("Global Alert Settings")
+        if 'alertGlobal' not in config:
+            config.add_section('alertGlobal')
+        config['alertGlobal']['global_enabled'] = 'True' if get_yes_no("Enable all alerts globally?", True) else 'False'
+        print_success("Global settings configured")
+
+    def create_basic_config() -> configparser.ConfigParser:
+        """Create a basic configuration"""
+        print_section("Basic Configuration")
+        config = configparser.ConfigParser()
+        for section in ['interface', 'general', 'emergencyHandler', 'proximityAlert',
+                       'altitudeAlert', 'weatherAlert', 'noisyNodeAlert', 'batteryAlert',
+                       'newNodeAlert', 'disconnectAlert', 'alertGlobal', 'smtp', 'sms']:
+            config.add_section(section)
+        configure_interface(config)
+        configure_general(config)
+        config['emergencyHandler']['enabled'] = 'True'
+        config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,sos,help,mayday'
+        config['newNodeAlert']['enabled'] = 'True'
+        config['newNodeAlert']['welcome_message'] = 'Welcome to the mesh!'
+        config['alertGlobal']['global_enabled'] = 'True'
+        print_success("Basic config created")
+        return config
 
 
-def get_pi_model() -> str:
-    """Get Raspberry Pi model information"""
-    try:
-        with open('/sys/firmware/devicetree/base/model', 'r') as f:
-            return f.read().strip().rstrip('\x00')
-    except (FileNotFoundError, PermissionError, IOError):
-        return "Unknown"
-
-
-def get_os_info() -> Tuple[str, str]:
-    """Get OS name and version (codename)"""
-    os_name = "Unknown"
-    os_version = "Unknown"
-
-    try:
-        with open('/etc/os-release', 'r') as f:
-            for line in f:
-                if line.startswith('PRETTY_NAME='):
-                    os_name = line.split('=')[1].strip().strip('"')
-                elif line.startswith('VERSION_CODENAME='):
-                    os_version = line.split('=')[1].strip().strip('"')
-    except (FileNotFoundError, PermissionError, IOError):
-        pass
-
-    return os_name, os_version
-
-
-def is_bookworm_or_newer() -> bool:
-    """Check if running Debian Bookworm (12) or newer"""
-    _, codename = get_os_info()
-    # Bookworm and newer codenames
-    new_codenames = ['bookworm', 'trixie', 'forky', 'sid']
-    return codename.lower() in new_codenames
-
-
-def check_pep668_environment() -> bool:
-    """Check if PEP 668 externally managed environment is in effect"""
-    # Check for EXTERNALLY-MANAGED file
-    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
-    managed_file = Path(f"/usr/lib/python{python_version}/EXTERNALLY-MANAGED")
-    return managed_file.exists()
-
-
-def get_serial_ports() -> List[str]:
-    """Get available serial ports, including Raspberry Pi specific ones"""
-    ports = []
-
-    # Common USB serial ports
-    usb_patterns = ['/dev/ttyUSB*', '/dev/ttyACM*']
-
-    # Raspberry Pi specific serial ports
-    pi_ports = ['/dev/ttyAMA0', '/dev/serial0', '/dev/serial1', '/dev/ttyS0']
-
-    # Check USB ports
-    for pattern in usb_patterns:
-        ret, stdout, _ = run_command(['ls', pattern], capture=True)
-        if ret == 0 and stdout.strip():
-            ports.extend(stdout.strip().split('\n'))
-
-    # Check Pi-specific ports
-    for port in pi_ports:
-        if os.path.exists(port):
-            ports.append(port)
-
-    return list(set(ports))  # Remove duplicates
-
-
-def check_user_groups() -> Tuple[bool, bool]:
-    """Check if user is in dialout and gpio groups"""
-    try:
-        groups = subprocess.run(['groups'], capture_output=True, text=True).stdout
-        in_dialout = 'dialout' in groups
-        in_gpio = 'gpio' in groups
-        return in_dialout, in_gpio
-    except (subprocess.SubprocessError, FileNotFoundError, Exception):
-        return False, False
-
+# =============================================================================
+# ORCHESTRATION FUNCTIONS
+# These functions coordinate module functionality and provide the main user interface
+# =============================================================================
 
 def fix_serial_permissions() -> bool:
     """Add current user to dialout group for serial port access"""
@@ -368,27 +498,6 @@ def setup_virtual_environment(venv_path: Path = None) -> Tuple[bool, Optional[Pa
         return False, None
 
 
-def get_pip_command(venv_path: Optional[Path] = None) -> List[str]:
-    """Get the appropriate pip command based on environment.
-
-    Returns a base command list. The --break-system-packages flag is placed
-    after 'install' since pip requires subcommand before global flags.
-    Usage: get_pip_command() + ['install', ...] or
-           get_pip_command() + ['install'] + get_pip_extra_flags() + [...]
-    """
-    if venv_path and venv_path.exists():
-        return [str(venv_path / "bin" / "pip3")]
-    else:
-        return ['pip3']
-
-
-def get_pip_install_flags() -> List[str]:
-    """Get extra flags needed for pip install (e.g. --break-system-packages)."""
-    if check_pep668_environment():
-        return ['--break-system-packages']
-    return []
-
-
 def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
     """Complete Raspberry Pi setup wizard"""
     print_header("Raspberry Pi Setup")
@@ -462,48 +571,6 @@ def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
         print_info(f"Activate before running bot: source {venv_path}/bin/activate")
 
     return len(errors) == 0, venv_path
-
-
-def get_pi_config_path() -> Path:
-    """Get the correct config.txt path for Bookworm/Trixie"""
-    # Bookworm and newer use /boot/firmware/config.txt
-    bookworm_path = Path("/boot/firmware/config.txt")
-    legacy_path = Path("/boot/config.txt")
-
-    if bookworm_path.exists():
-        return bookworm_path
-    elif legacy_path.exists():
-        return legacy_path
-    else:
-        # Default to Bookworm path for new installations
-        return bookworm_path
-
-
-def check_serial_enabled() -> Tuple[bool, bool]:
-    """Check if serial port is enabled in config.txt
-    Returns: (uart_enabled, console_enabled)
-    """
-    config_path = get_pi_config_path()
-
-    if not config_path.exists():
-        return False, False
-
-    try:
-        with open(config_path, 'r') as f:
-            content = f.read()
-
-        uart_enabled = 'enable_uart=1' in content
-        # Check if console is on serial (in cmdline.txt)
-        cmdline_path = config_path.parent / "cmdline.txt"
-        console_enabled = False
-        if cmdline_path.exists():
-            with open(cmdline_path, 'r') as f:
-                cmdline = f.read()
-                console_enabled = 'console=serial' in cmdline or 'console=ttyAMA' in cmdline
-
-        return uart_enabled, console_enabled
-    except (FileNotFoundError, PermissionError, IOError):
-        return False, False
 
 
 def configure_serial_raspi_config() -> bool:
@@ -708,343 +775,9 @@ def startup_system_check() -> bool:
     return True
 
 
-def get_input(prompt: str, default: str = "", input_type: type = str, password: bool = False) -> Any:
-    """Get user input with optional default value and password masking"""
-    if default:
-        if password:
-            full_prompt = f"{prompt} [****]: "
-        else:
-            full_prompt = f"{prompt} [{default}]: "
-    else:
-        full_prompt = f"{prompt}: "
-
-    while True:
-        try:
-            if password:
-                value = getpass(full_prompt)
-            else:
-                value = input(full_prompt).strip()
-
-            if not value and default:
-                value = str(default)
-
-            if input_type == bool:
-                value_lower = str(value).lower()
-                if value_lower in ['true', 'yes', 'y', '1', 'on']:
-                    return True
-                elif value_lower in ['false', 'no', 'n', '0', 'off']:
-                    return False
-                else:
-                    print_error("Please enter yes/no (y/n) or true/false")
-                    continue
-            elif input_type == int:
-                return int(value) if value else int(default) if default else 0
-            elif input_type == float:
-                return float(value) if value else float(default) if default else 0.0
-            else:
-                return value
-        except ValueError:
-            print_error(f"Invalid input. Expected {input_type.__name__}")
-
-def get_yes_no(prompt: str, default: bool = False) -> bool:
-    """Get yes/no input from user"""
-    default_str = "Y/n" if default else "y/N"
-    response = get_input(f"{prompt} ({default_str})", "y" if default else "n")
-    return response.lower() in ['y', 'yes', 'true', '1']
-
-def configure_interface(config: configparser.ConfigParser):
-    """Configure interface settings"""
-    print_section("Interface Configuration")
-    
-    print("\nConnection types:")
-    print("  1. Serial (recommended)")
-    print("  2. TCP")
-    print("  3. BLE")
-    
-    conn_type = get_input("Select connection type (1-3)", "1")
-    type_map = {"1": "serial", "2": "tcp", "3": "ble"}
-    conn_type_str = type_map.get(conn_type, "serial")
-    
-    config['interface']['type'] = conn_type_str
-    
-    if conn_type_str == "serial":
-        use_auto = get_yes_no("Use auto-detect for serial port?", True)
-        if not use_auto:
-            port = get_input("Enter serial port", "/dev/ttyUSB0")
-            config['interface']['port'] = port
-    elif conn_type_str == "tcp":
-        hostname = get_input("Enter TCP hostname/IP", "192.168.1.100")
-        config['interface']['hostname'] = hostname
-    elif conn_type_str == "ble":
-        mac = get_input("Enter BLE MAC address", "AA:BB:CC:DD:EE:FF")
-        config['interface']['mac'] = mac
-    
-    print_success(f"Interface configured: {conn_type_str}")
-
-def configure_general(config: configparser.ConfigParser):
-    """Configure general settings"""
-    print_section("General Settings")
-    
-    bot_name = get_input("Bot name", "MeshBot")
-    config['general']['bot_name'] = bot_name
-    
-    if get_yes_no("Configure admin nodes?", False):
-        admin_list = get_input("Admin node numbers (comma-separated)")
-        config['general']['bbs_admin_list'] = admin_list
-    
-    if get_yes_no("Configure favorite nodes?", False):
-        fav_list = get_input("Favorite node numbers (comma-separated)")
-        config['general']['favoriteNodeList'] = fav_list
-    
-    print_success("General settings configured")
-
-def configure_emergency_alerts(config: configparser.ConfigParser):
-    """Configure emergency alert settings"""
-    print_section("Emergency Alert Configuration")
-    
-    if not get_yes_no("Enable emergency keyword detection?", True):
-        config['emergencyHandler']['enabled'] = 'False'
-        return
-    
-    config['emergencyHandler']['enabled'] = 'True'
-    
-    print("\nDefault keywords: emergency, 911, 112, 999, police, fire, ambulance, rescue, help, sos, mayday")
-    if get_yes_no("Use default emergency keywords?", True):
-        config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,police,fire,ambulance,rescue,help,sos,mayday'
-    else:
-        keywords = get_input("Enter emergency keywords (comma-separated)")
-        config['emergencyHandler']['emergency_keywords'] = keywords
-    
-    channel = get_input("Alert channel number", "2", int)
-    config['emergencyHandler']['alert_channel'] = str(channel)
-    
-    cooldown = get_input("Cooldown period between alerts (seconds)", "300", int)
-    config['emergencyHandler']['cooldown_period'] = str(cooldown)
-    
-    if get_yes_no("Enable email notifications for emergencies?", False):
-        config['emergencyHandler']['send_email'] = 'True'
-    
-    if get_yes_no("Enable SMS notifications for emergencies?", False):
-        config['emergencyHandler']['send_sms'] = 'True'
-    
-    if get_yes_no("Play sound for emergency alerts?", False):
-        config['emergencyHandler']['play_sound'] = 'True'
-        sound_file = get_input("Sound file path", "/usr/share/sounds/freedesktop/stereo/alarm-clock-elapsed.oga")
-        config['emergencyHandler']['sound_file'] = sound_file
-    
-    print_success("Emergency alerts configured")
-
-def configure_proximity_alerts(config: configparser.ConfigParser):
-    """Configure proximity-based alerts"""
-    print_section("Proximity Alert Configuration")
-    
-    print("\nProximity alerts notify when nodes enter a specified area")
-    print("Useful for campsite monitoring, geofencing, etc.")
-    
-    if not get_yes_no("Enable proximity alerts?", False):
-        config['proximityAlert']['enabled'] = 'False'
-        return
-    
-    config['proximityAlert']['enabled'] = 'True'
-    
-    lat = get_input("Target latitude", "0.0", float)
-    config['proximityAlert']['target_latitude'] = str(lat)
-    
-    lon = get_input("Target longitude", "0.0", float)
-    config['proximityAlert']['target_longitude'] = str(lon)
-    
-    radius = get_input("Proximity radius in meters", "100", int)
-    config['proximityAlert']['radius_meters'] = str(radius)
-    
-    channel = get_input("Alert channel", "0", int)
-    config['proximityAlert']['alert_channel'] = str(channel)
-    
-    interval = get_input("Check interval in seconds", "60", int)
-    config['proximityAlert']['check_interval'] = str(interval)
-    
-    if get_yes_no("Execute script on proximity trigger?", False):
-        config['proximityAlert']['run_script'] = 'True'
-        script_path = get_input("Script path")
-        config['proximityAlert']['script_path'] = script_path
-    
-    print_success("Proximity alerts configured")
-
-def configure_altitude_alerts(config: configparser.ConfigParser):
-    """Configure high altitude alerts"""
-    print_section("Altitude Alert Configuration")
-    
-    if not get_yes_no("Enable high altitude detection?", False):
-        config['altitudeAlert']['enabled'] = 'False'
-        return
-    
-    config['altitudeAlert']['enabled'] = 'True'
-    
-    altitude = get_input("Minimum altitude threshold (meters)", "1000", int)
-    config['altitudeAlert']['min_altitude'] = str(altitude)
-    
-    channel = get_input("Alert channel", "0", int)
-    config['altitudeAlert']['alert_channel'] = str(channel)
-    
-    interval = get_input("Check interval (seconds)", "120", int)
-    config['altitudeAlert']['check_interval'] = str(interval)
-    
-    print_success("Altitude alerts configured")
-
-def configure_weather_alerts(config: configparser.ConfigParser):
-    """Configure weather/NOAA alerts"""
-    print_section("Weather Alert Configuration")
-    
-    if not get_yes_no("Enable weather/NOAA alerts?", False):
-        config['weatherAlert']['enabled'] = 'False'
-        return
-    
-    config['weatherAlert']['enabled'] = 'True'
-    
-    location = get_input("Location (latitude,longitude)")
-    config['weatherAlert']['location'] = location
-    
-    print("\nSeverity levels: Extreme, Severe, Moderate, Minor")
-    severity = get_input("Alert severity levels (comma-separated)", "Extreme,Severe")
-    config['weatherAlert']['severity_levels'] = severity
-    
-    interval = get_input("Check interval (minutes)", "30", int)
-    config['weatherAlert']['check_interval_minutes'] = str(interval)
-    
-    channel = get_input("Alert channel", "2", int)
-    config['weatherAlert']['alert_channel'] = str(channel)
-    
-    print_success("Weather alerts configured")
-
-def configure_battery_alerts(config: configparser.ConfigParser):
-    """Configure low battery alerts"""
-    print_section("Battery Alert Configuration")
-    
-    if not get_yes_no("Enable low battery monitoring?", False):
-        config['batteryAlert']['enabled'] = 'False'
-        return
-    
-    config['batteryAlert']['enabled'] = 'True'
-    
-    threshold = get_input("Battery threshold percentage", "20", int)
-    config['batteryAlert']['threshold_percent'] = str(threshold)
-    
-    interval = get_input("Check interval (minutes)", "30", int)
-    config['batteryAlert']['check_interval_minutes'] = str(interval)
-    
-    channel = get_input("Alert channel", "0", int)
-    config['batteryAlert']['alert_channel'] = str(channel)
-    
-    if get_yes_no("Monitor specific nodes only?", False):
-        nodes = get_input("Node numbers to monitor (comma-separated)")
-        config['batteryAlert']['monitor_nodes'] = nodes
-    
-    print_success("Battery alerts configured")
-
-def configure_noisy_node_alerts(config: configparser.ConfigParser):
-    """Configure noisy node detection"""
-    print_section("Noisy Node Alert Configuration")
-    
-    if not get_yes_no("Enable noisy node detection?", False):
-        config['noisyNodeAlert']['enabled'] = 'False'
-        return
-    
-    config['noisyNodeAlert']['enabled'] = 'True'
-    
-    threshold = get_input("Message threshold (messages per period)", "50", int)
-    config['noisyNodeAlert']['message_threshold'] = str(threshold)
-    
-    period = get_input("Time period (minutes)", "10", int)
-    config['noisyNodeAlert']['time_period_minutes'] = str(period)
-    
-    if get_yes_no("Auto-mute noisy nodes?", False):
-        config['noisyNodeAlert']['auto_mute'] = 'True'
-        duration = get_input("Mute duration (minutes)", "60", int)
-        config['noisyNodeAlert']['mute_duration_minutes'] = str(duration)
-    
-    print_success("Noisy node alerts configured")
-
-def configure_new_node_alerts(config: configparser.ConfigParser):
-    """Configure new node welcome messages"""
-    print_section("New Node Alert Configuration")
-    
-    if not get_yes_no("Enable new node welcomes?", True):
-        config['newNodeAlert']['enabled'] = 'False'
-        return
-    
-    config['newNodeAlert']['enabled'] = 'True'
-    
-    message = get_input("Welcome message (use {node_name} placeholder)", "Welcome to the mesh, {node_name}!")
-    config['newNodeAlert']['welcome_message'] = message
-    
-    send_dm = get_yes_no("Send welcome as DM?", True)
-    config['newNodeAlert']['send_as_dm'] = str(send_dm)
-    
-    if get_yes_no("Also announce to channel?", False):
-        config['newNodeAlert']['announce_to_channel'] = 'True'
-        channel = get_input("Announcement channel", "0", int)
-        config['newNodeAlert']['announcement_channel'] = str(channel)
-    
-    print_success("New node alerts configured")
-
-def configure_email_sms(config: configparser.ConfigParser):
-    """Configure email and SMS settings"""
-    print_section("Email/SMS Configuration")
-    
-    if not get_yes_no("Configure email settings?", False):
-        return
-    
-    config['smtp']['enableSMTP'] = 'True'
-    
-    server = get_input("SMTP server", "smtp.gmail.com")
-    config['smtp']['SMTP_SERVER'] = server
-    
-    port = get_input("SMTP port", "587", int)
-    config['smtp']['SMTP_PORT'] = str(port)
-    
-    username = get_input("SMTP username/email")
-    config['smtp']['SMTP_USERNAME'] = username
-    
-    password = get_input("SMTP password", password=True)
-    config['smtp']['SMTP_PASSWORD'] = password
-    
-    from_addr = get_input("From email address", username)
-    config['smtp']['SMTP_FROM'] = from_addr
-    
-    sysop_emails = get_input("Sysop email addresses (comma-separated)")
-    config['smtp']['sysopEmails'] = sysop_emails
-    
-    if get_yes_no("Configure SMS settings?", False):
-        config['sms']['enabled'] = 'True'
-        gateway = get_input("SMS gateway (e.g., @txt.att.net)")
-        config['sms']['gateway'] = gateway
-        phones = get_input("Phone numbers (comma-separated)")
-        config['sms']['phone_numbers'] = phones
-    
-    print_success("Email/SMS settings configured")
-
-def configure_global_settings(config: configparser.ConfigParser):
-    """Configure global alert settings"""
-    print_section("Global Alert Settings")
-
-    if get_yes_no("Enable all alerts globally?", True):
-        config['alertGlobal']['global_enabled'] = 'True'
-    else:
-        config['alertGlobal']['global_enabled'] = 'False'
-        return
-
-    if get_yes_no("Configure quiet hours?", False):
-        quiet = get_input("Quiet hours (24hr format HH:MM-HH:MM, e.g., 22:00-07:00)")
-        config['alertGlobal']['quiet_hours'] = quiet
-
-    max_rate = get_input("Maximum alerts per hour (all types)", "20", int)
-    config['alertGlobal']['max_alerts_per_hour'] = str(max_rate)
-
-    print_success("Global settings configured")
-
-
-# ============================================================================
+# =============================================================================
 # SYSTEM MAINTENANCE FUNCTIONS
-# ============================================================================
+# =============================================================================
 
 def system_update() -> bool:
     """Run apt update and upgrade"""
@@ -1845,45 +1578,6 @@ This wizard will:
             print(f"  1. Copy config.ini to {meshing_path}/")
             print(f"  2. cd {meshing_path}")
             print("  3. python3 mesh_bot.py")
-
-    return config
-
-
-def create_basic_config() -> configparser.ConfigParser:
-    """Create a basic configuration interactively"""
-    print_section("Basic Configuration")
-
-    config = configparser.ConfigParser()
-
-    # Initialize all sections
-    sections = [
-        'interface', 'general', 'emergencyHandler', 'proximityAlert',
-        'altitudeAlert', 'weatherAlert', 'ipawsAlert', 'volcanoAlert',
-        'noisyNodeAlert', 'batteryAlert', 'newNodeAlert', 'snrAlert',
-        'disconnectAlert', 'customAlert', 'alertGlobal', 'smtp', 'sms'
-    ]
-    for section in sections:
-        config.add_section(section)
-
-    # Basic interface config
-    configure_interface(config)
-
-    # Basic general config
-    configure_general(config)
-
-    # Enable emergency alerts by default
-    config['emergencyHandler']['enabled'] = 'True'
-    config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,sos,help,mayday'
-    config['emergencyHandler']['alert_channel'] = '2'
-    print_success("Emergency alerts enabled with default keywords")
-
-    # Enable new node welcomes
-    config['newNodeAlert']['enabled'] = 'True'
-    config['newNodeAlert']['welcome_message'] = 'Welcome to the mesh!'
-    print_success("New node welcomes enabled")
-
-    # Global settings
-    config['alertGlobal']['global_enabled'] = 'True'
 
     return config
 
