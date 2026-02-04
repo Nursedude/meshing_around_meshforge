@@ -1021,7 +1021,7 @@ This wizard will:
                 try:
                     shutil.rmtree(install_path)
                     print_success("Removed existing installation")
-                except Exception as e:
+                except OSError as e:
                     print_error(f"Failed to remove: {e}")
                     return False, None, None
             else:
@@ -1032,7 +1032,7 @@ This wizard will:
                 return False, None, None
             try:
                 shutil.rmtree(install_path)
-            except Exception as e:
+            except OSError as e:
                 print_error(f"Failed to remove: {e}")
                 return False, None, None
 
@@ -1301,7 +1301,7 @@ def run_install_script(meshing_path: Path) -> bool:
             if stderr:
                 print_error(f"Error: {stderr}")
             return False
-    except Exception as e:
+    except (OSError, FileNotFoundError) as e:
         print_error(f"Failed to run install.sh: {e}")
         return False
     finally:
@@ -1351,7 +1351,7 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
                         print(stderr.decode())
                     return False
 
-            except Exception as e:
+            except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
                 print_error(f"Failed to run launch.sh: {e}")
                 return False
             finally:
@@ -1398,7 +1398,7 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
                         print(stderr.decode())
                     return False
 
-            except Exception as e:
+            except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
                 print_error(f"Failed to start bot: {e}")
                 return False
             finally:
@@ -1476,7 +1476,7 @@ def verify_bot_running(meshing_path: Path) -> bool:
                     print(stdout.decode())
                 return False
 
-        except Exception as e:
+        except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
             print_error(f"Failed to start bot: {e}")
             return False
         finally:
