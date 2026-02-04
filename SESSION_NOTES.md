@@ -30,12 +30,24 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 226 tests passing
+- **Test Status:** 240 tests passing
 
 ### Code Health
 - All broad `except Exception` fixed in core modules
 - configure_bot.py decomposed (2307 → ~2000 lines)
 - New modular architecture with fallback support
+
+### Recent P1-P2 Improvements (Completed)
+- **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
+- **Persistent storage** - Network state saved/loaded from ~/.config/meshing-around-clients/
+- **Upstream config import** - `--import-config` CLI option for migration
+- **Web topology template** - topology.html created and fixed
+- **Crypto degradation** - mesh_crypto.py and mqtt_client.py handle missing crypto gracefully
+- **MQTT Integration** - Documentation/MQTT_INTEGRATION.md from MeshForge NOC
+- **CI/CD Pipeline** - GitHub Actions workflow (.github/workflows/ci.yml)
+  - Python 3.8-3.12 test matrix
+  - pytest with coverage
+  - flake8/black/isort linting
 
 ### Key Modules
 | Module | Purpose | Lines |
@@ -51,16 +63,17 @@ python3 -m py_compile configure_bot.py
 
 ## Pending Tasks
 
-### High Priority (P1)
+### High Priority (P1) - Ready for Physical Testing
 - [ ] Hardware testing - Serial mode with real Meshtastic device
-- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity
+- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity with private channel
 - [ ] Integration testing - configure_bot.py modules vs fallback
 
-### Medium Priority (P2)
-- [ ] Multi-interface support (upstream has 9, we have 1)
-- [ ] Upstream config compatibility (read meshing-around config.ini)
+### Medium Priority (P2) - Code Complete
+- [x] Multi-interface support (up to 9 interfaces)
+- [x] Upstream config compatibility (ConfigLoader._load_upstream())
 - [ ] Web templates - verify all render correctly
-- [ ] Persistent storage - save network state across restarts
+- [x] Persistent storage - network state auto-saved
+- [ ] CI/CD - GitHub Actions workflow (tests failing, needs investigation)
 
 ### Low Priority (P3)
 - [ ] Email/SMS notification testing
