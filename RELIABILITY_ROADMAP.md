@@ -128,14 +128,20 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 
 ### INI Parsing
 - [ ] Test with malformed config files
-- [ ] Verify default values applied correctly
+- [x] Verify default values applied correctly (unified schema)
 - [ ] Test config migration from older versions
-- [ ] Validate sensitive data handling (passwords)
+- [x] Validate sensitive data handling (passwords) - config_schema.py
 
 ### Upstream Compatibility
-- [ ] Read meshing-around config.ini successfully
-- [ ] Handle missing sections gracefully
-- [ ] Map equivalent config options
+- [x] Read meshing-around config.ini successfully - ConfigLoader._load_upstream()
+- [x] Handle missing sections gracefully - defaults via dataclasses
+- [x] Map equivalent config options - config_schema.py maps both formats
+
+### Auto-Update System (NEW)
+- [x] Design auto-update architecture (opt-in)
+- [x] Support both MeshForge and upstream updates
+- [x] Weekly/monthly schedule options
+- [ ] Test update workflow on Pi Zero 2W
 
 ---
 
@@ -220,7 +226,7 @@ Before releasing v1.0.0-stable, the following must be complete:
 | TUI | 0 | 0 | 3 | 0 | 0% |
 | Web | 0 | 0 | 3 | 0 | 0% |
 | Notifications | 0 | 0 | 0 | 2 | 0% |
-| Config | 0 | 0 | 2 | 0 | 0% |
+| Config | 0 | 0 | 2 | 0 | **75%** |
 | Testing | 0 | 3 | 0 | 0 | **80%** |
 | Docs | 0 | 0 | 0 | 2 | 0% |
 | Upstream | 0 | 0 | 3 | 0 | 0% |
@@ -230,4 +236,24 @@ Before releasing v1.0.0-stable, the following must be complete:
 
 ---
 
-*Last updated: 2026-02-01*
+## Recent Changes (2026-02-04)
+
+### New Modules Added
+- `config_schema.py` - Unified configuration with dataclass validation
+- `pi_utils.py` - Raspberry Pi detection, serial ports, PEP 668 handling
+- `system_maintenance.py` - Auto-update system, git-based updates
+- `cli_utils.py` - Terminal colors, formatted printing, menus
+
+### Exception Handling Improvements
+- Fixed 7 broad exceptions in `mqtt_client.py`
+- Fixed 8 broad exceptions in `meshtastic_api.py`
+- All exceptions now use specific types (OSError, ValueError, etc.)
+
+### Upstream Integration
+- Added git remote for SpudGunMan/meshing-around
+- Config loader supports both upstream and MeshForge formats
+- Multi-interface support (interface2...interface9)
+
+---
+
+*Last updated: 2026-02-04*

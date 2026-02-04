@@ -84,8 +84,8 @@ class MeshtasticAPI:
             for callback in self._callbacks[event]:
                 try:
                     callback(*args, **kwargs)
-                except Exception as e:
-                    print(f"Callback error for {event}: {e}")
+                except (TypeError, ValueError, AttributeError) as e:
+                    print(f"Callback error for {event} ({type(e).__name__}): {e}")
 
     def connect(self) -> bool:
         """Connect to the Meshtastic device."""
@@ -144,8 +144,13 @@ class MeshtasticAPI:
             self._trigger_callbacks("on_connect", self.connection_info)
             return True
 
-        except Exception as e:
-            self.connection_info.error_message = str(e)
+        except (OSError, ConnectionError, TimeoutError) as e:
+            self.connection_info.error_message = f"Connection failed: {e}"
+            self.connection_info.connected = False
+            self.network.connection_status = "error"
+            return False
+        except (ValueError, AttributeError) as e:
+            self.connection_info.error_message = f"Configuration error: {e}"
             self.connection_info.connected = False
             self.network.connection_status = "error"
             return False
@@ -160,8 +165,8 @@ class MeshtasticAPI:
                 pub.unsubscribe(self._on_connection, "meshtastic.connection.established")
                 pub.unsubscribe(self._on_disconnect_event, "meshtastic.connection.lost")
                 self.interface.close()
-            except Exception:
-                pass
+            except (OSError, AttributeError, RuntimeError):
+                pass  # Ignore cleanup errors during disconnect
 
         self.interface = None
         self.connection_info.connected = False
@@ -239,8 +244,8 @@ class MeshtasticAPI:
                 is_admin=is_admin,
                 hop_count=node_info.get('hopsAway', 0)
             )
-        except Exception as e:
-            print(f"Error parsing node info: {e}")
+        except (KeyError, TypeError, ValueError) as e:
+            print(f"Error parsing node info ({type(e).__name__}): {e}")
             return None
 
     def _on_receive(self, packet: dict, interface: Any) -> None:
@@ -269,8 +274,8 @@ class MeshtasticAPI:
                     self._process_packet(data)
             except queue.Empty:
                 continue
-            except Exception as e:
-                print(f"Worker error: {e}")
+            except (KeyError, TypeError, ValueError, AttributeError) as e:
+                print(f"Worker error ({type(e).__name__}): {e}")
 
     def _process_packet(self, packet: dict) -> None:
         """Process a received packet."""
@@ -294,8 +299,8 @@ class MeshtasticAPI:
             elif portnum == 'NODEINFO_APP':
                 self._handle_nodeinfo(packet)
 
-        except Exception as e:
-            print(f"Error processing packet: {e}")
+        except (KeyError, TypeError, ValueError, UnicodeDecodeError) as e:
+            print(f"Error processing packet ({type(e).__name__}): {e}")
 
     def _handle_text_message(self, packet: dict) -> None:
         """Handle incoming text message."""
@@ -473,8 +478,8 @@ class MeshtasticAPI:
             self.network.add_message(message)
             return True
 
-        except Exception as e:
-            print(f"Error sending message: {e}")
+        except (OSError, AttributeError, ValueError) as e:
+            print(f"Error sending message ({type(e).__name__}): {e}")
             return False
 
     def request_position(self, node_id: str) -> bool:
@@ -485,8 +490,8 @@ class MeshtasticAPI:
             node_num = int(node_id.lstrip('!'), 16) if node_id.startswith('!') else int(node_id)
             self.interface.sendPosition(destinationId=node_num)
             return True
-        except Exception as e:
-            print(f"Error requesting position: {e}")
+        except (OSError, ValueError, AttributeError) as e:
+            print(f"Error requesting position ({type(e).__name__}): {e}")
             return False
 
     def get_nodes(self) -> List[Node]:
