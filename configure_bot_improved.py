@@ -579,7 +579,7 @@ def save_config(config: configparser.ConfigParser, config_file: str):
         with open(config_file, 'w') as f:
             config.write(f)
         print_success(f"Configuration saved to {config_file}")
-    except Exception as e:
+    except (IOError, OSError, PermissionError) as e:
         print_error(f"Failed to save config: {e}")
 
 # ============================================================================
