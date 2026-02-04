@@ -30,12 +30,19 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 226 tests passing
+- **Test Status:** 240 tests passing
 
 ### Code Health
 - All broad `except Exception` fixed in core modules
 - configure_bot.py decomposed (2307 → ~2000 lines)
 - New modular architecture with fallback support
+
+### Recent P1-P2 Improvements (Completed)
+- **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
+- **Persistent storage** - Network state saved/loaded from ~/.config/meshing-around-clients/
+- **Upstream config import** - `--import-config` CLI option for migration
+- **Web topology template** - topology.html created and fixed
+- **Crypto degradation** - mesh_crypto.py and mqtt_client.py handle missing crypto gracefully
 
 ### Key Modules
 | Module | Purpose | Lines |
