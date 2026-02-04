@@ -63,6 +63,11 @@ class MeshtasticAPI:
         }
         self._running = False
         self._worker_thread: Optional[threading.Thread] = None
+        self._auto_save_thread: Optional[threading.Thread] = None
+        self._last_save_time: Optional[datetime] = None
+
+        # Load persisted state if enabled
+        self._load_persisted_state()
 
     @property
     def is_connected(self) -> bool:
@@ -86,6 +91,51 @@ class MeshtasticAPI:
                     callback(*args, **kwargs)
                 except (TypeError, ValueError, AttributeError) as e:
                     print(f"Callback error for {event} ({type(e).__name__}): {e}")
+
+    # ==================== Persistence Methods ====================
+
+    def _load_persisted_state(self) -> None:
+        """Load network state from persistent storage."""
+        if not hasattr(self.config, 'storage') or not self.config.storage.enabled:
+            return
+
+        state_path = self.config.get_state_file_path()
+        if state_path.exists():
+            loaded = MeshNetwork.load_from_file(state_path)
+            if loaded and loaded.nodes:
+                # Merge loaded nodes with empty network
+                self.network = loaded
+                self.network.connection_status = "disconnected"  # Reset status
+                print(f"Loaded {len(self.network.nodes)} nodes from {state_path}")
+
+    def _save_state(self) -> bool:
+        """Save network state to persistent storage."""
+        if not hasattr(self.config, 'storage') or not self.config.storage.enabled:
+            return False
+
+        state_path = self.config.get_state_file_path()
+        self.network.last_update = datetime.now()
+        success = self.network.save_to_file(state_path)
+        if success:
+            self._last_save_time = datetime.now()
+        return success
+
+    def _start_auto_save(self) -> None:
+        """Start background auto-save thread."""
+        if not hasattr(self.config, 'storage'):
+            return
+        if self.config.storage.auto_save_interval <= 0:
+            return
+
+        def auto_save_loop():
+            interval = self.config.storage.auto_save_interval
+            while self._running:
+                time.sleep(interval)
+                if self._running and self.connection_info.connected:
+                    self._save_state()
+
+        self._auto_save_thread = threading.Thread(target=auto_save_loop, daemon=True)
+        self._auto_save_thread.start()
 
     def connect(self) -> bool:
         """Connect to the Meshtastic device."""
@@ -141,6 +191,9 @@ class MeshtasticAPI:
             self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
             self._worker_thread.start()
 
+            # Start auto-save thread
+            self._start_auto_save()
+
             self._trigger_callbacks("on_connect", self.connection_info)
             return True
 
@@ -157,6 +210,10 @@ class MeshtasticAPI:
 
     def disconnect(self) -> None:
         """Disconnect from the Meshtastic device."""
+        # Save state before disconnecting
+        if self.connection_info.connected:
+            self._save_state()
+
         self._running = False
 
         if self.interface:

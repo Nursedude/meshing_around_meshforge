@@ -50,10 +50,20 @@ class ConnectionManager:
     - Fallback between connection types
     - Automatic reconnection
     - Unified API for all connection types
+    - Multi-interface support (uses first enabled interface by default)
     """
 
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, interface_index: int = 0):
+        """
+        Initialize connection manager.
+
+        Args:
+            config: Configuration object
+            interface_index: Which interface to use (0-based index).
+                           Ignored if config only has one interface.
+        """
         self.config = config
+        self._interface_index = interface_index
         self._api: Optional[Any] = None
         self._status = ConnectionStatus()
         self._callbacks: Dict[str, List[Callable]] = {
@@ -71,6 +81,45 @@ class ConnectionManager:
         self._max_reconnect_attempts = 10
         self._reconnect_thread: Optional[threading.Thread] = None
         self._running = False
+
+    @property
+    def current_interface_index(self) -> int:
+        """Get current interface index."""
+        return self._interface_index
+
+    @property
+    def available_interfaces(self) -> int:
+        """Get number of available interfaces."""
+        if hasattr(self.config, 'interfaces'):
+            return len(self.config.interfaces)
+        return 1
+
+    def switch_interface(self, index: int) -> bool:
+        """
+        Switch to a different interface.
+
+        Args:
+            index: Interface index to switch to (0-based)
+
+        Returns:
+            True if switch was successful
+        """
+        if not hasattr(self.config, 'interfaces'):
+            return index == 0
+
+        if index < 0 or index >= len(self.config.interfaces):
+            return False
+
+        was_connected = self._status.connected
+        if was_connected:
+            self.disconnect()
+
+        self._interface_index = index
+        self._status = ConnectionStatus()
+
+        if was_connected:
+            return self.connect()
+        return True
 
     @property
     def is_connected(self) -> bool:
@@ -104,12 +153,23 @@ class ConnectionManager:
                 # RuntimeError: General runtime issues in callback
                 print(f"Callback error ({event}): {e}")
 
+    def _get_current_interface(self):
+        """Get the current interface config."""
+        if hasattr(self.config, 'interfaces') and self.config.interfaces:
+            if self._interface_index < len(self.config.interfaces):
+                return self.config.interfaces[self._interface_index]
+        return self.config.interface
+
     def _detect_connection_type(self) -> ConnectionType:
         """Auto-detect the best available connection type."""
-        requested = self.config.interface.type.lower()
+        iface = self._get_current_interface()
+        requested = iface.type.lower()
 
         if requested != "auto":
-            return ConnectionType(requested)
+            try:
+                return ConnectionType(requested)
+            except ValueError:
+                pass  # Unknown type, continue to auto-detect
 
         # Try to detect serial ports
         import glob
@@ -121,7 +181,7 @@ class ConnectionManager:
             return ConnectionType.SERIAL
 
         # Check for TCP host configured
-        if self.config.interface.hostname:
+        if iface.hostname:
             return ConnectionType.TCP
 
         # Check if MQTT is enabled in config
@@ -405,12 +465,16 @@ class ConnectionManager:
     @property
     def connection_health(self) -> Dict[str, Any]:
         """Get connection health metrics."""
+        iface = self._get_current_interface()
         health = {
             "status": "disconnected",
             "connection_type": self._status.connection_type.value,
             "device_info": self._status.device_info,
             "reconnect_attempts": self._status.reconnect_attempts,
-            "last_connected": self._status.last_connected.isoformat() if self._status.last_connected else None
+            "last_connected": self._status.last_connected.isoformat() if self._status.last_connected else None,
+            "interface_index": self._interface_index,
+            "available_interfaces": self.available_interfaces,
+            "interface_type": iface.type if hasattr(iface, 'type') else "unknown",
         }
 
         if self._api and hasattr(self._api, 'connection_health'):
