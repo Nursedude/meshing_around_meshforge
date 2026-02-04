@@ -91,6 +91,14 @@
 
 {% block scripts %}
 <script>
+// Utility function to escape HTML
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     loadTopology();
     setInterval(loadTopology, 30000);  // Refresh every 30 seconds
@@ -102,15 +110,19 @@ function refreshTopology() {
 
 async function loadTopology() {
     try {
-        const resp = await fetch('/api/topology');
-        const data = await resp.json();
+        // Fetch topology and health data in parallel
+        const [topoResp, healthResp] = await Promise.all([
+            fetch('/api/topology'),
+            fetch('/api/health')
+        ]);
+        const data = await topoResp.json();
+        const health = await healthResp.json();
 
         // Update health status
-        const health = data.health;
-        document.getElementById('health-status').textContent = health.status.toUpperCase();
-        document.getElementById('health-fill').style.width = health.score + '%';
-        document.getElementById('health-fill').className = 'health-fill health-' + health.status;
-        document.getElementById('metric-online').textContent = health.online_nodes + '/' + health.total_nodes;
+        document.getElementById('health-status').textContent = (health.status || 'unknown').toUpperCase();
+        document.getElementById('health-fill').style.width = (health.score || 0) + '%';
+        document.getElementById('health-fill').className = 'health-fill health-' + (health.status || 'unknown');
+        document.getElementById('metric-online').textContent = (health.online_nodes || 0) + '/' + (health.total_nodes || 0);
         document.getElementById('metric-snr').textContent = (health.avg_snr || 0).toFixed(1) + ' dB';
         document.getElementById('metric-util').textContent = (health.avg_channel_utilization || 0).toFixed(0) + '%';
 
@@ -197,6 +209,11 @@ function renderNode(node) {
             ${node.hop_count > 0 ? `<span class="hop-count">${node.hop_count} hop${node.hop_count > 1 ? 's' : ''}</span>` : ''}
         </div>
     `;
+}
+
+function showNodeDetails(nodeId) {
+    // Navigate to node details page
+    window.location.href = '/nodes?selected=' + encodeURIComponent(nodeId);
 }
 </script>
 {% endblock %}
