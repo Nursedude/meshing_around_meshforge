@@ -10,8 +10,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.9', '3.10', '3.11', '3.12']
 
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-cov
           pip install -r meshing_around_clients/requirements.txt
+
+      - name: Verify core imports
+        run: |
+          python -c "from meshing_around_clients.core.models import Node, Message; print('Core imports OK')"
+          python -c "from meshing_around_clients.core.config import Config; print('Config imports OK')"
 
       - name: Run tests
         run: |
