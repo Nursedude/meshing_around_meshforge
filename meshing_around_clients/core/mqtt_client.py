@@ -152,8 +152,8 @@ class MQTTMeshtasticClient:
         for callback in self._callbacks.get(event, []):
             try:
                 callback(*args, **kwargs)
-            except Exception as e:
-                print(f"MQTT callback error: {e}")
+            except (TypeError, ValueError, AttributeError) as e:
+                print(f"MQTT callback error ({type(e).__name__}): {e}")
 
     def connect(self) -> bool:
         """Connect to MQTT broker."""
@@ -207,8 +207,11 @@ class MQTTMeshtasticClient:
                 self._client.loop_stop()
                 return False
 
-        except Exception as e:
-            print(f"MQTT connection error: {e}")
+        except (OSError, ConnectionError, TimeoutError) as e:
+            print(f"MQTT connection error ({type(e).__name__}): {e}")
+            return False
+        except ValueError as e:
+            print(f"MQTT config error: {e}")
             return False
 
     def disconnect(self) -> None:
@@ -296,8 +299,10 @@ class MQTTMeshtasticClient:
             else:
                 self._handle_protobuf_message(topic, payload, topic_info)
 
-        except Exception as e:
-            print(f"Error handling MQTT message: {e}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            pass  # Silently skip malformed messages
+        except (KeyError, ValueError, TypeError, struct.error) as e:
+            print(f"Error parsing MQTT message ({type(e).__name__}): {e}")
 
     def _parse_topic(self, topic: str) -> Dict[str, Any]:
         """Parse MQTT topic to extract metadata."""
@@ -409,8 +414,8 @@ class MQTTMeshtasticClient:
 
         except json.JSONDecodeError:
             pass
-        except Exception as e:
-            print(f"JSON message error: {e}")
+        except (KeyError, TypeError, ValueError) as e:
+            print(f"JSON message parse error ({type(e).__name__}): {e}")
 
     def _handle_text_from_json(self, data: dict, sender_id: str, msg_id: str = ""):
         """Handle text message from JSON."""
@@ -487,8 +492,8 @@ class MQTTMeshtasticClient:
                 )
                 self.network.update_route(sender_id, route)
 
-        except Exception as e:
-            print(f"Traceroute handling error: {e}")
+        except (KeyError, TypeError, ValueError) as e:
+            print(f"Traceroute handling error ({type(e).__name__}): {e}")
 
     def _handle_position_from_json(self, data: dict, sender_id: str):
         """Handle position update from JSON."""
@@ -605,8 +610,8 @@ class MQTTMeshtasticClient:
             if len(payload) >= 16:
                 self._parse_encrypted_header(payload, node_id)
 
-        except Exception as e:
-            print(f"Encrypted message handling error: {e}")
+        except (ValueError, struct.error, KeyError, TypeError) as e:
+            print(f"Encrypted message handling error ({type(e).__name__}): {e}")
 
     def _parse_encrypted_header(self, payload: bytes, node_id: str):
         """Parse the unencrypted header of an encrypted message."""
@@ -885,8 +890,8 @@ class MQTTMeshtasticClient:
 
             return True
 
-        except Exception as e:
-            print(f"MQTT send error: {e}")
+        except (OSError, ConnectionError, ValueError, TypeError) as e:
+            print(f"MQTT send error ({type(e).__name__}): {e}")
             return False
 
     def get_nodes(self) -> List[Node]:
