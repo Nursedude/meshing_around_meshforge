@@ -73,7 +73,7 @@ python3 -m py_compile configure_bot.py
 - [x] Upstream config compatibility (ConfigLoader._load_upstream())
 - [ ] Web templates - verify all render correctly
 - [x] Persistent storage - network state auto-saved
-- [x] CI/CD - GitHub Actions workflow
+- [ ] CI/CD - GitHub Actions workflow (tests failing, needs investigation)
 
 ### Low Priority (P3)
 - [ ] Email/SMS notification testing
