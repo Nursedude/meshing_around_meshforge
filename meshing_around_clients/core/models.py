@@ -3,10 +3,12 @@ Data models for Meshing-Around Clients.
 Defines the core data structures used across TUI and Web clients.
 """
 
+import os
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from pathlib import Path
+from typing import Optional, List, Dict, Any, Union
 from enum import Enum
 import json
 
@@ -646,3 +648,136 @@ class MeshNetwork:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MeshNetwork':
+        """Create MeshNetwork from dictionary (restore state).
+
+        Note: This restores essential state (nodes, channels) but not
+        transient data (messages, alerts, seen_messages) which will be
+        empty on restore.
+        """
+        network = cls()
+
+        # Restore basic state
+        network.my_node_id = data.get('my_node_id', '')
+        network.connection_status = data.get('connection_status', 'disconnected')
+        network.channel_count = data.get('channel_count', 0)
+
+        # Restore last_update
+        last_update = data.get('last_update')
+        if last_update:
+            try:
+                network.last_update = datetime.fromisoformat(last_update)
+            except (ValueError, TypeError):
+                network.last_update = None
+
+        # Restore nodes
+        nodes_data = data.get('nodes', {})
+        for node_id, node_dict in nodes_data.items():
+            try:
+                # Get role, handling both string and missing values
+                role_str = node_dict.get('role', 'CLIENT')
+                try:
+                    role = NodeRole(role_str) if role_str else NodeRole.CLIENT
+                except ValueError:
+                    role = NodeRole.CLIENT
+
+                node = Node(
+                    node_id=node_dict.get('node_id', node_id),
+                    node_num=node_dict.get('node_num', 0),
+                    short_name=node_dict.get('short_name', ''),
+                    long_name=node_dict.get('long_name', ''),
+                    hardware_model=node_dict.get('hardware_model', node_dict.get('hardware', 'UNKNOWN')),
+                    is_online=node_dict.get('is_online', False),
+                    role=role
+                )
+                # Restore timestamps
+                last_heard = node_dict.get('last_heard')
+                if last_heard:
+                    try:
+                        node.last_heard = datetime.fromisoformat(last_heard)
+                    except (ValueError, TypeError):
+                        pass
+                first_seen = node_dict.get('first_seen')
+                if first_seen:
+                    try:
+                        node.first_seen = datetime.fromisoformat(first_seen)
+                    except (ValueError, TypeError):
+                        pass
+                network.nodes[node_id] = node
+            except (KeyError, ValueError, TypeError):
+                continue  # Skip invalid node data
+
+        # Restore channels
+        channels_data = data.get('channels', {})
+        for idx_str, ch_dict in channels_data.items():
+            try:
+                idx = int(idx_str)
+                channel = Channel(
+                    index=idx,
+                    name=ch_dict.get('name', ''),
+                    role=ChannelRole(ch_dict.get('role', 'DISABLED')),
+                    uplink_enabled=ch_dict.get('uplink_enabled', False),
+                    downlink_enabled=ch_dict.get('downlink_enabled', False),
+                    message_count=ch_dict.get('message_count', 0)
+                )
+                last_activity = ch_dict.get('last_activity')
+                if last_activity:
+                    try:
+                        channel.last_activity = datetime.fromisoformat(last_activity)
+                    except (ValueError, TypeError):
+                        pass
+                network.channels[idx] = channel
+            except (KeyError, ValueError, TypeError):
+                continue  # Skip invalid channel data
+
+        return network
+
+    @classmethod
+    def from_json(cls, json_str: str) -> 'MeshNetwork':
+        """Create MeshNetwork from JSON string."""
+        try:
+            data = json.loads(json_str)
+            return cls.from_dict(data)
+        except json.JSONDecodeError:
+            return cls()  # Return empty network on invalid JSON
+
+    def save_to_file(self, path: Union[str, Path]) -> bool:
+        """Save network state to file.
+
+        Args:
+            path: Path to save state file
+
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        path = Path(path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, 'w') as f:
+                f.write(self.to_json())
+            # Set restrictive permissions
+            os.chmod(path, 0o600)
+            return True
+        except OSError:
+            return False
+
+    @classmethod
+    def load_from_file(cls, path: Union[str, Path]) -> 'MeshNetwork':
+        """Load network state from file.
+
+        Args:
+            path: Path to state file
+
+        Returns:
+            MeshNetwork instance (empty if file doesn't exist or is invalid)
+        """
+        path = Path(path)
+        if not path.exists():
+            return cls()
+        try:
+            with open(path, 'r') as f:
+                return cls.from_json(f.read())
+        except (OSError, json.JSONDecodeError):
+            return cls()

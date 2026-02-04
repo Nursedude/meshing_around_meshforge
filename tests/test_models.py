@@ -362,5 +362,118 @@ class TestMeshNetwork(unittest.TestCase):
         self.assertEqual(len(errors), 0, f"Thread safety errors: {errors}")
 
 
+class TestMeshNetworkPersistence(unittest.TestCase):
+    """Test MeshNetwork persistence methods."""
+
+    def test_from_dict_basic(self):
+        """Test restoring network from dictionary."""
+        data = {
+            "my_node_id": "!test123",
+            "connection_status": "connected",
+            "channel_count": 3,
+            "nodes": {
+                "!node1": {
+                    "node_id": "!node1",
+                    "node_num": 12345,
+                    "short_name": "N1",
+                    "long_name": "Node One",
+                    "hardware_model": "T-Beam",
+                    "is_online": True,
+                    "role": "ROUTER"
+                }
+            },
+            "channels": {
+                "0": {
+                    "name": "Primary",
+                    "role": "PRIMARY",
+                    "message_count": 42
+                }
+            }
+        }
+        network = MeshNetwork.from_dict(data)
+        self.assertEqual(network.my_node_id, "!test123")
+        self.assertEqual(network.connection_status, "connected")
+        self.assertEqual(len(network.nodes), 1)
+        self.assertEqual(network.nodes["!node1"].short_name, "N1")
+        self.assertEqual(network.nodes["!node1"].role, NodeRole.ROUTER)
+        # from_dict restores channels, which update the default 8 channels
+        self.assertIn(0, network.channels)
+        self.assertEqual(network.channels[0].name, "Primary")
+
+    def test_from_json(self):
+        """Test restoring network from JSON string."""
+        json_str = '{"my_node_id": "!json_test", "nodes": {}, "channels": {}}'
+        network = MeshNetwork.from_json(json_str)
+        self.assertEqual(network.my_node_id, "!json_test")
+
+    def test_from_json_invalid(self):
+        """Test handling invalid JSON."""
+        network = MeshNetwork.from_json("not valid json")
+        # Should return empty network
+        self.assertEqual(len(network.nodes), 0)
+
+    def test_roundtrip(self):
+        """Test save and restore roundtrip."""
+        # Create network with data
+        network = MeshNetwork()
+        network.my_node_id = "!roundtrip"
+        network.connection_status = "connected"
+        node = Node(node_id="!n1", node_num=1, short_name="RT", long_name="Roundtrip Test")
+        network.add_node(node)
+
+        # Convert to dict and back
+        data = network.to_dict()
+        restored = MeshNetwork.from_dict(data)
+
+        self.assertEqual(restored.my_node_id, "!roundtrip")
+        self.assertEqual(len(restored.nodes), 1)
+        self.assertEqual(restored.nodes["!n1"].short_name, "RT")
+
+    def test_save_and_load_file(self):
+        """Test file-based persistence."""
+        import tempfile
+        import os
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            filepath = Path(tmpdir) / "network_state.json"
+
+            # Create and save network
+            network = MeshNetwork()
+            network.my_node_id = "!filetest"
+            node = Node(node_id="!f1", node_num=1, short_name="FT")
+            network.add_node(node)
+
+            result = network.save_to_file(filepath)
+            self.assertTrue(result)
+            self.assertTrue(filepath.exists())
+
+            # Check file permissions (should be 600)
+            mode = os.stat(filepath).st_mode & 0o777
+            self.assertEqual(mode, 0o600)
+
+            # Load and verify
+            loaded = MeshNetwork.load_from_file(filepath)
+            self.assertEqual(loaded.my_node_id, "!filetest")
+            self.assertEqual(len(loaded.nodes), 1)
+
+    def test_load_nonexistent_file(self):
+        """Test loading from nonexistent file returns empty network."""
+        network = MeshNetwork.load_from_file("/nonexistent/path/state.json")
+        self.assertEqual(len(network.nodes), 0)
+
+    def test_from_dict_handles_bad_data(self):
+        """Test that from_dict handles malformed data gracefully."""
+        data = {
+            "nodes": {
+                "!good": {"node_id": "!good", "node_num": 1, "short_name": "Good"},
+                "!bad": {"invalid": "data"},  # Missing required fields
+            }
+        }
+        network = MeshNetwork.from_dict(data)
+        # Should have at least the good node
+        self.assertIn("!good", network.nodes)
+
+
 if __name__ == "__main__":
     unittest.main()

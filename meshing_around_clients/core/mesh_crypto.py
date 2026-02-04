@@ -17,12 +17,20 @@ from dataclasses import dataclass
 from datetime import datetime
 
 # Try to import cryptography library
+# Use BaseException to catch pyo3_runtime.PanicException from broken Rust backends
+CRYPTO_AVAILABLE = False
+Cipher = None
+algorithms = None
+modes = None
+default_backend = None
+
 try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.backends import default_backend
     CRYPTO_AVAILABLE = True
-except ImportError:
-    CRYPTO_AVAILABLE = False
+except BaseException:
+    # Catch any exception including pyo3 panics from broken cryptography backend
+    pass
 
 # Try to import meshtastic protobuf definitions
 try:
