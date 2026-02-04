@@ -84,8 +84,14 @@ class AlertDetector:
         for callback in self._alert_callbacks:
             try:
                 callback(alert)
-            except Exception:
-                pass  # Don't let callback errors break detection
+            except (ValueError, TypeError, AttributeError, KeyError, RuntimeError):
+                # ValueError: Invalid alert data in callback
+                # TypeError: Type mismatch in callback
+                # AttributeError: Missing attributes on callback objects
+                # KeyError: Missing expected keys
+                # RuntimeError: General runtime issues
+                # Don't let callback errors break detection
+                pass
 
     # ==================== Haversine Distance ====================
 
