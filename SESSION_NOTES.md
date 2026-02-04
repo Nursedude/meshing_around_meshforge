@@ -139,7 +139,15 @@ MeshNetwork
 
 ## Work History (Summary)
 
-### 2026-02-04 (Today)
+### 2026-02-04 (Session 2)
+- Integrated MQTT guide from MeshForge NOC repo
+- Added [mqtt] section to config.enhanced.ini
+- Set up GitHub Actions CI/CD (lint/syntax pass, tests need investigation)
+- Updated README: dual-mode (extension + standalone), MeshForge NOC integration
+- Wrote Substack article (Documentation/articles/001_building_meshforge_clients.md)
+- Hardware testing scheduled with WH6GXZ
+
+### 2026-02-04 (Session 1)
 - Fixed 6 remaining exception handlers in configure_bot.py
 - Decomposed configure_bot.py (removed 307 lines of duplicates)
 - All 226 tests passing
