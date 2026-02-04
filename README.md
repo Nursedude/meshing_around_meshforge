@@ -1,12 +1,19 @@
-# MeshForge
+# MeshForge Clients
 
-Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-around) - configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for your Meshtastic mesh network.
+**Companion toolkit for [MeshForge NOC](https://github.com/Nursedude/meshforge)** - TUI/Web monitoring clients, MQTT integration, and headless deployment for Meshtastic mesh networks.
 
 [![Version](https://img.shields.io/badge/version-0.5.0--beta-orange.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://python.org)
+[![CI](https://github.com/Nursedude/meshing_around_meshforge/actions/workflows/ci.yml/badge.svg)](https://github.com/Nursedude/meshing_around_meshforge/actions)
 
-> **EXTENSION MODULE** - This is a MeshForge extension module for [meshing-around](https://github.com/SpudGunMan/meshing-around). APIs and features are under active development and may change without notice. Not intended for production use.
+## What is this?
+
+This toolkit serves two purposes:
+
+1. **Extension for MeshForge NOC** - Integrates with [MeshForge NOC](https://github.com/Nursedude/meshforge) via MQTT for coordinated mesh network monitoring across private encrypted channels.
+
+2. **Standalone Client** - Works independently as a TUI/Web client for monitoring any Meshtastic mesh network via Serial, TCP, MQTT, or BLE.
 
 > **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
@@ -272,13 +279,33 @@ meshing_around_meshforge/
         └── static/
 ```
 
+## MeshForge NOC Integration
+
+This toolkit integrates with [MeshForge NOC](https://github.com/Nursedude/meshforge) for coordinated mesh monitoring:
+
+```
+┌─────────────────────┐         ┌─────────────────────┐
+│   MeshForge NOC     │◄───────►│  MeshForge Clients  │
+│   (Primary App)     │  MQTT   │  (This Toolkit)     │
+│   - Gateway         │  Sync   │  - TUI/Web UI       │
+│   - Node Tracker    │         │  - Alert System     │
+└─────────────────────┘         └─────────────────────┘
+          │                              │
+          ▼                              ▼
+┌─────────────────────────────────────────────────────┐
+│          Private MQTT Channel (256-bit PSK)         │
+│              msh/{region}/meshforge/#               │
+└─────────────────────────────────────────────────────┘
+```
+
+See [Documentation/MQTT_INTEGRATION.md](Documentation/MQTT_INTEGRATION.md) for setup details.
+
 ## Known Issues
 
-- **Serial/TCP/BLE modes**: Not tested with real hardware
+- **Serial/TCP/BLE modes**: Not tested with real hardware (scheduled for testing)
 - **Web templates**: May have rendering issues
-- **MQTT reconnection**: Limited retry logic
+- **CI Tests**: Test suite needs investigation (lint/syntax pass)
 - **Notifications**: Email/SMS sending untested
-- **Multi-interface**: Only single connection supported (upstream supports 9)
 
 ## Dependencies
 
@@ -302,23 +329,31 @@ Issues and PRs welcome. Please:
 - Provide Rich library fallbacks
 - Test with `--demo` before hardware
 
-## Upstream Compatibility
+## Compatibility
 
-MeshForge is designed to work with [meshing-around](https://github.com/SpudGunMan/meshing-around) (v1.9.9.x). Key differences:
+| Project | Relationship | Notes |
+|---------|-------------|-------|
+| [MeshForge NOC](https://github.com/Nursedude/meshforge) | Primary app | MQTT integration for coordinated monitoring |
+| [meshing-around](https://github.com/SpudGunMan/meshing-around) | Upstream | Config format compatible, multi-interface support |
+| [Meshtastic](https://meshtastic.org) | Platform | Works with any Meshtastic device |
 
-| Feature | meshing-around | MeshForge |
-|---------|---------------|-----------|
+### Feature Comparison
+
+| Feature | meshing-around | MeshForge Clients |
+|---------|---------------|-------------------|
 | Purpose | Bot server | Monitoring client |
-| Interfaces | Up to 9 | Single |
-| Config | `config.ini` | `mesh_client.ini` |
-| Focus | Commands/games | Visualization |
+| Interfaces | Up to 9 | Up to 9 (compatible) |
+| Config | `config.ini` | `mesh_client.ini` / `config.enhanced.ini` |
+| Focus | Commands/games | Visualization + alerts |
+| MQTT | Basic | 256-bit PSK encryption |
 
 ## Links
 
-- [meshing-around](https://github.com/SpudGunMan/meshing-around) - Parent project
-- [Meshtastic](https://meshtastic.org) - Platform
+- **[MeshForge NOC](https://github.com/Nursedude/meshforge)** - Primary mesh monitoring application
+- [meshing-around](https://github.com/SpudGunMan/meshing-around) - Bot framework (upstream)
+- [Meshtastic](https://meshtastic.org) - Platform documentation
 - [Issues](https://github.com/Nursedude/meshing_around_meshforge/issues)
 
 ---
 
-*Built for the Meshtastic community*
+*Built for the Meshtastic community by WH6GXZ*
