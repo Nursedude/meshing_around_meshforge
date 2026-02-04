@@ -232,7 +232,7 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Upstream | 0 | 0 | 3 | 0 | 0% |
 
 **Total Items:** 26 (P0: 0, P1: 7, P2: 15, P3: 4)
-**Unit Tests:** 177 tests passing (4 core modules fully tested)
+**Unit Tests:** 226 tests passing (6 core modules fully tested)
 
 ---
 
@@ -247,7 +247,14 @@ Before releasing v1.0.0-stable, the following must be complete:
 ### Exception Handling Improvements
 - Fixed 7 broad exceptions in `mqtt_client.py`
 - Fixed 8 broad exceptions in `meshtastic_api.py`
+- Fixed 6 broad exceptions in `configure_bot.py` (shutil, os.chdir, subprocess)
+- Fixed exceptions in `connection_manager.py` and `alert_detector.py`
 - All exceptions now use specific types (OSError, ValueError, etc.)
+
+### configure_bot.py Decomposition
+- Reduced from 2307 to ~2000 lines
+- Extracted code to new modules with fallback support
+- Removed duplicate functions that shadowed imports
 
 ### Upstream Integration
 - Added git remote for SpudGunMan/meshing-around
