@@ -1077,18 +1077,213 @@ class MeshingAroundTUI:
             pass
 
 
+class PlainTextTUI:
+    """
+    Minimal plain-text TUI fallback when Rich is not available.
+    Provides basic functionality without fancy rendering.
+    """
+
+    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False):
+        self.config = config or Config()
+        self.demo_mode = demo_mode
+
+        # Initialize API
+        if demo_mode:
+            self.api = MockMeshtasticAPI(self.config)
+        else:
+            from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+            self.api = MeshtasticAPI(self.config)
+
+        self._running = False
+        self.current_view = "dashboard"
+
+    def _clear_screen(self):
+        """Clear terminal screen."""
+        os.system('clear' if os.name != 'nt' else 'cls')
+
+    def _print_header(self):
+        """Print application header."""
+        print("=" * 60)
+        print(f"  MESHING-AROUND TUI v{VERSION}  [Plain Text Mode]")
+        if self.demo_mode:
+            print("  [DEMO MODE]")
+        print("=" * 60)
+        print()
+
+    def _print_status(self):
+        """Print network status."""
+        network = self.api.network
+        conn = self.api.connection_info
+
+        status = "CONNECTED" if conn.connected else "DISCONNECTED"
+        print(f"Status: {status}  |  Interface: {conn.interface_type}")
+        print(f"My Node: {network.my_node_id or 'N/A'}")
+        print(f"Nodes: {len(network.online_nodes)}/{len(network.nodes)} online")
+        print(f"Messages: {network.total_messages}  |  Alerts: {len(network.unread_alerts)} unread")
+        print("-" * 60)
+
+    def _print_nodes(self, limit: int = 10):
+        """Print node list."""
+        print("\n[NODES]")
+        print(f"{'Name':<20} {'Last Heard':<12} {'Batt':<6} {'SNR':<8}")
+        print("-" * 50)
+
+        nodes = sorted(
+            self.api.network.nodes.values(),
+            key=lambda n: n.last_heard or datetime.min,
+            reverse=True
+        )[:limit]
+
+        for node in nodes:
+            batt = "-"
+            if node.telemetry and node.telemetry.battery_level > 0:
+                batt = f"{node.telemetry.battery_level}%"
+
+            snr = "-"
+            if node.telemetry and node.telemetry.snr:
+                snr = f"{node.telemetry.snr:.1f}dB"
+
+            status = "*" if node.is_online else " "
+            print(f"{status}{node.display_name[:19]:<19} {node.time_since_heard:<12} {batt:<6} {snr:<8}")
+
+        if not nodes:
+            print("  No nodes discovered yet")
+
+    def _print_messages(self, limit: int = 10):
+        """Print recent messages."""
+        print("\n[MESSAGES]")
+        messages = self.api.network.messages[-limit:]
+
+        for msg in reversed(messages):
+            direction = ">>" if not msg.is_incoming else "<<"
+            sender = msg.sender_name or msg.sender_id[-6:]
+            text = msg.text[:50] + "..." if len(msg.text) > 50 else msg.text
+            print(f"  {msg.time_formatted} {direction} {sender}: {text}")
+
+        if not messages:
+            print("  No messages yet")
+
+    def _print_alerts(self, limit: int = 5):
+        """Print recent alerts."""
+        alerts = self.api.network.alerts[-limit:]
+        if alerts:
+            print("\n[ALERTS]")
+            for alert in reversed(alerts):
+                sev_marker = "!" * alert.severity
+                ack = "[ACK]" if alert.acknowledged else ""
+                print(f"  [{sev_marker}] {alert.title[:40]} {ack}")
+
+    def _print_menu(self):
+        """Print navigation menu."""
+        print("\n" + "-" * 60)
+        print("Commands: [1]Dashboard [2]Nodes [3]Messages [r]Refresh [q]Quit")
+
+    def _render_dashboard(self):
+        """Render dashboard view."""
+        self._clear_screen()
+        self._print_header()
+        self._print_status()
+        self._print_nodes(8)
+        self._print_messages(8)
+        self._print_alerts(3)
+        self._print_menu()
+
+    def _render_nodes(self):
+        """Render nodes view."""
+        self._clear_screen()
+        self._print_header()
+        self._print_status()
+        self._print_nodes(20)
+        self._print_menu()
+
+    def _render_messages(self):
+        """Render messages view."""
+        self._clear_screen()
+        self._print_header()
+        self._print_status()
+        self._print_messages(20)
+        self._print_menu()
+
+    def connect(self) -> bool:
+        """Connect to the Meshtastic device."""
+        print("Connecting to Meshtastic device...")
+        success = self.api.connect()
+        if success:
+            print("Connected!")
+        else:
+            print(f"Failed: {self.api.connection_info.error_message}")
+        return success
+
+    def disconnect(self) -> None:
+        """Disconnect from the device."""
+        self.api.disconnect()
+
+    def run_interactive(self) -> None:
+        """Run in interactive mode."""
+        import select
+        import termios
+        import tty
+
+        # Connect
+        if not self.demo_mode:
+            if not self.connect():
+                response = input("Connection failed. Run in demo mode? [Y/n]: ").strip().lower()
+                if response != 'n':
+                    self.demo_mode = True
+                    self.api = MockMeshtasticAPI(self.config)
+                    self.api.connect()
+                else:
+                    return
+        else:
+            self.api.connect()
+
+        self._running = True
+        old_settings = termios.tcgetattr(sys.stdin)
+
+        try:
+            tty.setcbreak(sys.stdin.fileno())
+
+            while self._running:
+                # Render current view
+                if self.current_view == "dashboard":
+                    self._render_dashboard()
+                elif self.current_view == "nodes":
+                    self._render_nodes()
+                elif self.current_view == "messages":
+                    self._render_messages()
+
+                # Check for input with timeout
+                if select.select([sys.stdin], [], [], 1.0)[0]:
+                    key = sys.stdin.read(1)
+                    self._handle_key(key)
+
+        except (KeyboardInterrupt, EOFError):
+            pass
+        except OSError as e:
+            print(f"I/O Error: {e}")
+        finally:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            self._running = False
+            self.disconnect()
+            self._clear_screen()
+            print("Goodbye!")
+
+    def _handle_key(self, key: str) -> None:
+        """Handle keyboard input."""
+        if key == 'q':
+            self._running = False
+        elif key == '1':
+            self.current_view = "dashboard"
+        elif key == '2':
+            self.current_view = "nodes"
+        elif key == '3':
+            self.current_view = "messages"
+        elif key == 'r':
+            pass  # Refresh happens on next render
+
+
 def main():
     """Main entry point for the TUI application."""
-    if not RICH_AVAILABLE:
-        print("Error: 'rich' library not found.")
-        print("The TUI requires the Rich library for terminal rendering.")
-        print("Please install it with: pip install rich")
-        print("  or: python3 -m pip install rich")
-        print("  or run: python3 mesh_client.py --install-deps")
-        print()
-        print("Alternatively, use the web interface: python3 mesh_client.py --web")
-        sys.exit(1)
-
     import argparse
 
     parser = argparse.ArgumentParser(description="Meshing-Around TUI Client")
@@ -1096,6 +1291,7 @@ def main():
     parser.add_argument("--config", type=str, help="Path to config file")
     parser.add_argument("--serial", type=str, help="Serial port to connect to")
     parser.add_argument("--tcp", type=str, help="TCP hostname to connect to")
+    parser.add_argument("--plain", action="store_true", help="Force plain text mode (no Rich)")
     args = parser.parse_args()
 
     # Load config
@@ -1109,7 +1305,21 @@ def main():
         config.interface.type = "tcp"
         config.interface.hostname = args.tcp
 
-    # Create and run TUI
+    # Use plain text TUI if Rich is not available or --plain flag is set
+    if not RICH_AVAILABLE or args.plain:
+        if not RICH_AVAILABLE:
+            print("Note: 'rich' library not found. Using plain text mode.")
+            print("Install with: pip install rich (for enhanced UI)")
+            print()
+        tui = PlainTextTUI(config=config, demo_mode=args.demo)
+        try:
+            tui.run_interactive()
+        except (ImportError, OSError) as e:
+            print(f"Error running plain text TUI: {e}")
+            print("Try using the web interface: python3 mesh_client.py --web")
+        return
+
+    # Create and run Rich TUI
     tui = MeshingAroundTUI(config=config, demo_mode=args.demo)
 
     try:
