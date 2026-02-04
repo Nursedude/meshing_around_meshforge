@@ -43,6 +43,11 @@ python3 -m py_compile configure_bot.py
 - **Upstream config import** - `--import-config` CLI option for migration
 - **Web topology template** - topology.html created and fixed
 - **Crypto degradation** - mesh_crypto.py and mqtt_client.py handle missing crypto gracefully
+- **MQTT Integration** - Documentation/MQTT_INTEGRATION.md from MeshForge NOC
+- **CI/CD Pipeline** - GitHub Actions workflow (.github/workflows/ci.yml)
+  - Python 3.8-3.12 test matrix
+  - pytest with coverage
+  - flake8/black/isort linting
 
 ### Key Modules
 | Module | Purpose | Lines |
@@ -58,16 +63,17 @@ python3 -m py_compile configure_bot.py
 
 ## Pending Tasks
 
-### High Priority (P1)
+### High Priority (P1) - Ready for Physical Testing
 - [ ] Hardware testing - Serial mode with real Meshtastic device
-- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity
+- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity with private channel
 - [ ] Integration testing - configure_bot.py modules vs fallback
 
-### Medium Priority (P2)
-- [ ] Multi-interface support (upstream has 9, we have 1)
-- [ ] Upstream config compatibility (read meshing-around config.ini)
+### Medium Priority (P2) - Code Complete
+- [x] Multi-interface support (up to 9 interfaces)
+- [x] Upstream config compatibility (ConfigLoader._load_upstream())
 - [ ] Web templates - verify all render correctly
-- [ ] Persistent storage - save network state across restarts
+- [x] Persistent storage - network state auto-saved
+- [x] CI/CD - GitHub Actions workflow
 
 ### Low Priority (P3)
 - [ ] Email/SMS notification testing
