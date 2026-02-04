@@ -167,7 +167,11 @@ class MessageHandler:
             try:
                 if not filter_func(message):
                     return None
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError) as e:
+                # ValueError: Invalid filter logic/data
+                # TypeError: Type mismatch in filter
+                # KeyError: Missing expected message attributes
+                # AttributeError: Missing expected methods/properties
                 logger.warning("Message filter %s raised an error: %s", filter_func.__name__, e)
 
         # Parse command
@@ -187,7 +191,12 @@ class MessageHandler:
         if handler:
             try:
                 return handler(parsed)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError, IndexError) as e:
+                # ValueError: Invalid command arguments or data
+                # TypeError: Type mismatch in handler
+                # KeyError: Missing expected data/keys
+                # AttributeError: Missing expected methods/properties
+                # IndexError: Invalid array/list access
                 logger.error("Command handler error for %s: %s", parsed.command, e)
                 return CommandResponse(text="An internal error occurred.")
 
@@ -221,7 +230,11 @@ class MessageHandler:
                 custom_alert = handler(message)
                 if custom_alert:
                     alerts.append(custom_alert)
-            except Exception as e:
+            except (ValueError, TypeError, KeyError, AttributeError) as e:
+                # ValueError: Invalid alert data or logic
+                # TypeError: Type mismatch in handler
+                # KeyError: Missing expected data/keys
+                # AttributeError: Missing expected methods/properties
                 logger.warning("Alert handler %s raised an error: %s", handler.__name__, e)
 
         return alerts
