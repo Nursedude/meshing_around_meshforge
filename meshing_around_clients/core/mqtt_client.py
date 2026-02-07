@@ -8,12 +8,15 @@ Supports:
 - TLS encryption
 - Message sending and receiving
 - Node discovery via MQTT
+- Stale node cleanup and bounded memory usage
 """
 
+import atexit
 import json
 import time
 import uuid
 import base64
+import logging
 import threading
 from datetime import datetime
 from typing import Optional, Callable, Dict, List, Any
@@ -22,9 +25,20 @@ import struct
 
 from .models import (
     Node, Message, Alert, MeshNetwork, Position, NodeTelemetry,
-    NodeRole, MessageType, AlertType, LinkQuality, RouteHop, MeshRoute
+    NodeRole, MessageType, AlertType, LinkQuality, RouteHop, MeshRoute,
+    VALID_LAT_RANGE, VALID_LON_RANGE, VALID_SNR_RANGE, VALID_RSSI_RANGE,
+    STALE_NODE_HOURS, MAX_NODES,
+    CHUTIL_WARNING_THRESHOLD, CHUTIL_CRITICAL_THRESHOLD,
+    AIRUTILTX_WARNING_THRESHOLD,
 )
 from .config import Config, MQTTConfig as ConfigMQTTConfig
+
+logger = logging.getLogger(__name__)
+
+# --- Robustness limits (from meshforge) ---
+MAX_PAYLOAD_BYTES = 65536   # 64 KB max per MQTT message
+DEFAULT_PORT_TLS = 8883     # Standard MQTT TLS port
+STALE_CLEANUP_INTERVAL = 600  # Check every 10 minutes
 
 # Try to import paho-mqtt
 try:
@@ -128,6 +142,18 @@ class MQTTMeshtasticClient:
         self._message_count = 0
         self._connection_start: Optional[datetime] = None
 
+        # Stats tracking (from meshforge patterns)
+        self._stats = {
+            "messages_received": 0,
+            "messages_rejected": 0,
+            "nodes_discovered": 0,
+            "nodes_pruned": 0,
+        }
+
+        # Stale node cleanup
+        self._last_cleanup: float = 0
+        self._cleanup_interval = STALE_CLEANUP_INTERVAL
+
         # Generate client ID if not set
         if not self.mqtt_config.client_id:
             self.mqtt_config.client_id = f"meshforge-{uuid.uuid4().hex[:8]}"
@@ -142,6 +168,39 @@ class MQTTMeshtasticClient:
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def stats(self) -> Dict[str, Any]:
+        """Get subscriber statistics."""
+        return dict(self._stats)
+
+    # --- Input validation helpers (from meshforge robustness patterns) ---
+
+    @staticmethod
+    def _safe_float(value: Any, min_val: float, max_val: float) -> Optional[float]:
+        """Safely extract and validate a float value within range."""
+        if value is None:
+            return None
+        try:
+            f = float(value)
+            if min_val <= f <= max_val:
+                return f
+        except (TypeError, ValueError):
+            pass
+        return None
+
+    @staticmethod
+    def _safe_int(value: Any, min_val: int, max_val: int) -> Optional[int]:
+        """Safely extract and validate an int value within range."""
+        if value is None:
+            return None
+        try:
+            i = int(value)
+            if min_val <= i <= max_val:
+                return i
+        except (TypeError, ValueError):
+            pass
+        return None
 
     def register_callback(self, event: str, callback: Callable) -> None:
         """Register a callback for an event."""
@@ -177,9 +236,11 @@ class MQTTMeshtasticClient:
                     self.mqtt_config.password
                 )
 
-            # TLS
-            if self.mqtt_config.use_tls:
-                self._client.tls_set()
+            # TLS (auto-detect port 8883)
+            if self.mqtt_config.use_tls or self.mqtt_config.port == DEFAULT_PORT_TLS:
+                import ssl
+                self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED,
+                                     tls_version=ssl.PROTOCOL_TLS_CLIENT)
 
             # Connect
             self._client.connect(
@@ -190,6 +251,9 @@ class MQTTMeshtasticClient:
 
             # Start network loop in background
             self._client.loop_start()
+
+            # Register atexit cleanup (from meshforge)
+            atexit.register(self._atexit_cleanup)
 
             # Wait for connection
             timeout = 10
@@ -202,18 +266,27 @@ class MQTTMeshtasticClient:
                 self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
                 self._connection_start = datetime.now()
                 self._message_count = 0
+                self._stats["messages_received"] = 0
+                self._stats["messages_rejected"] = 0
                 return True
             else:
-                # Connection timed out — stop the background loop thread
+                # Connection timed out - stop the background loop thread
                 self._client.loop_stop()
                 return False
 
         except (OSError, ConnectionError, TimeoutError) as e:
-            print(f"MQTT connection error ({type(e).__name__}): {e}")
+            logger.error("MQTT connection error (%s): %s", type(e).__name__, e)
             return False
         except ValueError as e:
-            print(f"MQTT config error: {e}")
+            logger.error("MQTT config error: %s", e)
             return False
+
+    def _atexit_cleanup(self) -> None:
+        """Ensure clean disconnect on process exit."""
+        try:
+            self.disconnect()
+        except (OSError, RuntimeError):
+            pass
 
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
@@ -282,10 +355,25 @@ class MQTTMeshtasticClient:
             topic = msg.topic
             payload = msg.payload
 
+            # Reject oversized payloads (robustness)
+            if len(payload) > MAX_PAYLOAD_BYTES:
+                self._stats["messages_rejected"] += 1
+                return
+
             # Update message stats
             self._last_message_time = datetime.now()
             self._message_count += 1
+            self._stats["messages_received"] += 1
             self.network.last_update = datetime.now()
+
+            # Periodic stale node cleanup
+            now = time.monotonic()
+            if now - self._last_cleanup > self._cleanup_interval:
+                self._last_cleanup = now
+                pruned = self.network.cleanup_stale_nodes()
+                if pruned:
+                    self._stats["nodes_pruned"] += pruned
+                    logger.debug("Pruned %d stale nodes", pruned)
 
             # Parse topic to extract metadata
             topic_info = self._parse_topic(topic)
@@ -369,11 +457,15 @@ class MQTTMeshtasticClient:
             if self.network.is_duplicate_message(msg_id):
                 return  # Skip duplicate
 
-            # Extract SNR/RSSI if available (for link quality)
-            snr = data.get("snr", data.get("rxSnr", 0.0))
-            rssi = data.get("rssi", data.get("rxRssi", 0))
-            hop_limit = data.get("hopLimit", 3)
-            hop_start = data.get("hopStart", 3)
+            # Extract SNR/RSSI with validation (from meshforge patterns)
+            snr = self._safe_float(
+                data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE
+            ) or 0.0
+            rssi = self._safe_int(
+                data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE
+            ) or 0
+            hop_limit = self._safe_int(data.get("hopLimit"), 0, 15) or 3
+            hop_start = self._safe_int(data.get("hopStart"), 0, 15) or 3
             hop_count = max(0, hop_start - hop_limit)
 
             # Update node last seen and link quality
@@ -386,6 +478,7 @@ class MQTTMeshtasticClient:
                     first_seen=datetime.now()
                 )
                 self.network.add_node(node)
+                self._stats["nodes_discovered"] += 1
                 self._trigger_callbacks("on_node_update", sender_id, True)
             else:
                 self.network.nodes[sender_id].last_heard = datetime.now()
@@ -497,42 +590,70 @@ class MQTTMeshtasticClient:
             print(f"Traceroute handling error ({type(e).__name__}): {e}")
 
     def _handle_position_from_json(self, data: dict, sender_id: str):
-        """Handle position update from JSON."""
+        """Handle position update from JSON with coordinate validation."""
         payload = data.get("payload", {})
         pos_data = payload.get("position", payload)
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
-            lat = pos_data.get("latitude")
+
+            # Validate coordinates (from meshforge robustness patterns)
+            lat = self._safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
             if lat is None:
                 lat_i = pos_data.get("latitudeI", 0)
-                lat = lat_i / 1e7 if lat_i else 0.0
-            lon = pos_data.get("longitude")
+                lat = lat_i / 1e7 if lat_i else None
+                if lat is not None:
+                    lat = self._safe_float(lat, *VALID_LAT_RANGE)
+
+            lon = self._safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
             if lon is None:
                 lon_i = pos_data.get("longitudeI", 0)
-                lon = lon_i / 1e7 if lon_i else 0.0
-            node.position = Position(
-                latitude=lat,
-                longitude=lon,
-                altitude=pos_data.get("altitude", 0),
-                time=datetime.now()
-            )
+                lon = lon_i / 1e7 if lon_i else None
+                if lon is not None:
+                    lon = self._safe_float(lon, *VALID_LON_RANGE)
+
+            # Only update position if coordinates are valid
+            if lat is not None and lon is not None:
+                node.position = Position(
+                    latitude=lat,
+                    longitude=lon,
+                    altitude=pos_data.get("altitude", 0),
+                    time=datetime.now()
+                )
             node.last_heard = datetime.now()
 
     def _handle_telemetry_from_json(self, data: dict, sender_id: str):
-        """Handle telemetry from JSON."""
+        """Handle telemetry from JSON with input validation."""
         payload = data.get("payload", {})
         telemetry = payload.get("telemetry", payload)
         device_metrics = telemetry.get("deviceMetrics", telemetry)
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
+
+            # Validate device metrics (from meshforge patterns)
+            battery = self._safe_int(device_metrics.get("batteryLevel"), 0, 101) or 0
+            voltage = self._safe_float(device_metrics.get("voltage"), 0.0, 10.0) or 0.0
+            ch_util = self._safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0) or 0.0
+            air_util = self._safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0) or 0.0
+
+            # Environment metrics (BME280, BME680, BMP280)
+            env_metrics = telemetry.get("environmentMetrics", {})
+            temperature = self._safe_float(env_metrics.get("temperature"), -50.0, 100.0)
+            humidity = self._safe_float(env_metrics.get("relativeHumidity"), 0.0, 100.0)
+            pressure = self._safe_float(env_metrics.get("barometricPressure"), 300.0, 1200.0)
+            gas_resistance = self._safe_float(env_metrics.get("gasResistance"), 0.0, 1000000.0)
+
             node.telemetry = NodeTelemetry(
-                battery_level=device_metrics.get("batteryLevel", 0),
-                voltage=device_metrics.get("voltage", 0),
-                channel_utilization=device_metrics.get("channelUtilization", 0),
-                air_util_tx=device_metrics.get("airUtilTx", 0),
-                last_updated=datetime.now()
+                battery_level=battery,
+                voltage=voltage,
+                channel_utilization=ch_util,
+                air_util_tx=air_util,
+                last_updated=datetime.now(),
+                temperature=temperature,
+                humidity=humidity,
+                pressure=pressure,
+                gas_resistance=gas_resistance,
             )
             node.last_heard = datetime.now()
 
@@ -548,6 +669,30 @@ class MQTTMeshtasticClient:
                 )
                 self.network.add_alert(alert)
                 self._trigger_callbacks("on_alert", alert)
+
+            # Channel congestion alert (from meshforge thresholds)
+            if ch_util >= CHUTIL_CRITICAL_THRESHOLD:
+                alert = Alert(
+                    id=str(uuid.uuid4()),
+                    alert_type=AlertType.CUSTOM,
+                    title="Channel Congestion (MQTT)",
+                    message=f"{node.display_name} channel utilization {ch_util:.1f}%",
+                    severity=3,
+                    source_node=sender_id,
+                    metadata={"channel_utilization": ch_util}
+                )
+                self.network.add_alert(alert)
+                self._trigger_callbacks("on_alert", alert)
+            elif ch_util >= CHUTIL_WARNING_THRESHOLD:
+                alert = Alert(
+                    id=str(uuid.uuid4()),
+                    alert_type=AlertType.CUSTOM,
+                    title="Channel Utilization Warning",
+                    message=f"{node.display_name} channel utilization {ch_util:.1f}%",
+                    severity=2,
+                    source_node=sender_id,
+                    metadata={"channel_utilization": ch_util}
+                )
 
     def _handle_nodeinfo_from_json(self, data: dict, sender_id: str):
         """Handle node info from JSON."""
@@ -952,24 +1097,31 @@ class MQTTMeshtasticClient:
             "message_count": self._message_count,
             "messages_per_minute": round(msg_rate, 2),
             "last_message_ago_seconds": int(last_msg_ago) if last_msg_ago else None,
-            "reconnect_count": self._reconnect_count
+            "reconnect_count": self._reconnect_count,
+            "stats": dict(self._stats),
         }
 
 
 class MQTTConnectionManager:
     """
     Manages MQTT connection with automatic reconnection.
+
+    Uses exponential backoff for reconnection attempts (from meshforge patterns).
     """
 
-    def __init__(self, client: MQTTMeshtasticClient, reconnect_delay: int = 5):
+    def __init__(self, client: MQTTMeshtasticClient, reconnect_delay: int = 5,
+                 max_reconnect_delay: int = 300):
         self.client = client
         self.reconnect_delay = reconnect_delay
+        self.max_reconnect_delay = max_reconnect_delay
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        self._consecutive_failures = 0
 
     def start(self):
         """Start connection manager."""
         self._running = True
+        self._consecutive_failures = 0
         self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
         self._thread.start()
 
@@ -980,10 +1132,27 @@ class MQTTConnectionManager:
             self._thread.join(timeout=5)
 
     def _monitor_loop(self):
-        """Monitor connection and reconnect if needed."""
+        """Monitor connection and reconnect with exponential backoff."""
         while self._running:
             if not self.client.is_connected:
-                print("MQTT disconnected, attempting reconnect...")
-                self.client.connect()
+                # Exponential backoff: delay * 1.5^failures, capped
+                delay = min(
+                    self.reconnect_delay * (1.5 ** self._consecutive_failures),
+                    self.max_reconnect_delay
+                )
+                logger.info("MQTT disconnected, reconnecting in %.0fs...", delay)
+                time.sleep(delay)
 
-            time.sleep(self.reconnect_delay)
+                if not self._running:
+                    break
+
+                if self.client.connect():
+                    self._consecutive_failures = 0
+                    logger.info("MQTT reconnected successfully")
+                else:
+                    self._consecutive_failures += 1
+                    logger.warning("MQTT reconnect failed (attempt %d)",
+                                   self._consecutive_failures)
+            else:
+                self._consecutive_failures = 0
+                time.sleep(self.reconnect_delay)

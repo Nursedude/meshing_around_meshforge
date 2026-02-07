@@ -12,6 +12,21 @@ from typing import Optional, List, Dict, Any, Union
 from enum import Enum
 import json
 
+# --- Mesh congestion thresholds (from Meshtastic ROUTER_LATE documentation) ---
+# See: https://meshtastic.org/blog/demystifying-router-late/
+CHUTIL_WARNING_THRESHOLD = 25.0    # Channel utilization warning at 25%
+CHUTIL_CRITICAL_THRESHOLD = 40.0   # Channel utilization critical at 40%
+AIRUTILTX_WARNING_THRESHOLD = 7.0  # TX airtime warning at 7-8%
+AIRUTILTX_CRITICAL_THRESHOLD = 10.0  # TX airtime critical at 10%
+
+# --- Robustness limits ---
+STALE_NODE_HOURS = 72   # Nodes not seen in 72h considered stale
+MAX_NODES = 10000       # Maximum tracked nodes before pruning
+VALID_LAT_RANGE = (-90.0, 90.0)
+VALID_LON_RANGE = (-180.0, 180.0)
+VALID_SNR_RANGE = (-50.0, 50.0)   # dB
+VALID_RSSI_RANGE = (-200, 0)      # dBm
+
 
 class NodeRole(Enum):
     """Node role types in the mesh network."""
@@ -209,6 +224,14 @@ class Position:
     time: Optional[datetime] = None
     precision_bits: int = 0
 
+    def is_valid(self) -> bool:
+        """Check if position has valid coordinates."""
+        return (
+            (self.latitude != 0.0 or self.longitude != 0.0)
+            and -90 <= self.latitude <= 90
+            and -180 <= self.longitude <= 180
+        )
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "latitude": self.latitude,
@@ -230,9 +253,41 @@ class NodeTelemetry:
     snr: float = 0.0
     rssi: int = 0
     last_updated: Optional[datetime] = None
+    # Environment metrics (BME280/BME680/BMP280 sensors)
+    temperature: Optional[float] = None  # Celsius
+    humidity: Optional[float] = None  # 0-100%
+    pressure: Optional[float] = None  # hPa (barometric)
+    gas_resistance: Optional[float] = None  # Ohms (BME680 VOC)
+
+    @property
+    def has_environment_data(self) -> bool:
+        """Check if any environment sensor data is present."""
+        return any([self.temperature, self.humidity, self.pressure,
+                    self.gas_resistance])
+
+    @property
+    def channel_utilization_status(self) -> str:
+        """Classify channel utilization per Meshtastic ROUTER_LATE thresholds.
+
+        See: https://meshtastic.org/blog/demystifying-router-late/
+        """
+        if self.channel_utilization >= 40.0:
+            return "critical"
+        elif self.channel_utilization >= 25.0:
+            return "warning"
+        return "normal"
+
+    @property
+    def air_util_tx_status(self) -> str:
+        """Classify TX airtime per Meshtastic congestion thresholds."""
+        if self.air_util_tx >= 10.0:
+            return "critical"
+        elif self.air_util_tx >= 7.0:
+            return "warning"
+        return "normal"
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "battery_level": self.battery_level,
             "voltage": self.voltage,
             "channel_utilization": self.channel_utilization,
@@ -240,8 +295,21 @@ class NodeTelemetry:
             "uptime_seconds": self.uptime_seconds,
             "snr": self.snr,
             "rssi": self.rssi,
-            "last_updated": self.last_updated.isoformat() if self.last_updated else None
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "channel_utilization_status": self.channel_utilization_status,
+            "air_util_tx_status": self.air_util_tx_status,
         }
+        # Include environment data only when present
+        if self.has_environment_data:
+            result["environment"] = {
+                k: v for k, v in {
+                    "temperature": self.temperature,
+                    "humidity": self.humidity,
+                    "pressure": self.pressure,
+                    "gas_resistance": self.gas_resistance,
+                }.items() if v is not None
+            }
+        return result
 
 
 @dataclass
@@ -297,14 +365,25 @@ class Node:
         if not self.last_heard:
             return "Never"
         delta = datetime.now() - self.last_heard
-        if delta.days > 0:
-            return f"{delta.days}d ago"
-        elif delta.seconds >= 3600:
-            return f"{delta.seconds // 3600}h ago"
-        elif delta.seconds >= 60:
-            return f"{delta.seconds // 60}m ago"
+        seconds = delta.total_seconds()
+        if seconds < 60:
+            return f"{int(seconds)}s ago"
+        elif seconds < 3600:
+            return f"{int(seconds / 60)}m ago"
+        elif seconds < 86400:
+            return f"{int(seconds / 3600)}h ago"
         else:
-            return f"{delta.seconds}s ago"
+            return f"{int(seconds / 86400)}d ago"
+
+    def is_recently_heard(self, threshold_minutes: int = 15) -> bool:
+        """Check if node was heard within threshold (default 15 min).
+
+        Matches meshforge's MQTTNode.is_online() semantics.
+        """
+        if not self.last_heard:
+            return False
+        delta = datetime.now() - self.last_heard
+        return delta.total_seconds() < threshold_minutes * 60
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -573,6 +652,37 @@ class MeshNetwork:
         with self._lock:
             if node_id in self.nodes:
                 self.nodes[node_id].link_quality.update(snr, rssi, hop_count)
+
+    def cleanup_stale_nodes(self, stale_hours: int = STALE_NODE_HOURS,
+                            max_nodes: int = MAX_NODES) -> int:
+        """Remove nodes not seen within stale_hours, or prune to max_nodes.
+
+        Returns number of nodes removed.
+        """
+        removed = 0
+        now = datetime.now()
+        with self._lock:
+            stale_ids = [
+                nid for nid, node in self.nodes.items()
+                if node.last_heard and
+                (now - node.last_heard).total_seconds() > stale_hours * 3600
+            ]
+            for nid in stale_ids:
+                del self.nodes[nid]
+                removed += 1
+
+            # If still over limit, prune oldest
+            if len(self.nodes) > max_nodes:
+                sorted_nodes = sorted(
+                    self.nodes.items(),
+                    key=lambda x: x[1].last_heard or datetime.min
+                )
+                to_remove = len(self.nodes) - max_nodes
+                for nid, _ in sorted_nodes[:to_remove]:
+                    del self.nodes[nid]
+                    removed += 1
+
+        return removed
 
     @property
     def mesh_health(self) -> Dict[str, Any]:
