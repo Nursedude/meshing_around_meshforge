@@ -3,6 +3,7 @@ Meshtastic API layer for Meshing-Around Clients.
 Provides interface to communicate with Meshtastic devices.
 """
 
+import logging
 import threading
 import queue
 import time
@@ -10,6 +11,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, Callable, List, Dict, Any
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 from .models import (
     Node, Message, Alert, MeshNetwork, Position, NodeTelemetry,
@@ -90,7 +93,7 @@ class MeshtasticAPI:
                 try:
                     callback(*args, **kwargs)
                 except (TypeError, ValueError, AttributeError) as e:
-                    print(f"Callback error for {event} ({type(e).__name__}): {e}")
+                    logger.warning("Callback error for %s (%s): %s", event, type(e).__name__, e)
 
     # ==================== Persistence Methods ====================
 
@@ -106,7 +109,7 @@ class MeshtasticAPI:
                 # Merge loaded nodes with empty network
                 self.network = loaded
                 self.network.connection_status = "disconnected"  # Reset status
-                print(f"Loaded {len(self.network.nodes)} nodes from {state_path}")
+                logger.info("Loaded %d nodes from %s", len(self.network.nodes), state_path)
 
     def _save_state(self) -> bool:
         """Save network state to persistent storage."""
@@ -216,6 +219,12 @@ class MeshtasticAPI:
 
         self._running = False
 
+        # Wait for worker threads to finish (with timeout to avoid hangs)
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=5)
+        if self._auto_save_thread and self._auto_save_thread.is_alive():
+            self._auto_save_thread.join(timeout=5)
+
         if self.interface:
             try:
                 pub.unsubscribe(self._on_receive, "meshtastic.receive")
@@ -302,7 +311,7 @@ class MeshtasticAPI:
                 hop_count=node_info.get('hopsAway', 0)
             )
         except (KeyError, TypeError, ValueError) as e:
-            print(f"Error parsing node info ({type(e).__name__}): {e}")
+            logger.warning("Error parsing node info (%s): %s", type(e).__name__, e)
             return None
 
     def _on_receive(self, packet: dict, interface: Any) -> None:
@@ -332,7 +341,7 @@ class MeshtasticAPI:
             except queue.Empty:
                 continue
             except (KeyError, TypeError, ValueError, AttributeError) as e:
-                print(f"Worker error ({type(e).__name__}): {e}")
+                logger.warning("Worker error (%s): %s", type(e).__name__, e)
 
     def _process_packet(self, packet: dict) -> None:
         """Process a received packet."""
@@ -357,7 +366,7 @@ class MeshtasticAPI:
                 self._handle_nodeinfo(packet)
 
         except (KeyError, TypeError, ValueError, UnicodeDecodeError) as e:
-            print(f"Error processing packet ({type(e).__name__}): {e}")
+            logger.warning("Error processing packet (%s): %s", type(e).__name__, e)
 
     def _handle_text_message(self, packet: dict) -> None:
         """Handle incoming text message."""
@@ -536,7 +545,7 @@ class MeshtasticAPI:
             return True
 
         except (OSError, AttributeError, ValueError) as e:
-            print(f"Error sending message ({type(e).__name__}): {e}")
+            logger.error("Error sending message (%s): %s", type(e).__name__, e)
             return False
 
     def request_position(self, node_id: str) -> bool:
@@ -548,7 +557,7 @@ class MeshtasticAPI:
             self.interface.sendPosition(destinationId=node_num)
             return True
         except (OSError, ValueError, AttributeError) as e:
-            print(f"Error requesting position ({type(e).__name__}): {e}")
+            logger.error("Error requesting position (%s): %s", type(e).__name__, e)
             return False
 
     def get_nodes(self) -> List[Node]:

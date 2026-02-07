@@ -14,6 +14,7 @@ Features:
 import sys
 import asyncio
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,13 @@ except ImportError:
 import hashlib
 import hmac
 import secrets
+
+logger = logging.getLogger(__name__)
+
+# WebSocket heartbeat interval (seconds)
+WS_HEARTBEAT_INTERVAL = 30
+# WebSocket receive timeout (seconds) - should be > heartbeat interval
+WS_RECEIVE_TIMEOUT = 90
 
 from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,
@@ -104,7 +112,7 @@ class ConnectionManager:
         """Broadcast an update event."""
         await self.broadcast({
             "type": update_type,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.utcnow().isoformat() + "Z",
             "data": data
         })
 
@@ -537,15 +545,27 @@ class WebApplication:
                 })
 
                 while True:
-                    # Keep connection alive and handle incoming messages
-                    data = await websocket.receive_text()
                     try:
-                        msg = json.loads(data)
-                        await self._handle_ws_message(websocket, msg)
-                    except json.JSONDecodeError:
-                        pass
+                        # Use timeout to detect dead connections
+                        data = await asyncio.wait_for(
+                            websocket.receive_text(),
+                            timeout=WS_RECEIVE_TIMEOUT
+                        )
+                        try:
+                            msg = json.loads(data)
+                            await self._handle_ws_message(websocket, msg)
+                        except json.JSONDecodeError:
+                            logger.debug("Invalid JSON from WebSocket client")
+                    except asyncio.TimeoutError:
+                        # No message received within timeout - send ping to check liveness
+                        try:
+                            await websocket.send_json({"type": "ping"})
+                        except (WebSocketDisconnect, RuntimeError, ConnectionError):
+                            break  # Client gone
 
             except WebSocketDisconnect:
+                pass
+            finally:
                 self.ws_manager.disconnect(websocket)
 
     async def _handle_ws_message(self, websocket: WebSocket, msg: dict):

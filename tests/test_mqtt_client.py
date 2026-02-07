@@ -286,13 +286,13 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
 
         client = MQTTMeshtasticClient(self.config)
 
-        # Add messages on different channels
-        for ch in [0, 0, 1, 2, 0]:
+        # Add messages on different channels (unique text to avoid dedup)
+        for i, ch in enumerate([0, 0, 1, 2, 0]):
             json_data = {
                 "from": 0x55555555,
                 "channel": ch,
                 "type": "text",
-                "payload": {"text": f"Channel {ch}"}
+                "payload": {"text": f"Message {i} on channel {ch}"}
             }
             client._handle_json_message("msh/US/json", json.dumps(json_data).encode())
 
