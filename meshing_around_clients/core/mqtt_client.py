@@ -13,6 +13,7 @@ Supports:
 
 import atexit
 import json
+import random
 import time
 import uuid
 import base64
@@ -153,6 +154,7 @@ class MQTTMeshtasticClient:
         # Stale node cleanup
         self._last_cleanup: float = 0
         self._cleanup_interval = STALE_CLEANUP_INTERVAL
+        self._cleanup_thread: Optional[threading.Thread] = None
 
         # Generate client ID if not set
         if not self.mqtt_config.client_id:
@@ -213,7 +215,7 @@ class MQTTMeshtasticClient:
             try:
                 callback(*args, **kwargs)
             except (TypeError, ValueError, AttributeError) as e:
-                print(f"MQTT callback error ({type(e).__name__}): {e}")
+                logger.warning("MQTT callback error (%s): %s", type(e).__name__, e)
 
     def connect(self) -> bool:
         """Connect to MQTT broker."""
@@ -268,6 +270,8 @@ class MQTTMeshtasticClient:
                 self._message_count = 0
                 self._stats["messages_received"] = 0
                 self._stats["messages_rejected"] = 0
+                # Start background stale node cleanup thread
+                self._start_cleanup_thread()
                 return True
             else:
                 # Connection timed out - stop the background loop thread
@@ -288,12 +292,37 @@ class MQTTMeshtasticClient:
         except (OSError, RuntimeError):
             pass
 
+    def _start_cleanup_thread(self) -> None:
+        """Start background thread for periodic stale node cleanup.
+
+        Ensures stale nodes are pruned even when no messages are arriving.
+        """
+        def cleanup_loop():
+            while self._connected:
+                time.sleep(self._cleanup_interval)
+                if not self._connected:
+                    break
+                pruned = self.network.cleanup_stale_nodes()
+                if pruned:
+                    self._stats["nodes_pruned"] += pruned
+                    logger.info("Background cleanup pruned %d stale nodes", pruned)
+
+        self._cleanup_thread = threading.Thread(
+            target=cleanup_loop, daemon=True, name="mqtt-stale-cleanup"
+        )
+        self._cleanup_thread.start()
+
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
+        self._connected = False  # Signal threads to stop first
+
+        # Wait for cleanup thread to finish
+        if self._cleanup_thread and self._cleanup_thread.is_alive():
+            self._cleanup_thread.join(timeout=5)
+
         if self._client:
             self._client.loop_stop()
             self._client.disconnect()
-        self._connected = False
         self.network.connection_status = "disconnected"
         self._trigger_callbacks("on_disconnect")
 
@@ -301,20 +330,20 @@ class MQTTMeshtasticClient:
         """Handle MQTT connection."""
         if rc == 0:
             self._connected = True
-            print(f"Connected to MQTT broker: {self.mqtt_config.broker}")
+            logger.info("Connected to MQTT broker: %s", self.mqtt_config.broker)
 
             # Subscribe to topics
             self._subscribe_topics()
 
             self._trigger_callbacks("on_connect")
         else:
-            print(f"MQTT connection failed with code: {rc}")
+            logger.error("MQTT connection failed with code: %d", rc)
 
     def _on_disconnect(self, client, userdata, rc):
         """Handle MQTT disconnection."""
         self._connected = False
         self.network.connection_status = "disconnected"
-        print(f"Disconnected from MQTT broker (rc={rc})")
+        logger.info("Disconnected from MQTT broker (rc=%d)", rc)
         self._trigger_callbacks("on_disconnect")
 
     def _subscribe_topics(self):
@@ -347,7 +376,7 @@ class MQTTMeshtasticClient:
             if topic not in seen:
                 seen.add(topic)
                 result = self._client.subscribe(topic, qos=qos)
-                print(f"Subscribed to: {topic} (qos={qos})")
+                logger.info("Subscribed to: %s (qos=%d)", topic, qos)
 
     def _on_message(self, client, userdata, msg):
         """Handle incoming MQTT message."""
@@ -389,9 +418,10 @@ class MQTTMeshtasticClient:
                 self._handle_protobuf_message(topic, payload, topic_info)
 
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            pass  # Silently skip malformed messages
+            logger.debug("Malformed MQTT message on %s: %s", topic, e)
+            self._stats["messages_rejected"] += 1
         except (KeyError, ValueError, TypeError, struct.error) as e:
-            print(f"Error parsing MQTT message ({type(e).__name__}): {e}")
+            logger.warning("Error parsing MQTT message (%s): %s", type(e).__name__, e)
 
     def _parse_topic(self, topic: str) -> Dict[str, Any]:
         """Parse MQTT topic to extract metadata."""
@@ -431,8 +461,8 @@ class MQTTMeshtasticClient:
                 if node_id in self.network.nodes:
                     self.network.nodes[node_id].last_heard = datetime.now()
                     self.network.nodes[node_id].is_online = True
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            pass
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.debug("Malformed stat message: %s", e)
 
     def _handle_json_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
         """Handle JSON formatted Meshtastic message."""
@@ -506,10 +536,10 @@ class MQTTMeshtasticClient:
             elif msg_type == "traceroute":
                 self._handle_traceroute_from_json(data, sender_id)
 
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as e:
+            logger.debug("Malformed JSON message on %s: %s", topic, e)
         except (KeyError, TypeError, ValueError) as e:
-            print(f"JSON message parse error ({type(e).__name__}): {e}")
+            logger.warning("JSON message parse error (%s): %s", type(e).__name__, e)
 
     def _handle_text_from_json(self, data: dict, sender_id: str, msg_id: str = ""):
         """Handle text message from JSON."""
@@ -587,7 +617,7 @@ class MQTTMeshtasticClient:
                 self.network.update_route(sender_id, route)
 
         except (KeyError, TypeError, ValueError) as e:
-            print(f"Traceroute handling error ({type(e).__name__}): {e}")
+            logger.warning("Traceroute handling error (%s): %s", type(e).__name__, e)
 
     def _handle_position_from_json(self, data: dict, sender_id: str):
         """Handle position update from JSON with coordinate validation."""
@@ -757,7 +787,7 @@ class MQTTMeshtasticClient:
                 self._parse_encrypted_header(payload, node_id)
 
         except (ValueError, struct.error, KeyError, TypeError) as e:
-            print(f"Encrypted message handling error ({type(e).__name__}): {e}")
+            logger.warning("Encrypted message handling error (%s): %s", type(e).__name__, e)
 
     def _parse_encrypted_header(self, payload: bytes, node_id: str):
         """Parse the unencrypted header of an encrypted message."""
@@ -1001,7 +1031,7 @@ class MQTTMeshtasticClient:
             return False
 
         if not self.mqtt_config.node_id:
-            print("Cannot send: no node_id configured for MQTT")
+            logger.warning("Cannot send: no node_id configured for MQTT")
             return False
 
         try:
@@ -1037,7 +1067,7 @@ class MQTTMeshtasticClient:
             return True
 
         except (OSError, ConnectionError, ValueError, TypeError) as e:
-            print(f"MQTT send error ({type(e).__name__}): {e}")
+            logger.error("MQTT send error (%s): %s", type(e).__name__, e)
             return False
 
     def get_nodes(self) -> List[Node]:
@@ -1135,11 +1165,13 @@ class MQTTConnectionManager:
         """Monitor connection and reconnect with exponential backoff."""
         while self._running:
             if not self.client.is_connected:
-                # Exponential backoff: delay * 1.5^failures, capped
-                delay = min(
+                # Exponential backoff with jitter to prevent thundering herd
+                base_delay = min(
                     self.reconnect_delay * (1.5 ** self._consecutive_failures),
                     self.max_reconnect_delay
                 )
+                # Add +/-25% jitter
+                delay = base_delay * (0.75 + random.random() * 0.5)
                 logger.info("MQTT disconnected, reconnecting in %.0fs...", delay)
                 time.sleep(delay)
 

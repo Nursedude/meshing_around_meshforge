@@ -878,10 +878,19 @@ class MeshingAroundTUI:
             Layout(self._get_footer(), name="footer", size=3)
         )
 
-        # Render current screen
+        # Render current screen with connection-safety guard
         screen = self.screens.get(self.current_screen)
         if screen:
-            layout["body"].update(screen.render())
+            try:
+                layout["body"].update(screen.render())
+            except (AttributeError, KeyError, TypeError) as e:
+                # Guard against stale/missing API data during reconnection
+                layout["body"].update(
+                    Panel(
+                        f"[yellow]Waiting for connection... ({e})[/yellow]",
+                        border_style="yellow"
+                    )
+                )
 
         return layout
 

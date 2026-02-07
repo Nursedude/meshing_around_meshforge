@@ -13,6 +13,7 @@ Includes connection cooldown and ConnectionBusy handling
 """
 
 import logging
+import random
 import time
 import threading
 from enum import Enum
@@ -196,12 +197,7 @@ class ConnectionManager:
             try:
                 callback(*args, **kwargs)
             except (ValueError, TypeError, AttributeError, KeyError, RuntimeError) as e:
-                # ValueError: Invalid data in callback
-                # TypeError: Type mismatch in callback arguments
-                # AttributeError: Missing attributes on callback objects
-                # KeyError: Missing expected keys in data
-                # RuntimeError: General runtime issues in callback
-                print(f"Callback error ({event}): {e}")
+                logger.warning("Callback error (%s): %s", event, e)
 
     def _get_current_interface(self):
         """Get the current interface config."""
@@ -284,7 +280,7 @@ class ConnectionManager:
 
                 return True
 
-            print(f"{conn_type.value} connection failed, trying next...")
+            logger.info("%s connection failed, trying next...", conn_type.value)
 
         self._status.connected = False
         self._status.error_message = "All connection types failed"
@@ -313,7 +309,7 @@ class ConnectionManager:
             # ValueError: Invalid configuration values
             # AttributeError: API mismatch or missing attributes
             self._status.error_message = str(e)
-            print(f"Connection error: {e}")
+            logger.warning("Connection error: %s", e)
             return False
 
     def _connect_serial(self) -> bool:
@@ -330,7 +326,7 @@ class ConnectionManager:
                 return True
             return False
         except ImportError:
-            print("Meshtastic library not available for serial connection")
+            logger.warning("Meshtastic library not available for serial connection")
             return False
 
     def _connect_tcp(self) -> bool:
@@ -350,7 +346,7 @@ class ConnectionManager:
                 return True
             return False
         except ImportError:
-            print("Meshtastic library not available for TCP connection")
+            logger.warning("Meshtastic library not available for TCP connection")
             return False
 
     def _connect_mqtt(self) -> bool:
@@ -369,7 +365,7 @@ class ConnectionManager:
                 return True
             return False
         except ImportError:
-            print("paho-mqtt not available for MQTT connection")
+            logger.warning("paho-mqtt not available for MQTT connection")
             return False
 
     def _connect_ble(self) -> bool:
@@ -389,7 +385,7 @@ class ConnectionManager:
                 return True
             return False
         except ImportError:
-            print("BLE libraries not available")
+            logger.warning("BLE libraries not available")
             return False
 
     def _connect_demo(self) -> bool:
@@ -425,6 +421,10 @@ class ConnectionManager:
     def disconnect(self) -> None:
         """Disconnect from mesh network."""
         self._running = False
+
+        # Wait for reconnect monitor thread to finish
+        if self._reconnect_thread and self._reconnect_thread.is_alive():
+            self._reconnect_thread.join(timeout=10)
 
         if self._api:
             self._api.disconnect()
@@ -474,11 +474,13 @@ class ConnectionManager:
         self._trigger_callbacks("on_status_change", self._status)
 
         if self._status.reconnect_attempts <= self._max_reconnect_attempts:
-            # Exponential backoff: delay * 1.5^(attempts-1), capped at 300s
-            delay = min(
+            # Exponential backoff with jitter to prevent thundering herd
+            base_delay = min(
                 self._reconnect_delay * (1.5 ** (self._status.reconnect_attempts - 1)),
                 300
             )
+            # Add +/-25% jitter
+            delay = base_delay * (0.75 + random.random() * 0.5)
             logger.info("Reconnecting in %.0fs (attempt %d/%d)...",
                         delay, self._status.reconnect_attempts,
                         self._max_reconnect_attempts)
