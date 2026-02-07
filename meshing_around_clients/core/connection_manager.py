@@ -7,17 +7,26 @@ Supports multiple connection types with automatic fallback:
 - MQTT (broker-based, no radio)
 - BLE (Bluetooth)
 - Demo (simulated)
+
+Includes connection cooldown and ConnectionBusy handling
+(patterns from meshforge's meshtasticd connection manager).
 """
 
+import logging
 import time
 import threading
 from enum import Enum
 from typing import Optional, Callable, Dict, List, Any, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from .models import Node, Message, Alert, MeshNetwork
 from .config import Config
+
+logger = logging.getLogger(__name__)
+
+# Cooldown between connections (devices/brokers need time to cleanup)
+CONNECTION_COOLDOWN = 1.0  # seconds
 
 
 class ConnectionType(Enum):
@@ -30,6 +39,11 @@ class ConnectionType(Enum):
     AUTO = "auto"
 
 
+class ConnectionBusy(Exception):
+    """Raised when connection is busy and non-blocking mode requested."""
+    pass
+
+
 @dataclass
 class ConnectionStatus:
     """Current connection status."""
@@ -38,6 +52,7 @@ class ConnectionStatus:
     device_info: str = ""
     error_message: str = ""
     last_connected: Optional[datetime] = None
+    last_disconnected: Optional[datetime] = None
     reconnect_attempts: int = 0
 
 
@@ -81,6 +96,7 @@ class ConnectionManager:
         self._max_reconnect_attempts = 10
         self._reconnect_thread: Optional[threading.Thread] = None
         self._running = False
+        self._last_close_time: float = 0.0  # For connection cooldown
 
     @property
     def current_interface_index(self) -> int:
@@ -134,6 +150,40 @@ class ConnectionManager:
         if self._api:
             return self._api.network
         return None
+
+    def get_connection_info(self) -> Dict[str, Any]:
+        """Get current connection info for debugging/introspection.
+
+        From meshforge's connection manager pattern.
+        """
+        return {
+            "connected": self._status.connected,
+            "connection_type": self._status.connection_type.value,
+            "device_info": self._status.device_info,
+            "error_message": self._status.error_message,
+            "reconnect_attempts": self._status.reconnect_attempts,
+            "last_connected": (
+                self._status.last_connected.isoformat()
+                if self._status.last_connected else None
+            ),
+            "last_disconnected": (
+                self._status.last_disconnected.isoformat()
+                if self._status.last_disconnected else None
+            ),
+            "interface_index": self._interface_index,
+            "available_interfaces": self.available_interfaces,
+            "auto_reconnect": self._auto_reconnect,
+        }
+
+    def _wait_for_cooldown(self) -> None:
+        """Wait for connection cooldown period.
+
+        Devices (especially meshtasticd) need time between disconnect and
+        reconnect to clean up resources.
+        """
+        elapsed = time.monotonic() - self._last_close_time
+        if elapsed < CONNECTION_COOLDOWN:
+            time.sleep(CONNECTION_COOLDOWN - elapsed)
 
     def register_callback(self, event: str, callback: Callable) -> None:
         """Register a callback for an event."""
@@ -216,7 +266,10 @@ class ConnectionManager:
             fallback_order = fallback_order[start_idx:]
 
         for conn_type in fallback_order:
-            print(f"Trying {conn_type.value} connection...")
+            logger.info("Trying %s connection...", conn_type.value)
+
+            # Respect cooldown between connection attempts
+            self._wait_for_cooldown()
 
             if self._try_connect(conn_type):
                 self._status.connected = True
@@ -378,6 +431,8 @@ class ConnectionManager:
             self._api = None
 
         self._status.connected = False
+        self._status.last_disconnected = datetime.now()
+        self._last_close_time = time.monotonic()
         self._trigger_callbacks("on_disconnect")
         self._trigger_callbacks("on_status_change", self._status)
 
@@ -407,28 +462,35 @@ class ConnectionManager:
                     self._handle_disconnect()
 
     def _handle_disconnect(self):
-        """Handle unexpected disconnection."""
+        """Handle unexpected disconnection with exponential backoff."""
         if not self._auto_reconnect:
             return
 
         self._status.connected = False
+        self._status.last_disconnected = datetime.now()
+        self._last_close_time = time.monotonic()
         self._status.reconnect_attempts += 1
         self._trigger_callbacks("on_disconnect")
         self._trigger_callbacks("on_status_change", self._status)
 
         if self._status.reconnect_attempts <= self._max_reconnect_attempts:
-            print(f"Reconnecting (attempt {self._status.reconnect_attempts})...")
-
-            # Wait with exponential backoff
-            delay = min(self._reconnect_delay * (2 ** (self._status.reconnect_attempts - 1)), 60)
+            # Exponential backoff: delay * 1.5^(attempts-1), capped at 300s
+            delay = min(
+                self._reconnect_delay * (1.5 ** (self._status.reconnect_attempts - 1)),
+                300
+            )
+            logger.info("Reconnecting in %.0fs (attempt %d/%d)...",
+                        delay, self._status.reconnect_attempts,
+                        self._max_reconnect_attempts)
             time.sleep(delay)
 
             if self.connect(self._status.connection_type):
-                print("Reconnected successfully")
+                logger.info("Reconnected successfully")
             else:
-                print("Reconnection failed")
+                logger.warning("Reconnection failed")
         else:
-            print(f"Max reconnection attempts ({self._max_reconnect_attempts}) reached")
+            logger.error("Max reconnection attempts (%d) reached",
+                         self._max_reconnect_attempts)
 
     # Forwarded API methods
 
