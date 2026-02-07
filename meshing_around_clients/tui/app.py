@@ -14,7 +14,7 @@ import os
 import asyncio
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
 from pathlib import Path
 
@@ -64,6 +64,7 @@ from meshing_around_clients.core import (
     Config, MeshtasticAPI, MessageHandler,
     Node, Message, Alert, MeshNetwork
 )
+from meshing_around_clients.core.models import DATETIME_MIN_UTC
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
 
 # Version
@@ -154,7 +155,7 @@ class DashboardScreen(Screen):
         """Create the nodes list panel."""
         nodes = sorted(
             self.app.api.network.nodes.values(),
-            key=lambda n: n.last_heard or datetime.min,
+            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
             reverse=True
         )[:10]
 
@@ -203,7 +204,7 @@ class DashboardScreen(Screen):
 
     def _create_messages_panel(self) -> Panel:
         """Create the messages panel."""
-        messages = self.app.api.network.messages[-15:]
+        messages = list(self.app.api.network.messages)[-15:]
 
         content = []
         for msg in reversed(messages):
@@ -247,7 +248,7 @@ class DashboardScreen(Screen):
 
     def _create_alerts_panel(self) -> Panel:
         """Create the alerts panel."""
-        alerts = self.app.api.network.alerts[-5:]
+        alerts = list(self.app.api.network.alerts)[-5:]
 
         content = []
         for alert in reversed(alerts):
@@ -305,7 +306,7 @@ class NodesScreen(Screen):
 
         nodes = sorted(
             self.app.api.network.nodes.values(),
-            key=lambda n: n.last_heard or datetime.min,
+            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
             reverse=True
         )
 
@@ -362,11 +363,11 @@ class MessagesScreen(Screen):
         self.channel_filter: Optional[int] = None
 
     def render(self) -> Panel:
-        messages = self.app.api.network.messages
+        all_messages = list(self.app.api.network.messages)
         if self.channel_filter is not None:
-            messages = [m for m in messages if m.channel == self.channel_filter]
+            all_messages = [m for m in all_messages if m.channel == self.channel_filter]
 
-        messages = messages[-30:]  # Last 30 messages
+        messages = all_messages[-30:]  # Last 30 messages
 
         table = Table(
             show_header=True,
@@ -429,7 +430,7 @@ class AlertsScreen(Screen):
     """Detailed alerts view screen."""
 
     def render(self) -> Panel:
-        alerts = self.app.api.network.alerts[-20:]
+        alerts = list(self.app.api.network.alerts)[-20:]
 
         table = Table(
             show_header=True,
@@ -696,7 +697,7 @@ class TopologyScreen(Screen):
 
             last_activity = "-"
             if channel.last_activity:
-                delta = datetime.now() - channel.last_activity
+                delta = datetime.now(timezone.utc) - channel.last_activity
                 if delta.total_seconds() < 60:
                     last_activity = f"{int(delta.total_seconds())}s ago"
                 elif delta.total_seconds() < 3600:

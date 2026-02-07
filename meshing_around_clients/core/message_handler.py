@@ -5,7 +5,7 @@ Provides message processing, command handling, and game integration.
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Callable, Dict, List, Tuple, Any
 from dataclasses import dataclass
 from enum import Enum
@@ -513,7 +513,7 @@ class BBSHandler:
         self._messages[to_node].append({
             "from": from_node,
             "message": message,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "read": False
         })
         return True
@@ -560,7 +560,7 @@ class GameHandler:
             "game": game_name,
             "state": "started",
             "data": {},
-            "started": datetime.now()
+            "started": datetime.now(timezone.utc)
         }
 
         if game_name == "dopewars":

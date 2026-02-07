@@ -17,7 +17,7 @@ import subprocess
 import shutil
 import tempfile
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Tuple, Optional, List, Callable
 from dataclasses import dataclass, field
 
@@ -450,7 +450,7 @@ def should_check_updates(
     if last_check is None:
         return True
 
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     if schedule == "daily":
         threshold = timedelta(days=1)
     elif schedule == "weekly":

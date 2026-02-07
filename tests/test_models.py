@@ -5,7 +5,7 @@ Unit tests for meshing_around_clients.core.models
 import unittest
 import json
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import sys
@@ -47,7 +47,7 @@ class TestPosition(unittest.TestCase):
         self.assertIsNone(pos.time)
 
     def test_custom_values(self):
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         pos = Position(latitude=45.5, longitude=-122.6, altitude=100, time=now)
         self.assertEqual(pos.latitude, 45.5)
         self.assertEqual(pos.longitude, -122.6)
@@ -55,7 +55,7 @@ class TestPosition(unittest.TestCase):
         self.assertEqual(pos.time, now)
 
     def test_to_dict(self):
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         pos = Position(latitude=45.5, longitude=-122.6, altitude=100, time=now)
         d = pos.to_dict()
         self.assertEqual(d["latitude"], 45.5)
@@ -79,7 +79,7 @@ class TestNodeTelemetry(unittest.TestCase):
         self.assertEqual(tel.snr, 0.0)
 
     def test_to_dict(self):
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         tel = NodeTelemetry(battery_level=85, voltage=4.1, snr=10.5, last_updated=now)
         d = tel.to_dict()
         self.assertEqual(d["battery_level"], 85)
@@ -118,22 +118,22 @@ class TestNode(unittest.TestCase):
 
     def test_time_since_heard_seconds(self):
         node = Node(node_id="!abc12345", node_num=12345)
-        node.last_heard = datetime.now() - timedelta(seconds=30)
+        node.last_heard = datetime.now(timezone.utc) - timedelta(seconds=30)
         self.assertIn("s ago", node.time_since_heard)
 
     def test_time_since_heard_minutes(self):
         node = Node(node_id="!abc12345", node_num=12345)
-        node.last_heard = datetime.now() - timedelta(minutes=5)
+        node.last_heard = datetime.now(timezone.utc) - timedelta(minutes=5)
         self.assertIn("m ago", node.time_since_heard)
 
     def test_time_since_heard_hours(self):
         node = Node(node_id="!abc12345", node_num=12345)
-        node.last_heard = datetime.now() - timedelta(hours=2)
+        node.last_heard = datetime.now(timezone.utc) - timedelta(hours=2)
         self.assertIn("h ago", node.time_since_heard)
 
     def test_time_since_heard_days(self):
         node = Node(node_id="!abc12345", node_num=12345)
-        node.last_heard = datetime.now() - timedelta(days=3)
+        node.last_heard = datetime.now(timezone.utc) - timedelta(days=3)
         self.assertIn("d ago", node.time_since_heard)
 
     def test_to_dict(self):
@@ -247,7 +247,7 @@ class TestMeshNetwork(unittest.TestCase):
         network = MeshNetwork()
         for i in range(1100):
             msg = Message(id=f"msg{i}", sender_id="!sender")
-            network.add_message(msg, max_history=1000)
+            network.add_message(msg)
         self.assertEqual(network.total_messages, 1000)
 
     def test_add_alert(self):

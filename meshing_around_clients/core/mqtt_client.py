@@ -19,7 +19,7 @@ import uuid
 import base64
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Callable, Dict, List, Any
 from dataclasses import dataclass
 import struct
@@ -266,7 +266,7 @@ class MQTTMeshtasticClient:
             if self._connected:
                 self.network.connection_status = "connected (MQTT)"
                 self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
-                self._connection_start = datetime.now()
+                self._connection_start = datetime.now(timezone.utc)
                 self._message_count = 0
                 self._stats["messages_received"] = 0
                 self._stats["messages_rejected"] = 0
@@ -390,10 +390,10 @@ class MQTTMeshtasticClient:
                 return
 
             # Update message stats
-            self._last_message_time = datetime.now()
+            self._last_message_time = datetime.now(timezone.utc)
             self._message_count += 1
             self._stats["messages_received"] += 1
-            self.network.last_update = datetime.now()
+            self.network.last_update = datetime.now(timezone.utc)
 
             # Periodic stale node cleanup
             now = time.monotonic()
@@ -459,7 +459,7 @@ class MQTTMeshtasticClient:
             node_id = topic_info.get("node_id", "")
             if node_id and node_id.startswith("!"):
                 if node_id in self.network.nodes:
-                    self.network.nodes[node_id].last_heard = datetime.now()
+                    self.network.nodes[node_id].last_heard = datetime.now(timezone.utc)
                     self.network.nodes[node_id].is_online = True
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.debug("Malformed stat message: %s", e)
@@ -504,14 +504,14 @@ class MQTTMeshtasticClient:
                 node = Node(
                     node_id=sender_id,
                     node_num=sender if isinstance(sender, int) else 0,
-                    last_heard=datetime.now(),
-                    first_seen=datetime.now()
+                    last_heard=datetime.now(timezone.utc),
+                    first_seen=datetime.now(timezone.utc)
                 )
                 self.network.add_node(node)
                 self._stats["nodes_discovered"] += 1
                 self._trigger_callbacks("on_node_update", sender_id, True)
             else:
-                self.network.nodes[sender_id].last_heard = datetime.now()
+                self.network.nodes[sender_id].last_heard = datetime.now(timezone.utc)
                 self.network.nodes[sender_id].is_online = True
 
             # Update link quality
@@ -568,7 +568,7 @@ class MQTTMeshtasticClient:
             channel=data.get("channel", 0),
             text=text,
             message_type=MessageType.TEXT,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             hop_count=hop_count,
             snr=float(snr) if snr else 0.0,
             rssi=int(rssi) if rssi else 0,
@@ -603,15 +603,15 @@ class MQTTMeshtasticClient:
                 hops.append(RouteHop(
                     node_id=hop_id,
                     snr=hop_snr,
-                    timestamp=datetime.now()
+                    timestamp=datetime.now(timezone.utc)
                 ))
 
             if hops:
                 route = MeshRoute(
                     destination_id=sender_id,
                     hops=hops,
-                    discovered=datetime.now(),
-                    last_used=datetime.now(),
+                    discovered=datetime.now(timezone.utc),
+                    last_used=datetime.now(timezone.utc),
                     is_preferred=True
                 )
                 self.network.update_route(sender_id, route)
@@ -648,9 +648,9 @@ class MQTTMeshtasticClient:
                     latitude=lat,
                     longitude=lon,
                     altitude=pos_data.get("altitude", 0),
-                    time=datetime.now()
+                    time=datetime.now(timezone.utc)
                 )
-            node.last_heard = datetime.now()
+            node.last_heard = datetime.now(timezone.utc)
 
     def _handle_telemetry_from_json(self, data: dict, sender_id: str):
         """Handle telemetry from JSON with input validation."""
@@ -679,13 +679,13 @@ class MQTTMeshtasticClient:
                 voltage=voltage,
                 channel_utilization=ch_util,
                 air_util_tx=air_util,
-                last_updated=datetime.now(),
+                last_updated=datetime.now(timezone.utc),
                 temperature=temperature,
                 humidity=humidity,
                 pressure=pressure,
                 gas_resistance=gas_resistance,
             )
-            node.last_heard = datetime.now()
+            node.last_heard = datetime.now(timezone.utc)
 
             # Battery alert
             if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
@@ -741,7 +741,7 @@ class MQTTMeshtasticClient:
         node.short_name = user.get("shortName", node.short_name)
         node.long_name = user.get("longName", node.long_name)
         node.hardware_model = user.get("hwModel", node.hardware_model)
-        node.last_heard = datetime.now()
+        node.last_heard = datetime.now(timezone.utc)
 
         self._trigger_callbacks("on_node_update", sender_id, False)
 
@@ -765,7 +765,7 @@ class MQTTMeshtasticClient:
             if node_id and node_id.startswith("!"):
                 # Update that we've seen this node
                 if node_id in self.network.nodes:
-                    self.network.nodes[node_id].last_heard = datetime.now()
+                    self.network.nodes[node_id].last_heard = datetime.now(timezone.utc)
                     self.network.nodes[node_id].is_online = True
                 else:
                     # Create minimal node entry
@@ -776,8 +776,8 @@ class MQTTMeshtasticClient:
                     node = Node(
                         node_id=node_id,
                         node_num=node_num,
-                        last_heard=datetime.now(),
-                        first_seen=datetime.now()
+                        last_heard=datetime.now(timezone.utc),
+                        first_seen=datetime.now(timezone.utc)
                     )
                     self.network.add_node(node)
                     self._trigger_callbacks("on_node_update", node_id, True)
@@ -805,7 +805,7 @@ class MQTTMeshtasticClient:
 
             sender_id = f"!{sender:08x}"
             if sender_id in self.network.nodes:
-                self.network.nodes[sender_id].last_heard = datetime.now()
+                self.network.nodes[sender_id].last_heard = datetime.now(timezone.utc)
 
         except struct.error:
             pass
@@ -827,7 +827,7 @@ class MQTTMeshtasticClient:
         # Fallback: update node last seen
         if node_id and node_id.startswith("!"):
             if node_id in self.network.nodes:
-                self.network.nodes[node_id].last_heard = datetime.now()
+                self.network.nodes[node_id].last_heard = datetime.now(timezone.utc)
                 self.network.nodes[node_id].is_online = True
             else:
                 # Create minimal node entry
@@ -838,8 +838,8 @@ class MQTTMeshtasticClient:
                 node = Node(
                     node_id=node_id,
                     node_num=node_num,
-                    last_heard=datetime.now(),
-                    first_seen=datetime.now()
+                    last_heard=datetime.now(timezone.utc),
+                    first_seen=datetime.now(timezone.utc)
                 )
                 self.network.add_node(node)
                 self._trigger_callbacks("on_node_update", node_id, True)
@@ -861,13 +861,13 @@ class MQTTMeshtasticClient:
             node = Node(
                 node_id=sender_id,
                 node_num=result.sender,
-                last_heard=datetime.now(),
-                first_seen=datetime.now()
+                last_heard=datetime.now(timezone.utc),
+                first_seen=datetime.now(timezone.utc)
             )
             self.network.add_node(node)
             self._trigger_callbacks("on_node_update", sender_id, True)
         else:
-            self.network.nodes[sender_id].last_heard = datetime.now()
+            self.network.nodes[sender_id].last_heard = datetime.now(timezone.utc)
             self.network.nodes[sender_id].is_online = True
 
         # Extract SNR/RSSI if available
@@ -893,7 +893,7 @@ class MQTTMeshtasticClient:
                     latitude=pos_data.get("latitude", 0),
                     longitude=pos_data.get("longitude", 0),
                     altitude=pos_data.get("altitude", 0),
-                    time=datetime.now()
+                    time=datetime.now(timezone.utc)
                 )
                 self._trigger_callbacks("on_position", sender_id)
 
@@ -908,7 +908,7 @@ class MQTTMeshtasticClient:
                     channel_utilization=device_metrics.get("channel_utilization", 0),
                     air_util_tx=device_metrics.get("air_util_tx", 0),
                     uptime_seconds=device_metrics.get("uptime_seconds", 0),
-                    last_updated=datetime.now()
+                    last_updated=datetime.now(timezone.utc)
                 )
                 self._trigger_callbacks("on_telemetry", sender_id)
 
@@ -948,14 +948,14 @@ class MQTTMeshtasticClient:
                     hops.append(RouteHop(
                         node_id=hop_node_id,
                         snr=float(hop_snr),
-                        timestamp=datetime.now()
+                        timestamp=datetime.now(timezone.utc)
                     ))
                 if hops:
                     route = MeshRoute(
                         destination_id=sender_id,
                         hops=hops,
-                        discovered=datetime.now(),
-                        last_used=datetime.now(),
+                        discovered=datetime.now(timezone.utc),
+                        last_used=datetime.now(timezone.utc),
                         is_preferred=True
                     )
                     self.network.update_route(sender_id, route)
@@ -993,7 +993,7 @@ class MQTTMeshtasticClient:
             channel=channel,
             text=text,
             message_type=MessageType.TEXT,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             hop_count=hop_count,
             snr=float(snr) if snr else 0.0,
             rssi=int(rssi) if rssi else 0,
@@ -1059,7 +1059,7 @@ class MQTTMeshtasticClient:
                 channel=channel,
                 text=text,
                 message_type=MessageType.TEXT,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 is_incoming=False
             )
             self.network.add_message(out_msg)
@@ -1090,7 +1090,7 @@ class MQTTMeshtasticClient:
     @property
     def connection_health(self) -> Dict[str, Any]:
         """Get connection health metrics."""
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
 
         # Calculate uptime
         uptime_seconds = 0

@@ -16,7 +16,7 @@ import asyncio
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
@@ -112,7 +112,7 @@ class ConnectionManager:
         """Broadcast an update event."""
         await self.broadcast({
             "type": update_type,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "data": data
         })
 
@@ -262,6 +262,8 @@ class WebApplication:
                     return
             except (ValueError, UnicodeDecodeError):
                 pass
+        client_host = request.client.host if request.client else "unknown"
+        logger.info("Authentication failed for API request from %s", client_host)
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     def _register_routes(self, app: FastAPI, templates):
@@ -533,6 +535,8 @@ class WebApplication:
                         except (ValueError, UnicodeDecodeError):
                             pass
                 if not auth_ok:
+                    client_host = websocket.client.host if websocket.client else "unknown"
+                    logger.info("Authentication failed for WebSocket from %s", client_host)
                     await websocket.close(code=1008, reason="Unauthorized")
                     return
 

@@ -5,10 +5,11 @@ Defines the core data structures used across TUI and Web clients.
 
 import os
 import threading
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any, Union, Deque
 from enum import Enum
 import json
 
@@ -26,6 +27,13 @@ VALID_LAT_RANGE = (-90.0, 90.0)
 VALID_LON_RANGE = (-180.0, 180.0)
 VALID_SNR_RANGE = (-50.0, 50.0)   # dB
 VALID_RSSI_RANGE = (-200, 0)      # dBm
+
+# UTC-aware minimum datetime for sort sentinels
+DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
+
+# --- Message/alert history bounds for deque ---
+MESSAGE_HISTORY_MAX = 1000
+ALERT_HISTORY_MAX = 500
 
 
 class NodeRole(Enum):
@@ -131,7 +139,7 @@ class LinkQuality:
 
     def update(self, snr: float, rssi: int, hop_count: int = 0) -> None:
         """Update link quality with new measurement."""
-        self.last_seen = datetime.now()
+        self.last_seen = datetime.now(timezone.utc)
         self.rssi = rssi
         self.hop_count = hop_count
         self.packet_count += 1
@@ -347,7 +355,7 @@ class Node:
         if self.link_quality is None:
             self.link_quality = LinkQuality()
         if self.first_seen is None:
-            self.first_seen = datetime.now()
+            self.first_seen = datetime.now(timezone.utc)
 
     @property
     def display_name(self) -> str:
@@ -364,7 +372,7 @@ class Node:
         """Return human-readable time since last heard."""
         if not self.last_heard:
             return "Never"
-        delta = datetime.now() - self.last_heard
+        delta = datetime.now(timezone.utc) - self.last_heard
         seconds = delta.total_seconds()
         if seconds < 60:
             return f"{int(seconds)}s ago"
@@ -382,7 +390,7 @@ class Node:
         """
         if not self.last_heard:
             return False
-        delta = datetime.now() - self.last_heard
+        delta = datetime.now(timezone.utc) - self.last_heard
         return delta.total_seconds() < threshold_minutes * 60
 
     def to_dict(self) -> Dict[str, Any]:
@@ -430,7 +438,7 @@ class Message:
 
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now()
+            self.timestamp = datetime.now(timezone.utc)
 
     @property
     def is_broadcast(self) -> bool:
@@ -478,7 +486,7 @@ class Alert:
 
     def __post_init__(self):
         if self.timestamp is None:
-            self.timestamp = datetime.now()
+            self.timestamp = datetime.now(timezone.utc)
 
     @property
     def severity_label(self) -> str:
@@ -512,8 +520,10 @@ class MeshNetwork:
     Thread-safe: all mutating operations are protected by a lock.
     """
     nodes: Dict[str, Node] = field(default_factory=dict)
-    messages: List[Message] = field(default_factory=list)
-    alerts: List[Alert] = field(default_factory=list)
+    messages: Deque[Message] = field(
+        default_factory=lambda: deque(maxlen=MESSAGE_HISTORY_MAX))
+    alerts: Deque[Alert] = field(
+        default_factory=lambda: deque(maxlen=ALERT_HISTORY_MAX))
     my_node_id: str = ""
     connection_status: str = "disconnected"
     channel_count: int = 8
@@ -564,18 +574,15 @@ class MeshNetwork:
         with self._lock:
             self.nodes[node.node_id] = node
 
-    def add_message(self, message: Message, max_history: int = 1000) -> None:
+    def add_message(self, message: Message) -> None:
         with self._lock:
             self.messages.append(message)
-            # Keep message history bounded
-            if len(self.messages) > max_history:
-                self.messages = self.messages[-max_history:]
+            # deque(maxlen=MESSAGE_HISTORY_MAX) handles bounding automatically
 
-    def add_alert(self, alert: Alert, max_history: int = 500) -> None:
+    def add_alert(self, alert: Alert) -> None:
         with self._lock:
             self.alerts.append(alert)
-            if len(self.alerts) > max_history:
-                self.alerts = self.alerts[-max_history:]
+            # deque(maxlen=ALERT_HISTORY_MAX) handles bounding automatically
 
     def get_messages_for_channel(self, channel: int) -> List[Message]:
         with self._lock:
@@ -601,7 +608,7 @@ class MeshNetwork:
         with self._lock:
             if channel_index in self.channels:
                 self.channels[channel_index].message_count += 1
-                self.channels[channel_index].last_activity = datetime.now()
+                self.channels[channel_index].last_activity = datetime.now(timezone.utc)
 
     def get_messages_for_node(self, node_id: str) -> List[Message]:
         with self._lock:
@@ -611,7 +618,7 @@ class MeshNetwork:
     def is_duplicate_message(self, message_id: str, window_seconds: int = 60) -> bool:
         """Check if message is a duplicate within the time window."""
         with self._lock:
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             # Clean old entries
             cutoff = now.replace(second=now.second - window_seconds) if now.second >= window_seconds else now
             self._seen_messages = {
@@ -660,7 +667,7 @@ class MeshNetwork:
         Returns number of nodes removed.
         """
         removed = 0
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         with self._lock:
             stale_ids = [
                 nid for nid, node in self.nodes.items()
@@ -675,7 +682,7 @@ class MeshNetwork:
             if len(self.nodes) > max_nodes:
                 sorted_nodes = sorted(
                     self.nodes.items(),
-                    key=lambda x: x[1].last_heard or datetime.min
+                    key=lambda x: x[1].last_heard or DATETIME_MIN_UTC
                 )
                 to_remove = len(self.nodes) - max_nodes
                 for nid, _ in sorted_nodes[:to_remove]:
@@ -743,8 +750,8 @@ class MeshNetwork:
 
             return {
                 "nodes": {k: v.to_dict() for k, v in self.nodes.items()},
-                "messages": [m.to_dict() for m in self.messages[-100:]],
-                "alerts": [a.to_dict() for a in self.alerts[-50:]],
+                "messages": [m.to_dict() for m in list(self.messages)[-100:]],
+                "alerts": [a.to_dict() for a in list(self.alerts)[-50:]],
                 "my_node_id": self.my_node_id,
                 "connection_status": self.connection_status,
                 "channel_count": self.channel_count,
@@ -778,7 +785,10 @@ class MeshNetwork:
         last_update = data.get('last_update')
         if last_update:
             try:
-                network.last_update = datetime.fromisoformat(last_update)
+                dt = datetime.fromisoformat(last_update)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                network.last_update = dt
             except (ValueError, TypeError):
                 network.last_update = None
 
@@ -806,13 +816,19 @@ class MeshNetwork:
                 last_heard = node_dict.get('last_heard')
                 if last_heard:
                     try:
-                        node.last_heard = datetime.fromisoformat(last_heard)
+                        dt = datetime.fromisoformat(last_heard)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        node.last_heard = dt
                     except (ValueError, TypeError):
                         pass
                 first_seen = node_dict.get('first_seen')
                 if first_seen:
                     try:
-                        node.first_seen = datetime.fromisoformat(first_seen)
+                        dt = datetime.fromisoformat(first_seen)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        node.first_seen = dt
                     except (ValueError, TypeError):
                         pass
                 network.nodes[node_id] = node
@@ -835,7 +851,10 @@ class MeshNetwork:
                 last_activity = ch_dict.get('last_activity')
                 if last_activity:
                     try:
-                        channel.last_activity = datetime.fromisoformat(last_activity)
+                        dt = datetime.fromisoformat(last_activity)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        channel.last_activity = dt
                     except (ValueError, TypeError):
                         pass
                 network.channels[idx] = channel
