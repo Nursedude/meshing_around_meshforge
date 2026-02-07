@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-04
+**Last Updated:** 2026-02-07
 **Version:** 0.5.0-beta
 
 ---
@@ -30,12 +30,14 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 240 tests passing
+- **Test Status:** 284 tests passing (14 skipped: MQTT integration)
+- **Meshforge Remote:** `meshforge` → `Nursedude/meshforge` (733+ PRs, `src/` architecture)
 
 ### Code Health
 - All broad `except Exception` fixed in core modules
 - configure_bot.py decomposed (2307 → ~2000 lines)
 - New modular architecture with fallback support
+- Meshforge robustness patterns synced (input validation, stale cleanup, congestion thresholds)
 
 ### Recent P1-P2 Improvements (Completed)
 - **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
@@ -115,7 +117,18 @@ MeshNetwork
 ├── channels: Dict[int, Channel]
 ├── routes: Dict[str, MeshRoute]
 ├── _seen_messages: Set  # Deduplication
+├── cleanup_stale_nodes()  # Prune nodes > 72h, cap at 10k
 └── mesh_health property  # Status, score, avg_snr
+```
+
+### Robustness Constants (from meshforge)
+```
+CHUTIL_WARNING_THRESHOLD = 25.0%   # Channel util warning
+CHUTIL_CRITICAL_THRESHOLD = 40.0%  # Channel util critical
+AIRUTILTX_WARNING_THRESHOLD = 7.0% # TX airtime warning
+STALE_NODE_HOURS = 72              # Prune after 72h
+MAX_NODES = 10000                  # Memory cap
+MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ```
 
 ---
@@ -139,7 +152,15 @@ MeshNetwork
 
 ## Work History (Summary)
 
-### 2026-02-04 (Today)
+### 2026-02-07
+- Synced meshforge robustness patterns into core modules (3 files, +395/-54 lines)
+- **models.py**: Position.is_valid(), environment metrics, congestion thresholds, stale cleanup
+- **mqtt_client.py**: Payload limits, _safe_float/_safe_int validation, stats, atexit, exponential backoff
+- **connection_manager.py**: ConnectionBusy, cooldown, connection info, logging
+- All 284 tests passing
+- Branch: `claude/sync-meshforge-improvements-v5d19`
+
+### 2026-02-04
 - Fixed 6 remaining exception handlers in configure_bot.py
 - Decomposed configure_bot.py (removed 307 lines of duplicates)
 - All 226 tests passing
@@ -166,6 +187,7 @@ MeshNetwork
 3. **PEP 668 compliance** - Never auto-install outside venv
 4. **Specific exceptions** - No bare except: or except Exception:
 5. **Upstream compatibility** - Config loader supports both formats
+6. **Meshforge patterns** - Input validation (_safe_float/_safe_int), stale node cleanup, congestion thresholds from Meshtastic ROUTER_LATE docs
 
 ---
 
@@ -187,10 +209,11 @@ MeshNetwork
 ## Commits Reference (Recent)
 
 ```
+7d1df2a Sync meshforge robustness patterns into core modules
+da49678 Merge pull request #36 from Nursedude/claude/review-nursedude-repo-vZ3qB
 2e0e5c1 Fix remaining exception handling in configure_bot.py
 707c695 Decompose configure_bot.py, fix remaining exception handling
 ce5c976 Add mesh networking improvements: protobuf, encryption, topology
-425824d Bump version to 0.5.0-beta with honest feature assessment
 ```
 
 ---
