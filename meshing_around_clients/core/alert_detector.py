@@ -10,7 +10,7 @@ Provides detection logic for various alert types including:
 import math
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Callable, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict
@@ -125,7 +125,7 @@ class AlertDetector:
     def update_node_seen(self, node_id: str, timestamp: Optional[datetime] = None) -> None:
         """Update the last seen time for a node."""
         with self._lock:
-            self._node_last_seen[node_id] = timestamp or datetime.now()
+            self._node_last_seen[node_id] = timestamp or datetime.now(timezone.utc)
             # Clear disconnect alert flag since node is back
             self._alerted_disconnects.discard(node_id)
 
@@ -138,7 +138,7 @@ class AlertDetector:
         if not self.detector_config.noisy_node_enabled:
             return None
 
-        ts = timestamp or datetime.now()
+        ts = timestamp or datetime.now(timezone.utc)
 
         with self._lock:
             # Update last seen
@@ -196,7 +196,7 @@ class AlertDetector:
             return []
 
         alerts = []
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         timeout = timedelta(seconds=self.detector_config.disconnect_timeout_seconds)
 
         with self._lock:

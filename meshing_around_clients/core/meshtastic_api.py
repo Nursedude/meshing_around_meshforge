@@ -8,11 +8,14 @@ import threading
 import queue
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Callable, List, Dict, Any
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
+
+# Connection timeout for serial/TCP/BLE interfaces (seconds)
+CONNECT_TIMEOUT_SECONDS = 30.0
 
 from .models import (
     Node, Message, Alert, MeshNetwork, Position, NodeTelemetry,
@@ -117,10 +120,10 @@ class MeshtasticAPI:
             return False
 
         state_path = self.config.get_state_file_path()
-        self.network.last_update = datetime.now()
+        self.network.last_update = datetime.now(timezone.utc)
         success = self.network.save_to_file(state_path)
         if success:
-            self._last_save_time = datetime.now()
+            self._last_save_time = datetime.now(timezone.utc)
         return success
 
     def _start_auto_save(self) -> None:
@@ -156,14 +159,16 @@ class MeshtasticAPI:
 
             if interface_type == "serial":
                 port = self.config.interface.port if self.config.interface.port else None
-                self.interface = meshtastic.serial_interface.SerialInterface(port)
+                self.interface = meshtastic.serial_interface.SerialInterface(
+                    port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
                 self.connection_info.device_path = port or "auto"
             elif interface_type == "tcp":
                 hostname = self.config.interface.hostname
                 if not hostname:
                     self.connection_info.error_message = "TCP hostname not configured"
                     return False
-                self.interface = meshtastic.tcp_interface.TCPInterface(hostname)
+                self.interface = meshtastic.tcp_interface.TCPInterface(
+                    hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
                 self.connection_info.device_path = hostname
             elif interface_type == "ble":
                 mac = self.config.interface.mac
@@ -352,7 +357,7 @@ class MeshtasticAPI:
             # Update sender node last heard
             sender_id = packet.get('fromId', '')
             if sender_id and sender_id in self.network.nodes:
-                self.network.nodes[sender_id].last_heard = datetime.now()
+                self.network.nodes[sender_id].last_heard = datetime.now(timezone.utc)
                 self.network.nodes[sender_id].is_online = True
 
             # Handle different packet types
@@ -386,7 +391,7 @@ class MeshtasticAPI:
             channel=packet.get('channel', 0),
             text=text,
             message_type=MessageType.TEXT,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             hop_count=max(0, packet.get('hopStart', 0) - packet.get('hopLimit', 0)),
             snr=packet.get('snr', 0.0),
             rssi=packet.get('rssi', 0),
@@ -434,9 +439,9 @@ class MeshtasticAPI:
                 latitude=lat,
                 longitude=lon,
                 altitude=position_data.get('altitude', 0),
-                time=datetime.now()
+                time=datetime.now(timezone.utc)
             )
-            node.last_heard = datetime.now()
+            node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_position", sender_id, node.position)
 
     def _handle_telemetry(self, packet: dict) -> None:
@@ -454,9 +459,9 @@ class MeshtasticAPI:
                 channel_utilization=device_metrics.get('channelUtilization', node.telemetry.channel_utilization),
                 air_util_tx=device_metrics.get('airUtilTx', node.telemetry.air_util_tx),
                 uptime_seconds=device_metrics.get('uptimeSeconds', node.telemetry.uptime_seconds),
-                last_updated=datetime.now()
+                last_updated=datetime.now(timezone.utc)
             )
-            node.last_heard = datetime.now()
+            node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_telemetry", sender_id, node.telemetry)
 
             # Check battery alert
@@ -487,7 +492,7 @@ class MeshtasticAPI:
             node.short_name = user.get('shortName', node.short_name)
             node.long_name = user.get('longName', node.long_name)
             node.hardware_model = user.get('hwModel', node.hardware_model)
-            node.last_heard = datetime.now()
+            node.last_heard = datetime.now(timezone.utc)
         else:
             # New node
             node_num = packet.get('from', 0)
@@ -497,7 +502,7 @@ class MeshtasticAPI:
                 short_name=user.get('shortName', ''),
                 long_name=user.get('longName', ''),
                 hardware_model=user.get('hwModel', 'UNKNOWN'),
-                last_heard=datetime.now()
+                last_heard=datetime.now(timezone.utc)
             )
             self.network.add_node(node)
 
@@ -538,7 +543,7 @@ class MeshtasticAPI:
                 channel=channel,
                 text=text,
                 message_type=MessageType.TEXT,
-                timestamp=datetime.now(),
+                timestamp=datetime.now(timezone.utc),
                 is_incoming=False
             )
             self.network.add_message(message)
@@ -566,7 +571,7 @@ class MeshtasticAPI:
 
     def get_messages(self, channel: Optional[int] = None, limit: int = 100) -> List[Message]:
         """Get messages, optionally filtered by channel."""
-        messages = self.network.messages
+        messages = list(self.network.messages)
         if channel is not None:
             messages = [m for m in messages if m.channel == channel]
         return messages[-limit:]
@@ -623,7 +628,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
                 long_name=long,
                 hardware_model=hw,
                 role=NodeRole.CLIENT if "Router" not in short else NodeRole.ROUTER,
-                last_heard=datetime.now(),
+                last_heard=datetime.now(timezone.utc),
                 is_online=True
             )
             node.telemetry.battery_level = 75 + (node_num % 25)
@@ -651,7 +656,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
             channel=channel,
             text=text,
             message_type=MessageType.TEXT,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
             is_incoming=False,
             ack_received=True
         )

@@ -13,7 +13,7 @@ import urllib.request
 import urllib.parse
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -142,7 +142,7 @@ class NotificationManager:
         with self._lock:
             last_sent = self._last_alerts.get(alert.alert_type.value)
             if last_sent:
-                elapsed = (datetime.now() - last_sent).total_seconds()
+                elapsed = (datetime.now(timezone.utc) - last_sent).total_seconds()
                 if elapsed < self.notification_config.min_alert_interval_seconds:
                     logger.debug("Notification suppressed: rate limit")
                     return False
@@ -152,7 +152,7 @@ class NotificationManager:
     def _record_notification(self, alert: Alert) -> None:
         """Record that a notification was sent for rate limiting."""
         with self._lock:
-            self._last_alerts[alert.alert_type.value] = datetime.now()
+            self._last_alerts[alert.alert_type.value] = datetime.now(timezone.utc)
 
     # ==================== Email Notifications ====================
 

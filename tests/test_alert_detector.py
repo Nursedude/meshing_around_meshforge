@@ -5,7 +5,7 @@ Unit tests for meshing_around_clients.core.alert_detector
 import unittest
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import sys
@@ -151,7 +151,7 @@ class TestAlertDetectorDisconnect(unittest.TestCase):
     def test_alert_after_timeout(self):
         """Alert generated after timeout."""
         # Set node as seen 2 minutes ago
-        old_time = datetime.now() - timedelta(minutes=2)
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         self.detector.update_node_seen("!node1", old_time)
 
         alerts = self.detector.check_disconnects()
@@ -161,7 +161,7 @@ class TestAlertDetectorDisconnect(unittest.TestCase):
 
     def test_no_duplicate_alerts(self):
         """Don't alert for same disconnected node twice."""
-        old_time = datetime.now() - timedelta(minutes=2)
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         self.detector.update_node_seen("!node1", old_time)
 
         alerts1 = self.detector.check_disconnects()
@@ -173,7 +173,7 @@ class TestAlertDetectorDisconnect(unittest.TestCase):
     def test_disconnect_disabled(self):
         """No alerts when disconnect detection disabled."""
         self.detector.detector_config.disconnect_enabled = False
-        old_time = datetime.now() - timedelta(minutes=2)
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         self.detector.update_node_seen("!node1", old_time)
 
         alerts = self.detector.check_disconnects()
@@ -181,7 +181,7 @@ class TestAlertDetectorDisconnect(unittest.TestCase):
 
     def test_reconnect_clears_alert_flag(self):
         """Reconnected node can trigger new disconnect alert."""
-        old_time = datetime.now() - timedelta(minutes=2)
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=2)
         self.detector.update_node_seen("!node1", old_time)
 
         # First disconnect
@@ -192,7 +192,7 @@ class TestAlertDetectorDisconnect(unittest.TestCase):
         self.detector.update_node_seen("!node1")
 
         # Goes offline again
-        old_time2 = datetime.now() - timedelta(minutes=2)
+        old_time2 = datetime.now(timezone.utc) - timedelta(minutes=2)
         self.detector.update_node_seen("!node1", old_time2)
 
         # Should alert again
@@ -375,7 +375,7 @@ class TestAlertDetectorBatchProcessing(unittest.TestCase):
             node_num=12345,
             position=Position(latitude=45.5, longitude=-122.6),
             telemetry=NodeTelemetry(snr=-15.0),
-            last_heard=datetime.now()
+            last_heard=datetime.now(timezone.utc)
         )
 
         alerts = self.detector.process_node_update(node)

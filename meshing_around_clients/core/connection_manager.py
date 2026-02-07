@@ -19,7 +19,7 @@ import threading
 from enum import Enum
 from typing import Optional, Callable, Dict, List, Any, Union
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .models import Node, Message, Alert, MeshNetwork
 from .config import Config
@@ -270,7 +270,7 @@ class ConnectionManager:
             if self._try_connect(conn_type):
                 self._status.connected = True
                 self._status.connection_type = conn_type
-                self._status.last_connected = datetime.now()
+                self._status.last_connected = datetime.now(timezone.utc)
                 self._status.reconnect_attempts = 0
                 self._trigger_callbacks("on_connect", self._status)
                 self._trigger_callbacks("on_status_change", self._status)
@@ -431,7 +431,7 @@ class ConnectionManager:
             self._api = None
 
         self._status.connected = False
-        self._status.last_disconnected = datetime.now()
+        self._status.last_disconnected = datetime.now(timezone.utc)
         self._last_close_time = time.monotonic()
         self._trigger_callbacks("on_disconnect")
         self._trigger_callbacks("on_status_change", self._status)
@@ -467,7 +467,7 @@ class ConnectionManager:
             return
 
         self._status.connected = False
-        self._status.last_disconnected = datetime.now()
+        self._status.last_disconnected = datetime.now(timezone.utc)
         self._last_close_time = time.monotonic()
         self._status.reconnect_attempts += 1
         self._trigger_callbacks("on_disconnect")
