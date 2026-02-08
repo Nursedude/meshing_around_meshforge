@@ -462,7 +462,12 @@ class ConnectionManager:
                     self._handle_disconnect()
 
     def _handle_disconnect(self):
-        """Handle unexpected disconnection with exponential backoff."""
+        """Handle unexpected disconnection with exponential backoff.
+
+        Note: This runs inside _reconnect_loop, so we must NOT call
+        self.connect() which would spawn another reconnect monitor thread.
+        Instead, we directly attempt reconnection inline.
+        """
         if not self._auto_reconnect:
             return
 
@@ -486,7 +491,18 @@ class ConnectionManager:
                         self._max_reconnect_attempts)
             time.sleep(delay)
 
-            if self.connect(self._status.connection_type):
+            if not self._running:
+                return
+
+            # Reconnect directly without spawning a new monitor thread
+            self._wait_for_cooldown()
+            conn_type = self._status.connection_type
+            if self._try_connect(conn_type):
+                self._status.connected = True
+                self._status.last_connected = datetime.now(timezone.utc)
+                self._status.reconnect_attempts = 0
+                self._trigger_callbacks("on_connect", self._status)
+                self._trigger_callbacks("on_status_change", self._status)
                 logger.info("Reconnected successfully")
             else:
                 logger.warning("Reconnection failed")

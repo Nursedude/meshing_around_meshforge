@@ -395,14 +395,8 @@ class MQTTMeshtasticClient:
             self._stats["messages_received"] += 1
             self.network.last_update = datetime.now(timezone.utc)
 
-            # Periodic stale node cleanup
-            now = time.monotonic()
-            if now - self._last_cleanup > self._cleanup_interval:
-                self._last_cleanup = now
-                pruned = self.network.cleanup_stale_nodes()
-                if pruned:
-                    self._stats["nodes_pruned"] += pruned
-                    logger.debug("Pruned %d stale nodes", pruned)
+            # Note: stale node cleanup handled by background thread
+            # (_start_cleanup_thread) to avoid blocking message processing
 
             # Parse topic to extract metadata
             topic_info = self._parse_topic(topic)
@@ -723,6 +717,8 @@ class MQTTMeshtasticClient:
                     source_node=sender_id,
                     metadata={"channel_utilization": ch_util}
                 )
+                self.network.add_alert(alert)
+                self._trigger_callbacks("on_alert", alert)
 
     def _handle_nodeinfo_from_json(self, data: dict, sender_id: str):
         """Handle node info from JSON."""
@@ -889,13 +885,17 @@ class MQTTMeshtasticClient:
             pos_data = decoded.get("position", {})
             if pos_data and sender_id in self.network.nodes:
                 node = self.network.nodes[sender_id]
-                node.position = Position(
-                    latitude=pos_data.get("latitude", 0),
-                    longitude=pos_data.get("longitude", 0),
-                    altitude=pos_data.get("altitude", 0),
-                    time=datetime.now(timezone.utc)
-                )
-                self._trigger_callbacks("on_position", sender_id)
+                # Validate coordinates (consistent with JSON path)
+                lat = self._safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
+                lon = self._safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
+                if lat is not None and lon is not None:
+                    node.position = Position(
+                        latitude=lat,
+                        longitude=lon,
+                        altitude=pos_data.get("altitude", 0),
+                        time=datetime.now(timezone.utc)
+                    )
+                    self._trigger_callbacks("on_position", sender_id)
 
         elif msg_type == "telemetry" or portnum == 67:
             telemetry_data = decoded.get("telemetry", {})
