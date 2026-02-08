@@ -1076,7 +1076,7 @@ class MQTTMeshtasticClient:
 
     def get_messages(self, channel: Optional[int] = None, limit: int = 100) -> List[Message]:
         """Get messages."""
-        messages = self.network.messages
+        messages = list(self.network.messages)
         if channel is not None:
             messages = [m for m in messages if m.channel == channel]
         return messages[-limit:]
