@@ -886,7 +886,10 @@ class MeshNetwork:
             return cls()  # Return empty network on invalid JSON
 
     def save_to_file(self, path: Union[str, Path]) -> bool:
-        """Save network state to file.
+        """Save network state to file atomically.
+
+        Uses temp file + rename to prevent corruption on crash.
+        From meshforge's atomic write pattern.
 
         Args:
             path: Path to save state file
@@ -894,14 +897,30 @@ class MeshNetwork:
         Returns:
             True if saved successfully, False otherwise
         """
+        import tempfile
+
         path = Path(path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w") as f:
-                f.write(self.to_json())
-            # Set restrictive permissions
-            os.chmod(path, 0o600)
-            return True
+            # Write to temp file first, then atomic rename
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(path.parent), suffix=".tmp", prefix=".meshforge_"
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    f.write(self.to_json())
+                # Set restrictive permissions before moving into place
+                os.chmod(tmp_path, 0o600)
+                # Atomic rename (on same filesystem)
+                os.replace(tmp_path, str(path))
+                return True
+            except OSError:
+                # Clean up temp file on failure
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+                return False
         except OSError:
             return False
 

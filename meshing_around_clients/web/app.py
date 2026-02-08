@@ -347,10 +347,18 @@ class WebApplication:
 
         @app.post("/api/messages/send", dependencies=[Depends(require_auth)])
         async def api_send_message(request: SendMessageRequest):
-            """Send a message."""
-            success = self.api.send_message(request.text, request.destination, request.channel)
+            """Send a message with input validation."""
+            # Validate message text
+            if not request.text or not request.text.strip():
+                raise HTTPException(status_code=400, detail="Message text cannot be empty")
+            if len(request.text) > 228:  # Meshtastic max message length
+                raise HTTPException(status_code=400, detail="Message too long (max 228 chars)")
+            # Validate channel range
+            if request.channel < 0 or request.channel > 7:
+                raise HTTPException(status_code=400, detail="Channel must be 0-7")
+            success = self.api.send_message(request.text.strip(), request.destination, request.channel)
             if success:
-                return {"status": "sent", "message": request.text}
+                return {"status": "sent", "message": request.text.strip()}
             raise HTTPException(status_code=500, detail="Failed to send message")
 
         @app.get("/api/alerts")
@@ -465,6 +473,53 @@ class WebApplication:
                 "link_quality": node.link_quality.to_dict() if node.link_quality else None,
             }
 
+        @app.get("/api/geojson")
+        async def api_geojson():
+            """Get GeoJSON FeatureCollection of nodes with positions.
+
+            Compatible with Leaflet.js for map visualization.
+            From meshforge's map cache pattern.
+            """
+            if hasattr(self.api, "get_geojson"):
+                return self.api.get_geojson()
+            # Fallback: build GeoJSON from network nodes
+            features = []
+            for node in self.api.network.nodes.values():
+                if node.position and node.position.is_valid():
+                    features.append(
+                        {
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "Point",
+                                "coordinates": [node.position.longitude, node.position.latitude],
+                            },
+                            "properties": {
+                                "node_id": node.node_id,
+                                "name": node.display_name,
+                                "is_online": node.is_online,
+                            },
+                        }
+                    )
+            return {"type": "FeatureCollection", "features": features}
+
+        @app.get("/api/congestion")
+        async def api_congestion():
+            """Get nodes with high channel utilization."""
+            congested = []
+            for node in self.api.network.nodes.values():
+                if node.telemetry and node.telemetry.channel_utilization > 0:
+                    congested.append(
+                        {
+                            "node_id": node.node_id,
+                            "name": node.display_name,
+                            "channel_utilization": node.telemetry.channel_utilization,
+                            "air_util_tx": node.telemetry.air_util_tx,
+                            "status": node.telemetry.channel_utilization_status,
+                        }
+                    )
+            congested.sort(key=lambda x: x["channel_utilization"], reverse=True)
+            return {"nodes": congested, "total": len(congested)}
+
         # ==================== WebSocket ====================
 
         @app.websocket("/ws")
@@ -527,7 +582,7 @@ class WebApplication:
                 self.ws_manager.disconnect(websocket)
 
     async def _handle_ws_message(self, websocket: WebSocket, msg: dict):
-        """Handle incoming WebSocket message."""
+        """Handle incoming WebSocket message with input validation."""
         msg_type = msg.get("type")
 
         if msg_type == "ping":
@@ -537,7 +592,18 @@ class WebApplication:
             text = msg.get("text", "")
             dest = msg.get("destination", "^all")
             channel = msg.get("channel", 0)
-            success = self.api.send_message(text, dest, channel)
+            # Validate inputs
+            if not text or not text.strip():
+                await websocket.send_json({"type": "message_status", "success": False, "error": "Empty message"})
+                return
+            if len(text) > 228:
+                await websocket.send_json(
+                    {"type": "message_status", "success": False, "error": "Message too long (max 228)"}
+                )
+                return
+            if not isinstance(channel, int) or channel < 0 or channel > 7:
+                channel = 0
+            success = self.api.send_message(text.strip(), dest, channel)
             await websocket.send_json({"type": "message_status", "success": success})
 
         elif msg_type == "refresh":
