@@ -849,8 +849,12 @@ class MeshingAroundTUI:
         try:
             with Live(self._render(), console=self.console, refresh_per_second=2, screen=True) as live:
                 while self._running:
-                    # Update display — match Rich.Live refresh rate (2Hz = 0.5s)
-                    live.update(self._render())
+                    try:
+                        # Update display — match Rich.Live refresh rate (2Hz = 0.5s)
+                        live.update(self._render())
+                    except (AttributeError, KeyError, TypeError, IndexError):
+                        # Guard against transient data issues during updates
+                        pass
                     time.sleep(0.5)
 
         except KeyboardInterrupt:
@@ -908,9 +912,14 @@ class MeshingAroundTUI:
             tty.setcbreak(sys.stdin.fileno())
 
             while self._running:
-                # Render screen
-                self.console.clear()
-                self.console.print(self._render())
+                # Render screen with error guard
+                try:
+                    self.console.clear()
+                    self.console.print(self._render())
+                except (AttributeError, KeyError, TypeError, IndexError):
+                    # Transient data issue during render - show minimal output
+                    self.console.clear()
+                    self.console.print("[yellow]Updating...[/yellow]")
 
                 # Check for input
                 if select.select([sys.stdin], [], [], 0.5)[0]:

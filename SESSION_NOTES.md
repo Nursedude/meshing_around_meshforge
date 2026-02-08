@@ -41,10 +41,15 @@ python3 -m py_compile configure_bot.py
 - **CI/CD linting passes:** black, isort, flake8 all clean
 - **configure_bot.py integration bugs fixed** (SerialPortInfo, run_command signatures)
 - **Web templates verified** (topology field names, nav link added)
+- **MQTT reliability overhaul:** paho v2 compat, thread-safe stats, reconnection, relay nodes
+- **Atomic writes:** save_to_file() crash-safe with tempfile + os.replace()
+- **Connection health:** double-tap verification pattern from meshforge
+- **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
 
 ### Recent P1-P2 Improvements (Completed)
 - **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
 - **Persistent storage** - Network state saved/loaded from ~/.config/meshing-around-clients/
+  - Now uses atomic writes (tempfile + os.replace) for crash safety
 - **Upstream config import** - `--import-config` CLI option for migration
 - **Web topology template** - topology.html created and fixed
 - **Crypto degradation** - mesh_crypto.py and mqtt_client.py handle missing crypto gracefully
@@ -53,6 +58,11 @@ python3 -m py_compile configure_bot.py
   - Python 3.9-3.12 test matrix
   - pytest with coverage
   - flake8/black/isort linting (all passing, no longer masked by continue-on-error)
+- **MQTT Reliability** - paho v2 compat, auto-reconnect, thread-safe stats, relay nodes
+- **GeoJSON/Map API** - /api/geojson endpoint for Leaflet.js visualization
+- **Connection Health** - Double-tap verification, stale traffic detection
+- **Input Validation** - Message length limits (228 chars), channel range (0-7)
+- **Relay Node Discovery** - Meshtastic 2.6+ partial node ID handling
 
 ### Key Modules
 | Module | Purpose | Lines |
@@ -155,7 +165,37 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 
 ## Work History (Summary)
 
-### 2026-02-08
+### 2026-02-08 (Reliability Session)
+- **MQTT Reliability Overhaul** (mqtt_client.py, +310/-79 lines):
+  - Paho-mqtt v1/v2 API compatibility (`_create_mqtt_client()`, `_PAHO_V2` detection)
+  - Built-in reconnection via `reconnect_delay_set()` + proper `_on_disconnect` handling
+  - Thread-safe stats with `_stats_lock` (all `_stats` mutations protected)
+  - Safe node access: all `self.network.nodes[id]` replaced with `self.network.get_node(id)`
+  - Relay node discovery (Meshtastic 2.6+): `_handle_relay_node()` with partial ID placeholders
+  - GeoJSON export: `get_geojson()` for Leaflet.js map visualization
+  - New methods: `get_online_nodes()`, `get_nodes_with_position()`, `get_congested_nodes()`
+  - Clean shutdown: `_stop_event` threading.Event for responsive thread cleanup
+  - Intentional vs unexpected disconnect tracking (`_intentional_disconnect` flag)
+  - Enriched stats: reconnections, telemetry_updates, position_updates counters
+  - MQTT RC code messages for better error logging
+- **Atomic File Writes** (models.py):
+  - `save_to_file()` now uses tempfile + `os.replace()` for crash-safe persistence
+- **Connection Health Double-Check** (connection_manager.py):
+  - `_check_connection_health()` implements meshforge's double-tap pattern
+  - First tap: is_connected flag, Second tap: traffic flow verification
+  - Auto-reconnect when stale >10 minutes without traffic
+- **TUI Error Resilience** (tui/app.py):
+  - Added error guards in both Live mode and interactive mode render loops
+  - Catches transient data issues (AttributeError, KeyError, TypeError, IndexError)
+- **Web App Improvements** (web/app.py):
+  - `/api/geojson` endpoint for map visualization
+  - `/api/congestion` endpoint for channel utilization monitoring
+  - Input validation on send_message: empty text, max 228 chars, channel 0-7
+  - WebSocket message validation with error responses
+- 284 tests passing (14 skipped), 0 lint errors
+- Branch: `claude/improve-reliability-features-9jgUT`
+
+### 2026-02-08 (Earlier)
 - **Bug fixes:** 2 runtime crash bugs in configure_bot.py
   - `get_serial_ports()` returns SerialPortInfo objects, not strings - crash on `', '.join(ports)`
   - `run_command(desc=...)` param doesn't exist in real module - crash on git clone

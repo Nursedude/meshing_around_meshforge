@@ -440,6 +440,31 @@ class ConnectionManager:
         self._reconnect_thread = threading.Thread(target=self._reconnect_loop, daemon=True)
         self._reconnect_thread.start()
 
+    def _check_connection_health(self) -> bool:
+        """Double-tap health check: verify connection is actually alive.
+
+        From meshforge's NodeMonitor pattern:
+        1. First check: is_connected flag
+        2. Second check: functional verification (message flow or socket)
+        """
+        if not self._api:
+            return False
+
+        # First tap: check connected flag
+        if hasattr(self._api, "is_connected") and not self._api.is_connected:
+            return False
+
+        # Second tap: for MQTT, check if we've had traffic recently
+        if hasattr(self._api, "connection_health"):
+            health = self._api.connection_health
+            # If connected but stale for >10 minutes, consider unhealthy
+            last_msg_ago = health.get("last_message_ago_seconds")
+            if last_msg_ago is not None and last_msg_ago > 600:
+                logger.warning("Connection stale (%ds without traffic), triggering reconnect", last_msg_ago)
+                return False
+
+        return True
+
     def _reconnect_loop(self):
         """Monitor connection and reconnect if needed."""
         while self._running:
@@ -448,10 +473,9 @@ class ConnectionManager:
             if not self._running:
                 break
 
-            # Check if still connected
-            if self._api and hasattr(self._api, "is_connected"):
-                if not self._api.is_connected:
-                    self._handle_disconnect()
+            # Double-tap health check
+            if not self._check_connection_health():
+                self._handle_disconnect()
 
     def _handle_disconnect(self):
         """Handle unexpected disconnection with exponential backoff.
