@@ -266,7 +266,7 @@ class MeshtasticAPI:
                 latitude=position.get('latitude', 0.0),
                 longitude=position.get('longitude', 0.0),
                 altitude=position.get('altitude', 0),
-                time=datetime.fromtimestamp(position['time']) if position.get('time') else None
+                time=datetime.fromtimestamp(position['time'], tz=timezone.utc) if position.get('time') else None
             )
 
             # Parse telemetry
@@ -293,7 +293,7 @@ class MeshtasticAPI:
             # Last heard
             last_heard = None
             if node_info.get('lastHeard'):
-                last_heard = datetime.fromtimestamp(node_info['lastHeard'])
+                last_heard = datetime.fromtimestamp(node_info['lastHeard'], tz=timezone.utc)
 
             # SNR/RSSI
             if 'snr' in node_info:

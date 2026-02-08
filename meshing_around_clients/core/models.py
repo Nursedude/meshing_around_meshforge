@@ -7,7 +7,7 @@ import os
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union, Deque
 from enum import Enum
@@ -615,16 +615,23 @@ class MeshNetwork:
             return [m for m in self.messages
                     if m.sender_id == node_id or m.recipient_id == node_id]
 
+    # Maximum seen messages to prevent unbounded memory growth
+    _MAX_SEEN_MESSAGES = 10000
+
     def is_duplicate_message(self, message_id: str, window_seconds: int = 60) -> bool:
         """Check if message is a duplicate within the time window."""
         with self._lock:
             now = datetime.now(timezone.utc)
-            # Clean old entries
-            cutoff = now.replace(second=now.second - window_seconds) if now.second >= window_seconds else now
+            cutoff = now - timedelta(seconds=window_seconds)
+            # Clean old entries (and enforce size bound)
             self._seen_messages = {
                 mid: ts for mid, ts in self._seen_messages.items()
-                if (now - ts).total_seconds() < window_seconds
+                if ts > cutoff
             }
+            # If still over size limit, prune oldest entries
+            if len(self._seen_messages) > self._MAX_SEEN_MESSAGES:
+                sorted_msgs = sorted(self._seen_messages.items(), key=lambda x: x[1])
+                self._seen_messages = dict(sorted_msgs[-self._MAX_SEEN_MESSAGES:])
             # Check and add
             if message_id in self._seen_messages:
                 return True
