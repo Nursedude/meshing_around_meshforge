@@ -5,17 +5,18 @@ Provides message processing, command handling, and game integration.
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Optional, Callable, Dict, List, Tuple, Any
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
-from .models import Message, Alert, Node, AlertType, MessageType
 from .config import Config
+from .models import Alert, AlertType, Message
 
 
 class CommandType(Enum):
     """Types of bot commands."""
+
     INFO = "info"
     LOCATION = "location"
     WEATHER = "weather"
@@ -32,6 +33,7 @@ class CommandType(Enum):
 @dataclass
 class ParsedCommand:
     """Represents a parsed command from a message."""
+
     command_type: CommandType
     command: str
     args: List[str]
@@ -43,6 +45,7 @@ class ParsedCommand:
 @dataclass
 class CommandResponse:
     """Response to a command."""
+
     text: str
     is_private: bool = False
     delay: float = 0.0
@@ -133,7 +136,7 @@ class MessageHandler:
         command_text = None
         for prefix in self.COMMAND_PREFIXES:
             if text.lower().startswith(prefix):
-                command_text = text[len(prefix):].strip()
+                command_text = text[len(prefix) :].strip()
                 break
 
         if not command_text:
@@ -156,7 +159,7 @@ class MessageHandler:
             args=args,
             raw_text=text,
             sender_id=message.sender_id,
-            is_admin=message.sender_id in admin_nodes
+            is_admin=message.sender_id in admin_nodes,
         )
 
     def process_message(self, message: Message) -> Optional[CommandResponse]:
@@ -181,10 +184,7 @@ class MessageHandler:
 
         # Check for admin-only commands
         if parsed.command_type == CommandType.ADMIN and not parsed.is_admin:
-            return CommandResponse(
-                text="Admin permission required",
-                is_private=True
-            )
+            return CommandResponse(text="Admin permission required", is_private=True)
 
         # Execute handler
         handler = self._command_handlers.get(parsed.command_type)
@@ -218,7 +218,7 @@ class MessageHandler:
                         message=f"From {message.sender_name}: {message.text}",
                         severity=4,
                         source_node=message.sender_id,
-                        metadata={"keyword": keyword, "message_id": message.id}
+                        metadata={"keyword": keyword, "message_id": message.id},
                     )
                     alerts.append(alert)
                     break
@@ -264,15 +264,11 @@ class MessageHandler:
 
     def _handle_info(self, cmd: ParsedCommand) -> CommandResponse:
         """Handle info command."""
-        return CommandResponse(
-            text=f"Bot: {self.config.bot_name}\nVersion: 1.0.0"
-        )
+        return CommandResponse(text=f"Bot: {self.config.bot_name}\nVersion: 1.0.0")
 
     def _handle_stats(self, cmd: ParsedCommand) -> CommandResponse:
         """Handle stats command."""
-        return CommandResponse(
-            text="Stats: Use the TUI or web interface for detailed statistics"
-        )
+        return CommandResponse(text="Stats: Use the TUI or web interface for detailed statistics")
 
     def _handle_location(self, cmd: ParsedCommand) -> CommandResponse:
         """Handle location command."""
@@ -281,12 +277,10 @@ class MessageHandler:
             node_name = " ".join(cmd.args)
             return CommandResponse(
                 text=f"Location request for '{node_name}' - check TUI/web for position data",
-                metadata={"requested_node": node_name}
+                metadata={"requested_node": node_name},
             )
         # Request own location or general location info
-        return CommandResponse(
-            text="Location: Enable GPS on your device or check TUI/web for node positions"
-        )
+        return CommandResponse(text="Location: Enable GPS on your device or check TUI/web for node positions")
 
     def _handle_weather(self, cmd: ParsedCommand) -> CommandResponse:
         """Handle weather command."""
@@ -296,22 +290,20 @@ class MessageHandler:
             # For now, return a placeholder that indicates the feature exists
             return CommandResponse(
                 text=f"Weather for '{location}': Feature requires external API configuration. "
-                     "Configure weather_api_key in settings to enable.",
-                metadata={"location": location}
+                "Configure weather_api_key in settings to enable.",
+                metadata={"location": location},
             )
-        return CommandResponse(
-            text="Usage: !weather <location>\nExample: !weather New York"
-        )
+        return CommandResponse(text="Usage: !weather <location>\nExample: !weather New York")
 
     def _handle_bbs(self, cmd: ParsedCommand) -> CommandResponse:
         """Handle BBS (Bulletin Board System) command."""
         if not cmd.args:
             return CommandResponse(
                 text="BBS Commands:\n"
-                     "!bbs list - List messages\n"
-                     "!bbs read <id> - Read message\n"
-                     "!bbs post <msg> - Post message\n"
-                     "!bbs delete <id> - Delete (admin)"
+                "!bbs list - List messages\n"
+                "!bbs read <id> - Read message\n"
+                "!bbs post <msg> - Post message\n"
+                "!bbs delete <id> - Delete (admin)"
             )
 
         subcommand = cmd.args[0].lower()
@@ -333,9 +325,7 @@ class MessageHandler:
                 if 0 <= idx < len(messages):
                     msg = messages[idx]
                     self._bbs_handler.mark_read(cmd.sender_id, idx)
-                    return CommandResponse(
-                        text=f"From: {msg['from']}\nTime: {msg['timestamp']}\n\n{msg['message']}"
-                    )
+                    return CommandResponse(text=f"From: {msg['from']}\nTime: {msg['timestamp']}\n\n{msg['message']}")
                 return CommandResponse(text="Message not found")
             except ValueError:
                 return CommandResponse(text="Usage: !bbs read <number>")
@@ -359,10 +349,10 @@ class MessageHandler:
             unread = self._bbs_handler.get_unread_count(cmd.sender_id)
             return CommandResponse(
                 text=f"Mail: {unread} unread message(s)\n"
-                     "Commands:\n"
-                     "!mail check - Check inbox\n"
-                     "!mail send <node> <msg> - Send private message\n"
-                     "!mail read <id> - Read message"
+                "Commands:\n"
+                "!mail check - Check inbox\n"
+                "!mail send <node> <msg> - Send private message\n"
+                "!mail read <id> - Read message"
             )
 
         subcommand = cmd.args[0].lower()
@@ -371,9 +361,7 @@ class MessageHandler:
             messages = self._bbs_handler.get_messages(cmd.sender_id, unread_only=True)
             if not messages:
                 return CommandResponse(text="No new mail")
-            return CommandResponse(
-                text=f"You have {len(messages)} unread message(s). Use !mail read <id> to read."
-            )
+            return CommandResponse(text=f"You have {len(messages)} unread message(s). Use !mail read <id> to read.")
 
         elif subcommand == "send" and len(cmd.args) > 2:
             recipient = cmd.args[1]
@@ -388,10 +376,7 @@ class MessageHandler:
                 if 0 <= idx < len(messages):
                     msg = messages[idx]
                     self._bbs_handler.mark_read(cmd.sender_id, idx)
-                    return CommandResponse(
-                        text=f"From: {msg['from']}\n{msg['message']}",
-                        is_private=True
-                    )
+                    return CommandResponse(text=f"From: {msg['from']}\n{msg['message']}", is_private=True)
                 return CommandResponse(text="Message not found")
             except ValueError:
                 return CommandResponse(text="Usage: !mail read <number>")
@@ -404,17 +389,15 @@ class MessageHandler:
             active = self._game_handler.get_active_games()
             if cmd.sender_id in active:
                 return CommandResponse(
-                    text=f"Active game: {active[cmd.sender_id]}\n"
-                         "Type !game quit to exit\n"
-                         "Or continue playing..."
+                    text=f"Active game: {active[cmd.sender_id]}\n" "Type !game quit to exit\n" "Or continue playing..."
                 )
             return CommandResponse(
                 text="Available Games:\n"
-                     "!game dopewars - Trade simulation\n"
-                     "!game lemonade - Business sim\n"
-                     "!game blackjack - Card game\n"
-                     "!game quiz - Trivia\n"
-                     "!game <name> - Start a game"
+                "!game dopewars - Trade simulation\n"
+                "!game lemonade - Business sim\n"
+                "!game blackjack - Card game\n"
+                "!game quiz - Trivia\n"
+                "!game <name> - Start a game"
             )
 
         subcommand = cmd.args[0].lower()
@@ -428,9 +411,7 @@ class MessageHandler:
         # If in active game, forward input
         active = self._game_handler.get_active_games()
         if cmd.sender_id in active:
-            return CommandResponse(
-                text=self._game_handler.process_input(cmd.sender_id, " ".join(cmd.args))
-            )
+            return CommandResponse(text=self._game_handler.process_input(cmd.sender_id, " ".join(cmd.args)))
 
         return CommandResponse(text=f"Unknown game: {subcommand}. Try !game for list")
 
@@ -442,12 +423,12 @@ class MessageHandler:
         if not cmd.args:
             return CommandResponse(
                 text="Admin Commands:\n"
-                     "!admin status - System status\n"
-                     "!admin nodes - Node summary\n"
-                     "!admin broadcast <msg> - Send to all\n"
-                     "!admin mute <node> - Mute node\n"
-                     "!admin unmute <node> - Unmute node\n"
-                     "!admin reboot - Reboot bot (careful!)"
+                "!admin status - System status\n"
+                "!admin nodes - Node summary\n"
+                "!admin broadcast <msg> - Send to all\n"
+                "!admin mute <node> - Mute node\n"
+                "!admin unmute <node> - Unmute node\n"
+                "!admin reboot - Reboot bot (careful!)"
             )
 
         subcommand = cmd.args[0].lower()
@@ -455,41 +436,29 @@ class MessageHandler:
         if subcommand == "status":
             return CommandResponse(
                 text=f"Bot: {self.config.bot_name}\n"
-                     f"Status: Online\n"
-                     f"Admin nodes: {len(self.config.admin_nodes)}\n"
-                     "Use TUI/web for detailed status"
+                f"Status: Online\n"
+                f"Admin nodes: {len(self.config.admin_nodes)}\n"
+                "Use TUI/web for detailed status"
             )
 
         elif subcommand == "nodes":
-            return CommandResponse(
-                text="Node summary available in TUI/web interface"
-            )
+            return CommandResponse(text="Node summary available in TUI/web interface")
 
         elif subcommand == "broadcast" and len(cmd.args) > 1:
             message = " ".join(cmd.args[1:])
-            return CommandResponse(
-                text=f"[BROADCAST] {message}",
-                metadata={"broadcast": True, "message": message}
-            )
+            return CommandResponse(text=f"[BROADCAST] {message}", metadata={"broadcast": True, "message": message})
 
         elif subcommand == "mute" and len(cmd.args) > 1:
             node = cmd.args[1]
-            return CommandResponse(
-                text=f"Node {node} muted",
-                metadata={"action": "mute", "node": node}
-            )
+            return CommandResponse(text=f"Node {node} muted", metadata={"action": "mute", "node": node})
 
         elif subcommand == "unmute" and len(cmd.args) > 1:
             node = cmd.args[1]
-            return CommandResponse(
-                text=f"Node {node} unmuted",
-                metadata={"action": "unmute", "node": node}
-            )
+            return CommandResponse(text=f"Node {node} unmuted", metadata={"action": "unmute", "node": node})
 
         elif subcommand == "reboot":
             return CommandResponse(
-                text="Reboot requested. Confirm with !admin reboot confirm",
-                metadata={"action": "reboot_pending"}
+                text="Reboot requested. Confirm with !admin reboot confirm", metadata={"action": "reboot_pending"}
             )
 
         return CommandResponse(text="Unknown admin command. Try !admin for help")
@@ -510,12 +479,9 @@ class BBSHandler:
         if to_node not in self._messages:
             self._messages[to_node] = []
 
-        self._messages[to_node].append({
-            "from": from_node,
-            "message": message,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "read": False
-        })
+        self._messages[to_node].append(
+            {"from": from_node, "message": message, "timestamp": datetime.now(timezone.utc).isoformat(), "read": False}
+        )
         return True
 
     def get_messages(self, node_id: str, unread_only: bool = False) -> List[Dict]:
@@ -560,7 +526,7 @@ class GameHandler:
             "game": game_name,
             "state": "started",
             "data": {},
-            "started": datetime.now(timezone.utc)
+            "started": datetime.now(timezone.utc),
         }
 
         if game_name == "dopewars":

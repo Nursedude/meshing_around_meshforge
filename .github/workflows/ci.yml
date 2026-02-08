@@ -67,17 +67,15 @@ jobs:
       - name: Check formatting with black
         run: |
           black --check --diff meshing_around_clients/ --exclude '__pycache__|\.pyc'
-        continue-on-error: true
 
       - name: Check imports with isort
         run: |
           isort --check-only --diff meshing_around_clients/
-        continue-on-error: true
 
       - name: Lint with flake8
         run: |
           flake8 meshing_around_clients/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 meshing_around_clients/ --count --exit-zero --max-complexity=15 --max-line-length=120 --statistics
+          flake8 meshing_around_clients/ --count --max-complexity=15 --max-line-length=120 --statistics
 
   syntax-check:
     runs-on: ubuntu-latest

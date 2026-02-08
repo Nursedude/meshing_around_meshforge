@@ -10,33 +10,31 @@ Based on MeshForge foundation principles:
 """
 
 import sys
-import os
-import asyncio
-import threading
 import time
 from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any, Callable, TYPE_CHECKING
 from pathlib import Path
+from typing import Any, Optional
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Check for Rich library - do NOT auto-install (PEP 668 compliance)
 try:
-    from rich.console import Console, Group
-    from rich.panel import Panel
-    from rich.table import Table
-    from rich.layout import Layout
-    from rich.live import Live
-    from rich.text import Text
-    from rich.prompt import Prompt, Confirm
-    from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich import box
     from rich.align import Align
     from rich.columns import Columns
+    from rich.console import Console, Group
+    from rich.layout import Layout
+    from rich.live import Live
     from rich.markdown import Markdown
+    from rich.panel import Panel
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.prompt import Confirm, Prompt
     from rich.syntax import Syntax
+    from rich.table import Table
+    from rich.text import Text
     from rich.tree import Tree
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -60,12 +58,9 @@ except ImportError:
     Syntax = Any  # type: ignore
     Tree = Any  # type: ignore
 
-from meshing_around_clients.core import (
-    Config, MeshtasticAPI, MessageHandler,
-    Node, Message, Alert, MeshNetwork
-)
-from meshing_around_clients.core.models import DATETIME_MIN_UTC
-from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
+from meshing_around_clients.core import Config, MeshtasticAPI, MessageHandler  # noqa: E402
+from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
+from meshing_around_clients.core.models import DATETIME_MIN_UTC  # noqa: E402
 
 # Version
 VERSION = "0.5.0-beta"
@@ -74,7 +69,7 @@ VERSION = "0.5.0-beta"
 class Screen:
     """Base class for TUI screens."""
 
-    def __init__(self, app: 'MeshingAroundTUI'):
+    def __init__(self, app: "MeshingAroundTUI"):
         self.app = app
         self.console = app.console
 
@@ -106,25 +101,16 @@ class DashboardScreen(Screen):
         alerts = self._create_alerts_panel()
 
         # Combine into layout
-        layout.split_column(
-            Layout(stats, name="stats", size=5),
-            Layout(name="main")
-        )
-        layout["main"].split_row(
-            Layout(name="left"),
-            Layout(name="right", ratio=2)
-        )
-        layout["left"].split_column(
-            Layout(nodes, name="nodes"),
-            Layout(alerts, name="alerts")
-        )
+        layout.split_column(Layout(stats, name="stats", size=5), Layout(name="main"))
+        layout["main"].split_row(Layout(name="left"), Layout(name="right", ratio=2))
+        layout["left"].split_column(Layout(nodes, name="nodes"), Layout(alerts, name="alerts"))
         layout["right"].update(messages)
 
         return Panel(
             layout,
             title="[bold cyan]Meshing-Around Dashboard[/bold cyan]",
             subtitle=f"[dim]{datetime.now().strftime('%H:%M:%S')}[/dim]",
-            border_style="cyan"
+            border_style="cyan",
         )
 
     def _create_stats_panel(self) -> Panel:
@@ -154,9 +140,7 @@ class DashboardScreen(Screen):
     def _create_nodes_panel(self) -> Panel:
         """Create the nodes list panel."""
         nodes = sorted(
-            self.app.api.network.nodes.values(),
-            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
-            reverse=True
+            self.app.api.network.nodes.values(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
         )[:10]
 
         table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
@@ -191,10 +175,7 @@ class DashboardScreen(Screen):
             snr_str = f"{snr:.1f}" if snr else "-"
 
             table.add_row(
-                f"[{name_style}]{node.display_name[:15]}[/{name_style}]",
-                node.time_since_heard,
-                batt_str,
-                snr_str
+                f"[{name_style}]{node.display_name[:15]}[/{name_style}]", node.time_since_heard, batt_str, snr_str
             )
 
         if not nodes:
@@ -217,10 +198,7 @@ class DashboardScreen(Screen):
                 prefix = "[green]>>[/green]"
 
             # Check for emergency keywords
-            is_emergency = any(
-                kw.lower() in msg.text.lower()
-                for kw in self.app.config.alerts.emergency_keywords
-            )
+            is_emergency = any(kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords)
 
             if is_emergency:
                 text_style = "bold red"
@@ -240,11 +218,7 @@ class DashboardScreen(Screen):
         if not content:
             content.append(Text("No messages yet", style="dim"))
 
-        return Panel(
-            Group(*content),
-            title="[bold]Messages[/bold]",
-            border_style="magenta"
-        )
+        return Panel(Group(*content), title="[bold]Messages[/bold]", border_style="magenta")
 
     def _create_alerts_panel(self) -> Panel:
         """Create the alerts panel."""
@@ -252,19 +226,9 @@ class DashboardScreen(Screen):
 
         content = []
         for alert in reversed(alerts):
-            style = {
-                1: "blue",
-                2: "yellow",
-                3: "orange1",
-                4: "red bold"
-            }.get(alert.severity, "white")
+            style = {1: "blue", 2: "yellow", 3: "orange1", 4: "red bold"}.get(alert.severity, "white")
 
-            icon = {
-                1: "i",
-                2: "!",
-                3: "!!",
-                4: "!!!"
-            }.get(alert.severity, "*")
+            icon = {1: "i", 2: "!", 3: "!!", 4: "!!!"}.get(alert.severity, "*")
 
             line = Text()
             line.append(f"[{icon}] ", style=style)
@@ -275,11 +239,7 @@ class DashboardScreen(Screen):
         if not content:
             content.append(Text("No alerts", style="dim green"))
 
-        return Panel(
-            Group(*content),
-            title="[bold]Alerts[/bold]",
-            border_style="red"
-        )
+        return Panel(Group(*content), title="[bold]Alerts[/bold]", border_style="red")
 
 
 class NodesScreen(Screen):
@@ -287,11 +247,7 @@ class NodesScreen(Screen):
 
     def render(self) -> Panel:
         table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=box.ROUNDED,
-            expand=True,
-            title="Mesh Network Nodes"
+            show_header=True, header_style="bold cyan", box=box.ROUNDED, expand=True, title="Mesh Network Nodes"
         )
 
         table.add_column("#", style="dim", width=4)
@@ -305,9 +261,7 @@ class NodesScreen(Screen):
         table.add_column("Hops", justify="center")
 
         nodes = sorted(
-            self.app.api.network.nodes.values(),
-            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
-            reverse=True
+            self.app.api.network.nodes.values(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
         )
 
         for idx, node in enumerate(nodes, 1):
@@ -344,21 +298,21 @@ class NodesScreen(Screen):
                 node.time_since_heard,
                 batt_str,
                 snr_str,
-                str(node.hop_count) if node.hop_count else "0"
+                str(node.hop_count) if node.hop_count else "0",
             )
 
         return Panel(
             table,
             title="[bold cyan]Nodes[/bold cyan]",
             subtitle="[dim]Press 'q' to return to dashboard[/dim]",
-            border_style="cyan"
+            border_style="cyan",
         )
 
 
 class MessagesScreen(Screen):
     """Detailed messages view screen."""
 
-    def __init__(self, app: 'MeshingAroundTUI'):
+    def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self.channel_filter: Optional[int] = None
 
@@ -369,12 +323,7 @@ class MessagesScreen(Screen):
 
         messages = all_messages[-30:]  # Last 30 messages
 
-        table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=box.SIMPLE,
-            expand=True
-        )
+        table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
 
         table.add_column("Time", style="dim", width=8)
         table.add_column("Ch", justify="center", width=3)
@@ -397,15 +346,7 @@ class MessagesScreen(Screen):
 
             snr_str = f"{msg.snr:.1f}" if msg.snr else "-"
 
-            table.add_row(
-                msg.time_formatted,
-                str(msg.channel),
-                direction,
-                from_str,
-                to_str,
-                text,
-                snr_str
-            )
+            table.add_row(msg.time_formatted, str(msg.channel), direction, from_str, to_str, text, snr_str)
 
         filter_text = f"Channel {self.channel_filter}" if self.channel_filter is not None else "All channels"
 
@@ -413,14 +354,14 @@ class MessagesScreen(Screen):
             table,
             title=f"[bold cyan]Messages[/bold cyan] - {filter_text}",
             subtitle="[dim]Press 0-7 to filter by channel, 'a' for all, 'q' to return[/dim]",
-            border_style="magenta"
+            border_style="magenta",
         )
 
     def handle_input(self, key: str) -> bool:
         if key.isdigit() and int(key) < 8:
             self.channel_filter = int(key)
             return True
-        elif key == 'a':
+        elif key == "a":
             self.channel_filter = None
             return True
         return False
@@ -432,12 +373,7 @@ class AlertsScreen(Screen):
     def render(self) -> Panel:
         alerts = list(self.app.api.network.alerts)[-20:]
 
-        table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=box.ROUNDED,
-            expand=True
-        )
+        table = Table(show_header=True, header_style="bold cyan", box=box.ROUNDED, expand=True)
 
         table.add_column("Time", style="dim", width=12)
         table.add_column("Sev", justify="center", width=4)
@@ -460,14 +396,14 @@ class AlertsScreen(Screen):
                 alert.alert_type.value,
                 alert.title[:25],
                 alert.message[:40],
-                ack
+                ack,
             )
 
         return Panel(
             table,
             title=f"[bold cyan]Alerts[/bold cyan] - {len(self.app.api.network.unread_alerts)} unread",
             subtitle="[dim]Press 'q' to return to dashboard[/dim]",
-            border_style="red"
+            border_style="red",
         )
 
 
@@ -493,18 +429,15 @@ class TopologyScreen(Screen):
         layout.split_column(
             Layout(health_panel, name="health", size=7),
             Layout(name="main"),
-            Layout(channels_panel, name="channels", size=10)
+            Layout(channels_panel, name="channels", size=10),
         )
-        layout["main"].split_row(
-            Layout(topology_panel, name="topology"),
-            Layout(routes_panel, name="routes")
-        )
+        layout["main"].split_row(Layout(topology_panel, name="topology"), Layout(routes_panel, name="routes"))
 
         return Panel(
             layout,
             title="[bold cyan]Mesh Topology[/bold cyan]",
             subtitle="[dim]Press 'q' to return to dashboard[/dim]",
-            border_style="cyan"
+            border_style="cyan",
         )
 
     def _create_health_panel(self) -> Panel:
@@ -518,7 +451,7 @@ class TopologyScreen(Screen):
             "fair": "yellow",
             "poor": "orange1",
             "critical": "red bold",
-            "unknown": "dim"
+            "unknown": "dim",
         }
         status_style = status_colors.get(health["status"], "white")
 
@@ -534,7 +467,9 @@ class TopologyScreen(Screen):
 
         table.add_row("Status", f"[{status_style}]{health['status'].upper()}[/{status_style}]")
         table.add_row("Health Score", f"{health_bar} {score}%")
-        table.add_row("Online Nodes", f"[green]{health.get('online_nodes', 0)}[/green] / {health.get('total_nodes', 0)}")
+        table.add_row(
+            "Online Nodes", f"[green]{health.get('online_nodes', 0)}[/green] / {health.get('total_nodes', 0)}"
+        )
         table.add_row("Avg SNR", f"{health.get('avg_snr', 0):.1f} dB")
         table.add_row("Channel Util", f"{health.get('avg_channel_utilization', 0):.1f}%")
 
@@ -579,8 +514,9 @@ class TopologyScreen(Screen):
                 self._add_node_to_tree(multi_branch, node)
 
         # Add nodes with unknown hops
-        unknown_hop = [n for n in network.nodes.values()
-                       if n not in direct_nodes and n not in one_hop and n not in multi_hop]
+        unknown_hop = [
+            n for n in network.nodes.values() if n not in direct_nodes and n not in one_hop and n not in multi_hop
+        ]
         if unknown_hop:
             unknown_branch = tree.add("[dim]Unknown[/dim]")
             for node in sorted(unknown_hop, key=lambda n: n.display_name)[:10]:
@@ -624,12 +560,7 @@ class TopologyScreen(Screen):
         """Create known routes panel."""
         network = self.app.api.network
 
-        table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=box.SIMPLE,
-            expand=True
-        )
+        table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
 
         table.add_column("Destination", style="white")
         table.add_column("Hops", justify="center")
@@ -657,10 +588,7 @@ class TopologyScreen(Screen):
                     via += f" (+{len(route.hops)-1})"
 
             table.add_row(
-                dest_name,
-                f"[{hop_style}]{hop_count}[/{hop_style}]",
-                f"[{snr_style}]{avg_snr:.1f}[/{snr_style}]",
-                via
+                dest_name, f"[{hop_style}]{hop_count}[/{hop_style}]", f"[{snr_style}]{avg_snr:.1f}[/{snr_style}]", via
             )
 
         if not routes:
@@ -672,12 +600,7 @@ class TopologyScreen(Screen):
         """Create channels overview panel."""
         network = self.app.api.network
 
-        table = Table(
-            show_header=True,
-            header_style="bold cyan",
-            box=box.SIMPLE,
-            expand=True
-        )
+        table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
 
         table.add_column("Ch", justify="center", width=3)
         table.add_column("Name", style="white")
@@ -716,7 +639,7 @@ class TopologyScreen(Screen):
                 str(channel.message_count),
                 last_activity,
                 uplink,
-                downlink
+                downlink,
             )
 
         return Panel(table, title="[bold]Channels[/bold]", border_style="yellow")
@@ -725,7 +648,7 @@ class TopologyScreen(Screen):
 class SendMessageScreen(Screen):
     """Screen for composing and sending messages."""
 
-    def __init__(self, app: 'MeshingAroundTUI'):
+    def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self.message = ""
         self.channel = 0
@@ -745,7 +668,7 @@ class SendMessageScreen(Screen):
             Group(*content),
             title="[bold cyan]Send Message[/bold cyan]",
             subtitle="[dim]Press Enter to send, Esc to cancel[/dim]",
-            border_style="green"
+            border_style="green",
         )
 
 
@@ -787,7 +710,7 @@ class HelpScreen(Screen):
             Markdown(help_text),
             title="[bold cyan]Help[/bold cyan]",
             subtitle="[dim]Press any key to return[/dim]",
-            border_style="yellow"
+            border_style="yellow",
         )
 
 
@@ -836,12 +759,7 @@ class MeshingAroundTUI:
         if self.demo_mode:
             title.append(" [DEMO MODE]", style="yellow")
 
-        return Panel(
-            Align.center(title),
-            box=box.DOUBLE,
-            border_style="cyan",
-            padding=(0, 2)
-        )
+        return Panel(Align.center(title), box=box.DOUBLE, border_style="cyan", padding=(0, 2))
 
     def _get_footer(self) -> Panel:
         """Create the application footer."""
@@ -863,11 +781,7 @@ class MeshingAroundTUI:
         shortcuts.append("[q]", style="red bold")
         shortcuts.append("Quit", style="dim")
 
-        return Panel(
-            Align.center(shortcuts),
-            box=box.SIMPLE,
-            border_style="dim"
-        )
+        return Panel(Align.center(shortcuts), box=box.SIMPLE, border_style="dim")
 
     def _render(self) -> Layout:
         """Render the full application layout."""
@@ -876,7 +790,7 @@ class MeshingAroundTUI:
         layout.split_column(
             Layout(self._get_header(), name="header", size=3),
             Layout(name="body"),
-            Layout(self._get_footer(), name="footer", size=3)
+            Layout(self._get_footer(), name="footer", size=3),
         )
 
         # Render current screen with connection-safety guard
@@ -886,12 +800,7 @@ class MeshingAroundTUI:
                 layout["body"].update(screen.render())
             except (AttributeError, KeyError, TypeError) as e:
                 # Guard against stale/missing API data during reconnection
-                layout["body"].update(
-                    Panel(
-                        f"[yellow]Waiting for connection... ({e})[/yellow]",
-                        border_style="yellow"
-                    )
-                )
+                layout["body"].update(Panel(f"[yellow]Waiting for connection... ({e})[/yellow]", border_style="yellow"))
 
         return layout
 
@@ -900,9 +809,7 @@ class MeshingAroundTUI:
         self.console.print("[cyan]Connecting to Meshtastic device...[/cyan]")
 
         with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=self.console
+            SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=self.console
         ) as progress:
             task = progress.add_task("Connecting...", total=None)
 
@@ -940,12 +847,7 @@ class MeshingAroundTUI:
         self._running = True
 
         try:
-            with Live(
-                self._render(),
-                console=self.console,
-                refresh_per_second=2,
-                screen=True
-            ) as live:
+            with Live(self._render(), console=self.console, refresh_per_second=2, screen=True) as live:
                 while self._running:
                     # Update display — match Rich.Live refresh rate (2Hz = 0.5s)
                     live.update(self._render())
@@ -1035,29 +937,29 @@ class MeshingAroundTUI:
             return
 
         # Global shortcuts
-        if key == 'q':
+        if key == "q":
             if self.current_screen != "dashboard":
                 self.current_screen = "dashboard"
             else:
                 self._running = False
-        elif key == '1':
+        elif key == "1":
             self.current_screen = "dashboard"
-        elif key == '2':
+        elif key == "2":
             self.current_screen = "nodes"
-        elif key == '3':
+        elif key == "3":
             self.current_screen = "messages"
-        elif key == '4':
+        elif key == "4":
             self.current_screen = "alerts"
-        elif key == '5':
+        elif key == "5":
             self.current_screen = "topology"
-        elif key == 's':
+        elif key == "s":
             self._send_message_prompt()
-        elif key == '?' or key == 'h':
+        elif key == "?" or key == "h":
             self.current_screen = "help"
-        elif key == 'r':
+        elif key == "r":
             # Refresh - just let the next render cycle handle it
             pass
-        elif key == 'c':
+        elif key == "c":
             if self.api.is_connected:
                 self.disconnect()
             else:
@@ -1066,10 +968,7 @@ class MeshingAroundTUI:
     def _send_message_prompt(self) -> None:
         """Prompt user to send a message."""
         self.console.clear()
-        self.console.print(Panel(
-            "[bold cyan]Send Message[/bold cyan]",
-            border_style="cyan"
-        ))
+        self.console.print(Panel("[bold cyan]Send Message[/bold cyan]", border_style="cyan"))
 
         try:
             text = Prompt.ask("Message")

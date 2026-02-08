@@ -10,42 +10,43 @@ Provides:
 Extracted from configure_bot.py for reusability across MeshForge CLI tools.
 """
 
-import sys
 import re
-from typing import Any, Optional, TypeVar, Callable, List
+import sys
 from getpass import getpass
-
+from typing import Any, Callable, List, Optional, TypeVar
 
 # =============================================================================
 # ANSI Color Codes
 # =============================================================================
 
+
 class Colors:
     """ANSI color codes for terminal output."""
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKCYAN = '\033[96m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    DIM = '\033[2m'
+
+    HEADER = "\033[95m"
+    OKBLUE = "\033[94m"
+    OKCYAN = "\033[96m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
+    DIM = "\033[2m"
 
     @classmethod
     def disable(cls):
         """Disable all colors (for non-terminal output)."""
-        cls.HEADER = ''
-        cls.OKBLUE = ''
-        cls.OKCYAN = ''
-        cls.OKGREEN = ''
-        cls.WARNING = ''
-        cls.FAIL = ''
-        cls.ENDC = ''
-        cls.BOLD = ''
-        cls.UNDERLINE = ''
-        cls.DIM = ''
+        cls.HEADER = ""
+        cls.OKBLUE = ""
+        cls.OKCYAN = ""
+        cls.OKGREEN = ""
+        cls.WARNING = ""
+        cls.FAIL = ""
+        cls.ENDC = ""
+        cls.BOLD = ""
+        cls.UNDERLINE = ""
+        cls.DIM = ""
 
 
 # Auto-disable colors if not a TTY
@@ -56,6 +57,7 @@ if not sys.stdout.isatty():
 # =============================================================================
 # Formatted Printing
 # =============================================================================
+
 
 def print_header(text: str, width: int = 70):
     """Print a formatted header with borders.
@@ -177,8 +179,7 @@ def print_table(headers: List[str], rows: List[List[str]], col_widths: Optional[
 
     # Rows
     for row in rows:
-        row_line = " | ".join(str(row[i] if i < len(row) else "").ljust(col_widths[i])
-                             for i in range(len(headers)))
+        row_line = " | ".join(str(row[i] if i < len(row) else "").ljust(col_widths[i]) for i in range(len(headers)))
         print(row_line)
 
 
@@ -186,7 +187,7 @@ def print_table(headers: List[str], rows: List[List[str]], col_widths: Optional[
 # User Input
 # =============================================================================
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def get_input(
@@ -195,7 +196,7 @@ def get_input(
     input_type: type = str,
     password: bool = False,
     validator: Optional[Callable[[Any], bool]] = None,
-    error_message: str = "Invalid input"
+    error_message: str = "Invalid input",
 ) -> Any:
     """Get user input with optional default value, type conversion, and validation.
 
@@ -234,9 +235,9 @@ def get_input(
             # Type conversion
             if input_type == bool:
                 value_lower = str(value).lower()
-                if value_lower in ['true', 'yes', 'y', '1', 'on']:
+                if value_lower in ["true", "yes", "y", "1", "on"]:
                     result = True
-                elif value_lower in ['false', 'no', 'n', '0', 'off']:
+                elif value_lower in ["false", "no", "n", "0", "off"]:
                     result = False
                 else:
                     print_error("Please enter yes/no (y/n) or true/false")
@@ -274,14 +275,10 @@ def get_yes_no(prompt: str, default: bool = False) -> bool:
     """
     default_str = "Y/n" if default else "y/N"
     response = get_input(f"{prompt} ({default_str})", "y" if default else "n")
-    return response.lower() in ['y', 'yes', 'true', '1']
+    return response.lower() in ["y", "yes", "true", "1"]
 
 
-def get_choice(
-    prompt: str,
-    choices: List[str],
-    default: Optional[int] = None
-) -> int:
+def get_choice(prompt: str, choices: List[str], default: Optional[int] = None) -> int:
     """Get a choice from a list of options.
 
     Args:
@@ -312,11 +309,7 @@ def get_choice(
             print_error("Please enter a valid number")
 
 
-def get_list_input(
-    prompt: str,
-    default: Optional[List[str]] = None,
-    separator: str = ","
-) -> List[str]:
+def get_list_input(prompt: str, default: Optional[List[str]] = None, separator: str = ",") -> List[str]:
     """Get a comma-separated list of values.
 
     Args:
@@ -340,6 +333,7 @@ def get_list_input(
 # Validation Functions
 # =============================================================================
 
+
 def validate_mac_address(mac: str) -> bool:
     """Validate BLE MAC address format.
 
@@ -349,7 +343,7 @@ def validate_mac_address(mac: str) -> bool:
     Returns:
         True if valid format
     """
-    pattern = r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+    pattern = r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$"
     return bool(re.match(pattern, mac))
 
 
@@ -362,7 +356,7 @@ def validate_ip_address(ip: str) -> bool:
     Returns:
         True if valid format
     """
-    parts = ip.split('.')
+    parts = ip.split(".")
     if len(parts) != 4:
         return False
     for part in parts:
@@ -396,7 +390,7 @@ def validate_email(email: str) -> bool:
     Returns:
         True if valid format
     """
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
     return bool(re.match(pattern, email))
 
 
@@ -423,13 +417,15 @@ def validate_serial_port(port: str) -> bool:
         True if path looks like a serial port
     """
     import os
+
     # Check if it exists or at least starts with /dev/
-    return os.path.exists(port) or port.startswith('/dev/')
+    return os.path.exists(port) or port.startswith("/dev/")
 
 
 # =============================================================================
 # Progress Indicators
 # =============================================================================
+
 
 class ProgressBar:
     """Simple console progress bar."""
@@ -461,10 +457,10 @@ class ProgressBar:
 
         percent = min(100, int(100 * self.current / self.total))
         filled = int(self.width * self.current / self.total)
-        bar = '█' * filled + '░' * (self.width - filled)
+        bar = "█" * filled + "░" * (self.width - filled)
 
         status = f" {message}" if message else ""
-        print(f'\r{self.prefix}: |{bar}| {percent}%{status}', end='', flush=True)
+        print(f"\r{self.prefix}: |{bar}| {percent}%{status}", end="", flush=True)
 
         if self.current >= self.total:
             print()  # Newline when complete
@@ -481,7 +477,7 @@ class ProgressBar:
 class Spinner:
     """Simple console spinner for indeterminate progress."""
 
-    FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+    FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
     def __init__(self, message: str = "Loading"):
         """Initialize spinner.
@@ -496,7 +492,7 @@ class Spinner:
     def spin(self):
         """Display next spinner frame."""
         frame_char = self.FRAMES[self.frame % len(self.FRAMES)]
-        print(f'\r{frame_char} {self.message}...', end='', flush=True)
+        print(f"\r{frame_char} {self.message}...", end="", flush=True)
         self.frame += 1
 
     def stop(self, success: bool = True, message: str = ""):
@@ -506,15 +502,16 @@ class Spinner:
             success: Whether operation succeeded
             message: Optional result message
         """
-        result_char = '✓' if success else '✗'
+        result_char = "✓" if success else "✗"
         color = Colors.OKGREEN if success else Colors.FAIL
         final_msg = message or ("Done" if success else "Failed")
-        print(f'\r{color}{result_char} {final_msg}{Colors.ENDC}')
+        print(f"\r{color}{result_char} {final_msg}{Colors.ENDC}")
 
 
 # =============================================================================
 # Menu System
 # =============================================================================
+
 
 class Menu:
     """Simple menu system for CLI applications."""
@@ -541,7 +538,7 @@ class Menu:
         for i, (label, _) in enumerate(self.items, 1):
             print(f"  {i}. {label}")
 
-        print(f"  0. Back/Exit")
+        print("  0. Back/Exit")
 
         try:
             choice = get_input(f"Select (0-{len(self.items)})", "0")

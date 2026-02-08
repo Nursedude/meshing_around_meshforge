@@ -524,7 +524,9 @@ def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
     print_step(2, 4, "Detecting serial ports...")
     ports = get_serial_ports()
     if ports:
-        print_success(f"Found serial ports: {', '.join(ports)}")
+        # get_serial_ports() returns SerialPortInfo objects when modules available
+        port_names = [p.port if hasattr(p, 'port') else str(p) for p in ports]
+        print_success(f"Found serial ports: {', '.join(port_names)}")
     else:
         print_warning("No serial ports found - connect your Meshtastic device")
 
@@ -844,7 +846,7 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
             clone_path = get_input("Clone to directory", str(Path.home() / "meshing-around"))
             ret, _, stderr = run_command(
                 ['git', 'clone', 'https://github.com/SpudGunMan/meshing-around.git', clone_path],
-                desc="Cloning meshing-around"
+                capture=True
             )
             if ret == 0:
                 print_success(f"Cloned to {clone_path}")
@@ -1051,7 +1053,7 @@ This wizard will:
     # Clone the repository
     ret, stdout, stderr = run_command(
         ['git', 'clone', 'https://github.com/SpudGunMan/meshing-around.git', str(install_path)],
-        desc="Cloning repository"
+        capture=True
     )
 
     if ret != 0:
@@ -1640,7 +1642,8 @@ def show_system_info():
     ports = get_serial_ports()
     if ports:
         for port in ports:
-            print_success(f"  {port}")
+            port_name = port.port if hasattr(port, 'port') else str(port)
+            print_success(f"  {port_name}")
     else:
         print_warning("  No serial ports found - connect your Meshtastic device")
 

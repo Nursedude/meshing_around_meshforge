@@ -4,32 +4,40 @@ Provides interface to communicate with Meshtastic devices.
 """
 
 import logging
-import threading
 import queue
+import threading
 import time
 import uuid
-from datetime import datetime, timezone
-from typing import Optional, Callable, List, Dict, Any
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # Connection timeout for serial/TCP/BLE interfaces (seconds)
 CONNECT_TIMEOUT_SECONDS = 30.0
 
-from .models import (
-    Node, Message, Alert, MeshNetwork, Position, NodeTelemetry,
-    NodeRole, MessageType, AlertType
+from .config import Config  # noqa: E402
+from .models import (  # noqa: E402
+    Alert,
+    AlertType,
+    MeshNetwork,
+    Message,
+    MessageType,
+    Node,
+    NodeRole,
+    NodeTelemetry,
+    Position,
 )
-from .config import Config
 
 # Try to import meshtastic
 try:
     import meshtastic
+    import meshtastic.ble_interface
     import meshtastic.serial_interface
     import meshtastic.tcp_interface
-    import meshtastic.ble_interface
     from pubsub import pub
+
     MESHTASTIC_AVAILABLE = True
 except ImportError:
     MESHTASTIC_AVAILABLE = False
@@ -38,6 +46,7 @@ except ImportError:
 @dataclass
 class ConnectionInfo:
     """Connection information and status."""
+
     connected: bool = False
     interface_type: str = ""
     device_path: str = ""
@@ -65,7 +74,7 @@ class MeshtasticAPI:
             "on_node_update": [],
             "on_alert": [],
             "on_position": [],
-            "on_telemetry": []
+            "on_telemetry": [],
         }
         self._running = False
         self._worker_thread: Optional[threading.Thread] = None
@@ -102,7 +111,7 @@ class MeshtasticAPI:
 
     def _load_persisted_state(self) -> None:
         """Load network state from persistent storage."""
-        if not hasattr(self.config, 'storage') or not self.config.storage.enabled:
+        if not hasattr(self.config, "storage") or not self.config.storage.enabled:
             return
 
         state_path = self.config.get_state_file_path()
@@ -116,7 +125,7 @@ class MeshtasticAPI:
 
     def _save_state(self) -> bool:
         """Save network state to persistent storage."""
-        if not hasattr(self.config, 'storage') or not self.config.storage.enabled:
+        if not hasattr(self.config, "storage") or not self.config.storage.enabled:
             return False
 
         state_path = self.config.get_state_file_path()
@@ -128,7 +137,7 @@ class MeshtasticAPI:
 
     def _start_auto_save(self) -> None:
         """Start background auto-save thread."""
-        if not hasattr(self.config, 'storage'):
+        if not hasattr(self.config, "storage"):
             return
         if self.config.storage.auto_save_interval <= 0:
             return
@@ -160,7 +169,8 @@ class MeshtasticAPI:
             if interface_type == "serial":
                 port = self.config.interface.port if self.config.interface.port else None
                 self.interface = meshtastic.serial_interface.SerialInterface(
-                    port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+                    port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
+                )
                 self.connection_info.device_path = port or "auto"
             elif interface_type == "tcp":
                 hostname = self.config.interface.hostname
@@ -168,7 +178,8 @@ class MeshtasticAPI:
                     self.connection_info.error_message = "TCP hostname not configured"
                     return False
                 self.interface = meshtastic.tcp_interface.TCPInterface(
-                    hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+                    hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
+                )
                 self.connection_info.device_path = hostname
             elif interface_type == "ble":
                 mac = self.config.interface.mac
@@ -246,7 +257,7 @@ class MeshtasticAPI:
 
     def _load_node_database(self) -> None:
         """Load the node database from the connected device."""
-        if not self.interface or not hasattr(self.interface, 'nodes'):
+        if not self.interface or not hasattr(self.interface, "nodes"):
             return
 
         for node_id, node_info in self.interface.nodes.items():
@@ -257,63 +268,63 @@ class MeshtasticAPI:
     def _parse_node_info(self, node_id: str, node_info: dict) -> Optional[Node]:
         """Parse node info from Meshtastic to our model."""
         try:
-            user = node_info.get('user', {})
-            position = node_info.get('position', {})
-            device_metrics = node_info.get('deviceMetrics', {})
+            user = node_info.get("user", {})
+            position = node_info.get("position", {})
+            device_metrics = node_info.get("deviceMetrics", {})
 
             # Parse position
             pos = Position(
-                latitude=position.get('latitude', 0.0),
-                longitude=position.get('longitude', 0.0),
-                altitude=position.get('altitude', 0),
-                time=datetime.fromtimestamp(position['time'], tz=timezone.utc) if position.get('time') else None
+                latitude=position.get("latitude", 0.0),
+                longitude=position.get("longitude", 0.0),
+                altitude=position.get("altitude", 0),
+                time=datetime.fromtimestamp(position["time"], tz=timezone.utc) if position.get("time") else None,
             )
 
             # Parse telemetry
             telemetry = NodeTelemetry(
-                battery_level=device_metrics.get('batteryLevel', 0),
-                voltage=device_metrics.get('voltage', 0.0),
-                channel_utilization=device_metrics.get('channelUtilization', 0.0),
-                air_util_tx=device_metrics.get('airUtilTx', 0.0),
-                uptime_seconds=device_metrics.get('uptimeSeconds', 0)
+                battery_level=device_metrics.get("batteryLevel", 0),
+                voltage=device_metrics.get("voltage", 0.0),
+                channel_utilization=device_metrics.get("channelUtilization", 0.0),
+                air_util_tx=device_metrics.get("airUtilTx", 0.0),
+                uptime_seconds=device_metrics.get("uptimeSeconds", 0),
             )
 
             # Parse role
-            role_str = user.get('role', 'CLIENT')
+            role_str = user.get("role", "CLIENT")
             try:
                 role = NodeRole[role_str.upper()]
             except (KeyError, AttributeError):
                 role = NodeRole.CLIENT
 
             # Determine if favorite/admin
-            node_num_str = str(node_info.get('num', ''))
+            node_num_str = str(node_info.get("num", ""))
             is_favorite = node_num_str in self.config.favorite_nodes
             is_admin = node_num_str in self.config.admin_nodes
 
             # Last heard
             last_heard = None
-            if node_info.get('lastHeard'):
-                last_heard = datetime.fromtimestamp(node_info['lastHeard'], tz=timezone.utc)
+            if node_info.get("lastHeard"):
+                last_heard = datetime.fromtimestamp(node_info["lastHeard"], tz=timezone.utc)
 
             # SNR/RSSI
-            if 'snr' in node_info:
-                telemetry.snr = node_info['snr']
-            if 'rssi' in node_info:
-                telemetry.rssi = node_info['rssi']
+            if "snr" in node_info:
+                telemetry.snr = node_info["snr"]
+            if "rssi" in node_info:
+                telemetry.rssi = node_info["rssi"]
 
             return Node(
                 node_id=node_id,
-                node_num=node_info.get('num', 0),
-                short_name=user.get('shortName', ''),
-                long_name=user.get('longName', ''),
-                hardware_model=user.get('hwModel', 'UNKNOWN'),
+                node_num=node_info.get("num", 0),
+                short_name=user.get("shortName", ""),
+                long_name=user.get("longName", ""),
+                hardware_model=user.get("hwModel", "UNKNOWN"),
                 role=role,
                 position=pos,
                 telemetry=telemetry,
                 last_heard=last_heard,
                 is_favorite=is_favorite,
                 is_admin=is_admin,
-                hop_count=node_info.get('hopsAway', 0)
+                hop_count=node_info.get("hopsAway", 0),
             )
         except (KeyError, TypeError, ValueError) as e:
             logger.warning("Error parsing node info (%s): %s", type(e).__name__, e)
@@ -351,23 +362,23 @@ class MeshtasticAPI:
     def _process_packet(self, packet: dict) -> None:
         """Process a received packet."""
         try:
-            decoded = packet.get('decoded', {})
-            portnum = decoded.get('portnum', '')
+            decoded = packet.get("decoded", {})
+            portnum = decoded.get("portnum", "")
 
             # Update sender node last heard
-            sender_id = packet.get('fromId', '')
+            sender_id = packet.get("fromId", "")
             if sender_id and sender_id in self.network.nodes:
                 self.network.nodes[sender_id].last_heard = datetime.now(timezone.utc)
                 self.network.nodes[sender_id].is_online = True
 
             # Handle different packet types
-            if portnum == 'TEXT_MESSAGE_APP':
+            if portnum == "TEXT_MESSAGE_APP":
                 self._handle_text_message(packet)
-            elif portnum == 'POSITION_APP':
+            elif portnum == "POSITION_APP":
                 self._handle_position(packet)
-            elif portnum == 'TELEMETRY_APP':
+            elif portnum == "TELEMETRY_APP":
                 self._handle_telemetry(packet)
-            elif portnum == 'NODEINFO_APP':
+            elif portnum == "NODEINFO_APP":
                 self._handle_nodeinfo(packet)
 
         except (KeyError, TypeError, ValueError, UnicodeDecodeError) as e:
@@ -375,10 +386,10 @@ class MeshtasticAPI:
 
     def _handle_text_message(self, packet: dict) -> None:
         """Handle incoming text message."""
-        decoded = packet.get('decoded', {})
-        text = decoded.get('text', decoded.get('payload', b'').decode('utf-8', errors='ignore'))
+        decoded = packet.get("decoded", {})
+        text = decoded.get("text", decoded.get("payload", b"").decode("utf-8", errors="ignore"))
 
-        sender_id = packet.get('fromId', '')
+        sender_id = packet.get("fromId", "")
         sender_name = ""
         if sender_id in self.network.nodes:
             sender_name = self.network.nodes[sender_id].display_name
@@ -387,15 +398,15 @@ class MeshtasticAPI:
             id=str(uuid.uuid4()),
             sender_id=sender_id,
             sender_name=sender_name,
-            recipient_id=packet.get('toId', ''),
-            channel=packet.get('channel', 0),
+            recipient_id=packet.get("toId", ""),
+            channel=packet.get("channel", 0),
             text=text,
             message_type=MessageType.TEXT,
             timestamp=datetime.now(timezone.utc),
-            hop_count=max(0, packet.get('hopStart', 0) - packet.get('hopLimit', 0)),
-            snr=packet.get('snr', 0.0),
-            rssi=packet.get('rssi', 0),
-            is_incoming=True
+            hop_count=max(0, packet.get("hopStart", 0) - packet.get("hopLimit", 0)),
+            snr=packet.get("snr", 0.0),
+            rssi=packet.get("rssi", 0),
+            is_incoming=True,
         )
 
         self.network.add_message(message)
@@ -413,7 +424,7 @@ class MeshtasticAPI:
                         message=f"{sender_name}: {text}",
                         severity=4,
                         source_node=sender_id,
-                        metadata={"keyword": keyword}
+                        metadata={"keyword": keyword},
                     )
                     self.network.add_alert(alert)
                     self._trigger_callbacks("on_alert", alert)
@@ -421,88 +432,83 @@ class MeshtasticAPI:
 
     def _handle_position(self, packet: dict) -> None:
         """Handle position update."""
-        sender_id = packet.get('fromId', '')
-        decoded = packet.get('decoded', {})
-        position_data = decoded.get('position', {})
+        sender_id = packet.get("fromId", "")
+        decoded = packet.get("decoded", {})
+        position_data = decoded.get("position", {})
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
-            lat = position_data.get('latitude')
+            lat = position_data.get("latitude")
             if lat is None:
-                lat_i = position_data.get('latitudeI', 0)
+                lat_i = position_data.get("latitudeI", 0)
                 lat = lat_i / 1e7 if lat_i else 0.0
-            lon = position_data.get('longitude')
+            lon = position_data.get("longitude")
             if lon is None:
-                lon_i = position_data.get('longitudeI', 0)
+                lon_i = position_data.get("longitudeI", 0)
                 lon = lon_i / 1e7 if lon_i else 0.0
             node.position = Position(
-                latitude=lat,
-                longitude=lon,
-                altitude=position_data.get('altitude', 0),
-                time=datetime.now(timezone.utc)
+                latitude=lat, longitude=lon, altitude=position_data.get("altitude", 0), time=datetime.now(timezone.utc)
             )
             node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_position", sender_id, node.position)
 
     def _handle_telemetry(self, packet: dict) -> None:
         """Handle telemetry update."""
-        sender_id = packet.get('fromId', '')
-        decoded = packet.get('decoded', {})
-        telemetry_data = decoded.get('telemetry', {})
-        device_metrics = telemetry_data.get('deviceMetrics', {})
+        sender_id = packet.get("fromId", "")
+        decoded = packet.get("decoded", {})
+        telemetry_data = decoded.get("telemetry", {})
+        device_metrics = telemetry_data.get("deviceMetrics", {})
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
             node.telemetry = NodeTelemetry(
-                battery_level=device_metrics.get('batteryLevel', node.telemetry.battery_level),
-                voltage=device_metrics.get('voltage', node.telemetry.voltage),
-                channel_utilization=device_metrics.get('channelUtilization', node.telemetry.channel_utilization),
-                air_util_tx=device_metrics.get('airUtilTx', node.telemetry.air_util_tx),
-                uptime_seconds=device_metrics.get('uptimeSeconds', node.telemetry.uptime_seconds),
-                last_updated=datetime.now(timezone.utc)
+                battery_level=device_metrics.get("batteryLevel", node.telemetry.battery_level),
+                voltage=device_metrics.get("voltage", node.telemetry.voltage),
+                channel_utilization=device_metrics.get("channelUtilization", node.telemetry.channel_utilization),
+                air_util_tx=device_metrics.get("airUtilTx", node.telemetry.air_util_tx),
+                uptime_seconds=device_metrics.get("uptimeSeconds", node.telemetry.uptime_seconds),
+                last_updated=datetime.now(timezone.utc),
             )
             node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_telemetry", sender_id, node.telemetry)
 
             # Check battery alert
-            if (self.config.alerts.enabled and
-                node.telemetry.battery_level > 0 and
-                node.telemetry.battery_level < 20):
+            if self.config.alerts.enabled and node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
                 alert = Alert(
                     id=str(uuid.uuid4()),
                     alert_type=AlertType.BATTERY,
                     title="Low Battery Alert",
                     message=f"{node.display_name} battery at {node.telemetry.battery_level}%",
                     severity=2,
-                    source_node=sender_id
+                    source_node=sender_id,
                 )
                 self.network.add_alert(alert)
                 self._trigger_callbacks("on_alert", alert)
 
     def _handle_nodeinfo(self, packet: dict) -> None:
         """Handle node info update."""
-        sender_id = packet.get('fromId', '')
-        decoded = packet.get('decoded', {})
-        user = decoded.get('user', {})
+        sender_id = packet.get("fromId", "")
+        decoded = packet.get("decoded", {})
+        user = decoded.get("user", {})
 
         is_new = sender_id not in self.network.nodes
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
-            node.short_name = user.get('shortName', node.short_name)
-            node.long_name = user.get('longName', node.long_name)
-            node.hardware_model = user.get('hwModel', node.hardware_model)
+            node.short_name = user.get("shortName", node.short_name)
+            node.long_name = user.get("longName", node.long_name)
+            node.hardware_model = user.get("hwModel", node.hardware_model)
             node.last_heard = datetime.now(timezone.utc)
         else:
             # New node
-            node_num = packet.get('from', 0)
+            node_num = packet.get("from", 0)
             node = Node(
                 node_id=sender_id,
                 node_num=node_num,
-                short_name=user.get('shortName', ''),
-                long_name=user.get('longName', ''),
-                hardware_model=user.get('hwModel', 'UNKNOWN'),
-                last_heard=datetime.now(timezone.utc)
+                short_name=user.get("shortName", ""),
+                long_name=user.get("longName", ""),
+                hardware_model=user.get("hwModel", "UNKNOWN"),
+                last_heard=datetime.now(timezone.utc),
             )
             self.network.add_node(node)
 
@@ -516,7 +522,7 @@ class MeshtasticAPI:
                 title="New Node Joined",
                 message=f"New node joined the mesh: {node.display_name}",
                 severity=1,
-                source_node=sender_id
+                source_node=sender_id,
             )
             self.network.add_alert(alert)
             self._trigger_callbacks("on_alert", alert)
@@ -531,7 +537,7 @@ class MeshtasticAPI:
                 self.interface.sendText(text, channelIndex=channel)
             else:
                 # Parse destination node number
-                dest_num = int(destination.lstrip('!'), 16) if destination.startswith('!') else int(destination)
+                dest_num = int(destination.lstrip("!"), 16) if destination.startswith("!") else int(destination)
                 self.interface.sendText(text, destinationId=dest_num, channelIndex=channel)
 
             # Log outgoing message
@@ -544,7 +550,7 @@ class MeshtasticAPI:
                 text=text,
                 message_type=MessageType.TEXT,
                 timestamp=datetime.now(timezone.utc),
-                is_incoming=False
+                is_incoming=False,
             )
             self.network.add_message(message)
             return True
@@ -558,7 +564,7 @@ class MeshtasticAPI:
         if not self.interface:
             return False
         try:
-            node_num = int(node_id.lstrip('!'), 16) if node_id.startswith('!') else int(node_id)
+            node_num = int(node_id.lstrip("!"), 16) if node_id.startswith("!") else int(node_id)
             self.interface.sendPosition(destinationId=node_num)
             return True
         except (OSError, ValueError, AttributeError) as e:
@@ -629,7 +635,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
                 hardware_model=hw,
                 role=NodeRole.CLIENT if "Router" not in short else NodeRole.ROUTER,
                 last_heard=datetime.now(timezone.utc),
-                is_online=True
+                is_online=True,
             )
             node.telemetry.battery_level = 75 + (node_num % 25)
             node.telemetry.snr = 5.0 + (node_num % 10)
@@ -658,7 +664,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
             message_type=MessageType.TEXT,
             timestamp=datetime.now(timezone.utc),
             is_incoming=False,
-            ack_received=True
+            ack_received=True,
         )
         self.network.add_message(message)
         return True

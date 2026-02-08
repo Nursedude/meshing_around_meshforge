@@ -5,4 +5,4 @@ Provides a rich terminal interface for monitoring and interacting with the mesh 
 
 from .app import MeshingAroundTUI
 
-__all__ = ['MeshingAroundTUI']
+__all__ = ["MeshingAroundTUI"]

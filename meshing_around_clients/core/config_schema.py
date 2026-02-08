@@ -13,17 +13,18 @@ Compatible with:
 - MeshForge core/config.py dataclass format
 """
 
-import os
 import configparser
+import os
 import re
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class ConnectionType(Enum):
     """Supported connection types."""
+
     SERIAL = "serial"
     TCP = "tcp"
     BLE = "ble"
@@ -33,6 +34,7 @@ class ConnectionType(Enum):
 
 class AlertPriority(Enum):
     """Alert priority levels."""
+
     LOW = 1
     MEDIUM = 2
     HIGH = 3
@@ -43,12 +45,14 @@ class AlertPriority(Enum):
 # Interface Configuration
 # =============================================================================
 
+
 @dataclass
 class InterfaceConfig:
     """Single interface connection configuration.
 
     Compatible with upstream [interface], [interface2], etc. sections.
     """
+
     enabled: bool = True
     type: ConnectionType = ConnectionType.SERIAL
     port: str = ""  # Auto-detect if empty
@@ -57,9 +61,9 @@ class InterfaceConfig:
     baudrate: int = 115200
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'InterfaceConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "InterfaceConfig":
         """Create from dictionary, handling type conversion."""
-        conn_type = data.get('type', 'serial')
+        conn_type = data.get("type", "serial")
         if isinstance(conn_type, str):
             try:
                 conn_type = ConnectionType(conn_type.lower())
@@ -67,30 +71,30 @@ class InterfaceConfig:
                 conn_type = ConnectionType.SERIAL
 
         return cls(
-            enabled=_str_to_bool(data.get('enabled', True)),
+            enabled=_str_to_bool(data.get("enabled", True)),
             type=conn_type,
-            port=str(data.get('port', '')),
-            hostname=str(data.get('hostname', '')),
-            mac=str(data.get('mac', '')),
-            baudrate=int(data.get('baudrate', 115200))
+            port=str(data.get("port", "")),
+            hostname=str(data.get("hostname", "")),
+            mac=str(data.get("mac", "")),
+            baudrate=int(data.get("baudrate", 115200)),
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for INI serialization."""
         return {
-            'enabled': str(self.enabled),
-            'type': self.type.value,
-            'port': self.port,
-            'hostname': self.hostname,
-            'mac': self.mac,
-            'baudrate': str(self.baudrate)
+            "enabled": str(self.enabled),
+            "type": self.type.value,
+            "port": self.port,
+            "hostname": self.hostname,
+            "mac": self.mac,
+            "baudrate": str(self.baudrate),
         }
 
     def validate(self) -> List[str]:
         """Validate configuration, return list of errors."""
         errors = []
         if self.type == ConnectionType.BLE and self.mac:
-            if not re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', self.mac):
+            if not re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", self.mac):
                 errors.append(f"Invalid BLE MAC address format: {self.mac}")
         if self.type == ConnectionType.TCP and not self.hostname:
             errors.append("TCP connection requires hostname")
@@ -101,17 +105,30 @@ class InterfaceConfig:
 # Alert Configurations
 # =============================================================================
 
+
 @dataclass
 class EmergencyAlertConfig:
     """Emergency keyword detection configuration.
 
     Maps to: [emergencyHandler] in both upstream and MeshForge.
     """
+
     enabled: bool = True
-    keywords: List[str] = field(default_factory=lambda: [
-        "emergency", "911", "112", "999", "police", "fire",
-        "ambulance", "rescue", "help", "sos", "mayday"
-    ])
+    keywords: List[str] = field(
+        default_factory=lambda: [
+            "emergency",
+            "911",
+            "112",
+            "999",
+            "police",
+            "fire",
+            "ambulance",
+            "rescue",
+            "help",
+            "sos",
+            "mayday",
+        ]
+    )
     alert_channel: int = 2
     alert_interface: int = 1
     play_sound: bool = False
@@ -123,25 +140,25 @@ class EmergencyAlertConfig:
     log_file: str = "logs/emergency_alerts.log"
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'EmergencyAlertConfig':
-        keywords = data.get('emergency_keywords', data.get('keywords', ''))
+    def from_dict(cls, data: Dict[str, Any]) -> "EmergencyAlertConfig":
+        keywords = data.get("emergency_keywords", data.get("keywords", ""))
         if isinstance(keywords, str):
-            keywords = [k.strip() for k in keywords.split(',') if k.strip()]
+            keywords = [k.strip() for k in keywords.split(",") if k.strip()]
         elif not keywords:
-            keywords = cls.__dataclass_fields__['keywords'].default_factory()
+            keywords = cls.__dataclass_fields__["keywords"].default_factory()
 
         return cls(
-            enabled=_str_to_bool(data.get('enabled', True)),
+            enabled=_str_to_bool(data.get("enabled", True)),
             keywords=keywords,
-            alert_channel=int(data.get('alert_channel', 2)),
-            alert_interface=int(data.get('alert_interface', 1)),
-            play_sound=_str_to_bool(data.get('play_sound', False)),
-            sound_file=str(data.get('sound_file', '')),
-            send_email=_str_to_bool(data.get('send_email', False)),
-            send_sms=_str_to_bool(data.get('send_sms', False)),
-            cooldown_period=int(data.get('cooldown_period', 300)),
-            log_to_file=_str_to_bool(data.get('log_to_file', True)),
-            log_file=str(data.get('log_file', 'logs/emergency_alerts.log'))
+            alert_channel=int(data.get("alert_channel", 2)),
+            alert_interface=int(data.get("alert_interface", 1)),
+            play_sound=_str_to_bool(data.get("play_sound", False)),
+            sound_file=str(data.get("sound_file", "")),
+            send_email=_str_to_bool(data.get("send_email", False)),
+            send_sms=_str_to_bool(data.get("send_sms", False)),
+            cooldown_period=int(data.get("cooldown_period", 300)),
+            log_to_file=_str_to_bool(data.get("log_to_file", True)),
+            log_file=str(data.get("log_file", "logs/emergency_alerts.log")),
         )
 
 
@@ -151,6 +168,7 @@ class SentryConfig:
 
     Maps to: [sentry] in upstream, [proximityAlert] in MeshForge.
     """
+
     enabled: bool = False
     interface: int = 1
     channel: int = 2
@@ -171,49 +189,50 @@ class SentryConfig:
     log_file: str = "logs/proximity_alerts.log"
 
     @classmethod
-    def from_upstream(cls, data: Dict[str, Any]) -> 'SentryConfig':
+    def from_upstream(cls, data: Dict[str, Any]) -> "SentryConfig":
         """Create from upstream [sentry] section format.
 
         Note: ConfigParser lowercases all keys, so we check both cases.
         """
+
         # Helper to get value with case-insensitive key lookup
-        def get_ci(key: str, default: Any = '') -> Any:
+        def get_ci(key: str, default: Any = "") -> Any:
             return data.get(key.lower(), data.get(key, default))
 
-        ignore_str = get_ci('sentryIgnoreList', '')
-        watch_str = get_ci('sentryWatchList', '')
+        ignore_str = get_ci("sentryIgnoreList", "")
+        watch_str = get_ci("sentryWatchList", "")
 
         return cls(
-            enabled=_str_to_bool(get_ci('SentryEnabled', False)),
-            interface=int(get_ci('SentryInterface', 1)),
-            channel=int(get_ci('SentryChannel', 2)),
-            radius_meters=int(get_ci('SentryRadius', 100)),
-            holdoff_multiplier=int(get_ci('SentryHoldoff', 9)),
+            enabled=_str_to_bool(get_ci("SentryEnabled", False)),
+            interface=int(get_ci("SentryInterface", 1)),
+            channel=int(get_ci("SentryChannel", 2)),
+            radius_meters=int(get_ci("SentryRadius", 100)),
+            holdoff_multiplier=int(get_ci("SentryHoldoff", 9)),
             ignore_list=_str_to_list(ignore_str),
             watch_list=_str_to_list(watch_str),
-            email_alerts=_str_to_bool(get_ci('emailSentryAlerts', False)),
-            detection_sensor=_str_to_bool(get_ci('detectionSensorAlert', False)),
-            run_script=_str_to_bool(get_ci('cmdShellSentryAlerts', False)),
-            script_near=str(get_ci('sentryAlertNear', 'sentry_alert_near.sh')),
-            script_away=str(get_ci('sentryAlertAway', 'sentry_alert_away.sh'))
+            email_alerts=_str_to_bool(get_ci("emailSentryAlerts", False)),
+            detection_sensor=_str_to_bool(get_ci("detectionSensorAlert", False)),
+            run_script=_str_to_bool(get_ci("cmdShellSentryAlerts", False)),
+            script_near=str(get_ci("sentryAlertNear", "sentry_alert_near.sh")),
+            script_away=str(get_ci("sentryAlertAway", "sentry_alert_away.sh")),
         )
 
     @classmethod
-    def from_meshforge(cls, data: Dict[str, Any]) -> 'SentryConfig':
+    def from_meshforge(cls, data: Dict[str, Any]) -> "SentryConfig":
         """Create from MeshForge [proximityAlert] section format."""
         return cls(
-            enabled=_str_to_bool(data.get('enabled', False)),
-            target_latitude=float(data.get('target_latitude', 0.0)),
-            target_longitude=float(data.get('target_longitude', 0.0)),
-            radius_meters=int(data.get('radius_meters', 100)),
-            channel=int(data.get('alert_channel', 0)),
-            check_interval=int(data.get('check_interval', 60)),
-            run_script=_str_to_bool(data.get('run_script', False)),
-            script_near=str(data.get('script_path', '')),
-            email_alerts=_str_to_bool(data.get('send_email', False)),
-            node_cooldown=int(data.get('node_cooldown', 600)),
-            log_to_file=_str_to_bool(data.get('log_to_file', True)),
-            log_file=str(data.get('log_file', 'logs/proximity_alerts.log'))
+            enabled=_str_to_bool(data.get("enabled", False)),
+            target_latitude=float(data.get("target_latitude", 0.0)),
+            target_longitude=float(data.get("target_longitude", 0.0)),
+            radius_meters=int(data.get("radius_meters", 100)),
+            channel=int(data.get("alert_channel", 0)),
+            check_interval=int(data.get("check_interval", 60)),
+            run_script=_str_to_bool(data.get("run_script", False)),
+            script_near=str(data.get("script_path", "")),
+            email_alerts=_str_to_bool(data.get("send_email", False)),
+            node_cooldown=int(data.get("node_cooldown", 600)),
+            log_to_file=_str_to_bool(data.get("log_to_file", True)),
+            log_file=str(data.get("log_file", "logs/proximity_alerts.log")),
         )
 
 
@@ -223,6 +242,7 @@ class AltitudeAlertConfig:
 
     Maps to: [sentry].highFlyingAlert in upstream, [altitudeAlert] in MeshForge.
     """
+
     enabled: bool = False
     min_altitude: int = 1000  # meters
     check_openskynetwork: bool = True
@@ -235,30 +255,32 @@ class AltitudeAlertConfig:
     log_file: str = "logs/altitude_alerts.log"
 
     @classmethod
-    def from_upstream(cls, sentry_data: Dict[str, Any]) -> 'AltitudeAlertConfig':
+    def from_upstream(cls, sentry_data: Dict[str, Any]) -> "AltitudeAlertConfig":
         """Create from upstream [sentry] section (high flying fields).
 
         Note: ConfigParser lowercases all keys, so we check both cases.
         """
+
         # Helper to get value with case-insensitive key lookup
-        def get_ci(key: str, default: Any = '') -> Any:
+        def get_ci(key: str, default: Any = "") -> Any:
             return sentry_data.get(key.lower(), sentry_data.get(key, default))
 
-        ignore_str = get_ci('highFlyingIgnoreList', '')
+        ignore_str = get_ci("highFlyingIgnoreList", "")
 
         return cls(
-            enabled=_str_to_bool(get_ci('highFlyingAlert', False)),
-            min_altitude=int(get_ci('highFlyingAlertAltitude', 2000)),
-            check_openskynetwork=_str_to_bool(get_ci('highflyOpenskynetwork', True)),
-            interface=int(get_ci('highFlyingAlertInterface', 1)),
-            channel=int(get_ci('highFlyingAlertChannel', 2)),
-            ignore_list=_str_to_list(ignore_str)
+            enabled=_str_to_bool(get_ci("highFlyingAlert", False)),
+            min_altitude=int(get_ci("highFlyingAlertAltitude", 2000)),
+            check_openskynetwork=_str_to_bool(get_ci("highflyOpenskynetwork", True)),
+            interface=int(get_ci("highFlyingAlertInterface", 1)),
+            channel=int(get_ci("highFlyingAlertChannel", 2)),
+            ignore_list=_str_to_list(ignore_str),
         )
 
 
 @dataclass
 class WeatherAlertConfig:
     """Weather/NOAA alert configuration."""
+
     enabled: bool = False
     location: str = ""  # lat,lon
     severity_levels: List[str] = field(default_factory=lambda: ["Extreme", "Severe"])
@@ -275,6 +297,7 @@ class WeatherAlertConfig:
 @dataclass
 class BatteryAlertConfig:
     """Low battery alert configuration."""
+
     enabled: bool = False
     threshold_percent: int = 20
     check_interval_minutes: int = 30
@@ -288,6 +311,7 @@ class BatteryAlertConfig:
 @dataclass
 class NewNodeAlertConfig:
     """New node welcome/alert configuration."""
+
     enabled: bool = True
     welcome_message: str = "Welcome to the mesh, {node_name}!"
     send_as_dm: bool = True
@@ -301,6 +325,7 @@ class NewNodeAlertConfig:
 @dataclass
 class NoisyNodeAlertConfig:
     """Noisy/chatty node detection configuration."""
+
     enabled: bool = False
     message_threshold: int = 50
     time_period_minutes: int = 10
@@ -315,6 +340,7 @@ class NoisyNodeAlertConfig:
 @dataclass
 class DisconnectAlertConfig:
     """Node disconnect/offline alert configuration."""
+
     enabled: bool = False
     offline_threshold_minutes: int = 60
     monitor_nodes: List[str] = field(default_factory=list)  # Empty = all
@@ -327,6 +353,7 @@ class DisconnectAlertConfig:
 @dataclass
 class GlobalAlertConfig:
     """Global alert settings."""
+
     enabled: bool = True
     quiet_hours: str = ""  # HH:MM-HH:MM format
     max_alerts_per_hour: int = 20
@@ -340,9 +367,11 @@ class GlobalAlertConfig:
 # MQTT Configuration
 # =============================================================================
 
+
 @dataclass
 class MQTTConfig:
     """MQTT broker configuration for radio-less operation."""
+
     enabled: bool = False
     broker: str = "mqtt.meshtastic.org"
     port: int = 1883
@@ -359,22 +388,22 @@ class MQTTConfig:
     max_reconnect_attempts: int = 10
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MQTTConfig':
+    def from_dict(cls, data: Dict[str, Any]) -> "MQTTConfig":
         return cls(
-            enabled=_str_to_bool(data.get('enabled', False)),
-            broker=str(data.get('broker', 'mqtt.meshtastic.org')),
-            port=int(data.get('port', 1883)),
-            use_tls=_str_to_bool(data.get('use_tls', False)),
-            username=str(data.get('username', 'meshdev')),
-            password=str(data.get('password', 'large4cats')),
-            topic_root=str(data.get('topic_root', 'msh/US')),
-            channel=str(data.get('channel', 'LongFast')),
-            node_id=str(data.get('node_id', '')),
-            client_id=str(data.get('client_id', '')),
-            encryption_key=str(data.get('encryption_key', '')),
-            qos=int(data.get('qos', 1)),
-            reconnect_delay=int(data.get('reconnect_delay', 5)),
-            max_reconnect_attempts=int(data.get('max_reconnect_attempts', 10))
+            enabled=_str_to_bool(data.get("enabled", False)),
+            broker=str(data.get("broker", "mqtt.meshtastic.org")),
+            port=int(data.get("port", 1883)),
+            use_tls=_str_to_bool(data.get("use_tls", False)),
+            username=str(data.get("username", "meshdev")),
+            password=str(data.get("password", "large4cats")),
+            topic_root=str(data.get("topic_root", "msh/US")),
+            channel=str(data.get("channel", "LongFast")),
+            node_id=str(data.get("node_id", "")),
+            client_id=str(data.get("client_id", "")),
+            encryption_key=str(data.get("encryption_key", "")),
+            qos=int(data.get("qos", 1)),
+            reconnect_delay=int(data.get("reconnect_delay", 5)),
+            max_reconnect_attempts=int(data.get("max_reconnect_attempts", 10)),
         )
 
 
@@ -382,9 +411,11 @@ class MQTTConfig:
 # Notification Configuration
 # =============================================================================
 
+
 @dataclass
 class SMTPConfig:
     """Email/SMTP notification configuration."""
+
     enabled: bool = False
     enable_imap: bool = False
     server: str = "smtp.gmail.com"
@@ -400,6 +431,7 @@ class SMTPConfig:
 @dataclass
 class SMSConfig:
     """SMS notification configuration."""
+
     enabled: bool = False
     gateway: str = ""  # e.g., @txt.att.net
     phone_numbers: List[str] = field(default_factory=list)
@@ -409,9 +441,11 @@ class SMSConfig:
 # Auto-Update Configuration
 # =============================================================================
 
+
 @dataclass
 class AutoUpdateConfig:
     """Auto-update configuration for MeshForge and upstream."""
+
     enabled: bool = False  # Opt-in
     check_meshforge: bool = True
     check_upstream: bool = True
@@ -425,12 +459,14 @@ class AutoUpdateConfig:
 # General/Bot Configuration
 # =============================================================================
 
+
 @dataclass
 class GeneralConfig:
     """General bot settings.
 
     Maps to: [general] in upstream.
     """
+
     bot_name: str = "MeshBot"
     respond_by_dm_only: bool = True
     auto_ping_in_channel: bool = False
@@ -455,9 +491,11 @@ class GeneralConfig:
 # TUI/Web Configuration
 # =============================================================================
 
+
 @dataclass
 class TUIConfig:
     """Terminal UI configuration."""
+
     refresh_rate: float = 1.0
     color_scheme: str = "default"
     show_timestamps: bool = True
@@ -468,6 +506,7 @@ class TUIConfig:
 @dataclass
 class WebConfig:
     """Web dashboard configuration."""
+
     host: str = "127.0.0.1"
     port: int = 8080
     debug: bool = False
@@ -481,6 +520,7 @@ class WebConfig:
 # Unified Configuration
 # =============================================================================
 
+
 @dataclass
 class UnifiedConfig:
     """Complete unified configuration for MeshForge.
@@ -488,6 +528,7 @@ class UnifiedConfig:
     Combines all configuration sections into a single, validated structure.
     Supports loading from both upstream and MeshForge config formats.
     """
+
     # Interfaces (supports up to 9)
     interfaces: List[InterfaceConfig] = field(default_factory=lambda: [InterfaceConfig()])
 
@@ -548,6 +589,7 @@ class UnifiedConfig:
 # Config Loading/Saving
 # =============================================================================
 
+
 class ConfigLoader:
     """Handles loading and saving configuration from various formats."""
 
@@ -562,7 +604,7 @@ class ConfigLoader:
 
         # Detect format based on section names
         sections = parser.sections()
-        is_upstream = 'bbs' in sections or 'sentry' in sections
+        is_upstream = "bbs" in sections or "sentry" in sections
 
         if is_upstream:
             return ConfigLoader._load_upstream(parser, path)
@@ -577,12 +619,12 @@ class ConfigLoader:
         # Load interfaces (interface, interface2, ..., interface9)
         interfaces = []
         for i in range(1, 10):
-            section = 'interface' if i == 1 else f'interface{i}'
+            section = "interface" if i == 1 else f"interface{i}"
             if parser.has_section(section):
                 data = dict(parser.items(section))
                 iface = InterfaceConfig.from_dict(data)
                 # interface1 is always enabled if present
-                if i > 1 and not _str_to_bool(data.get('enabled', False)):
+                if i > 1 and not _str_to_bool(data.get("enabled", False)):
                     iface.enabled = False
                 interfaces.append(iface)
 
@@ -590,37 +632,37 @@ class ConfigLoader:
             config.interfaces = interfaces
 
         # Load general
-        if parser.has_section('general'):
-            data = dict(parser.items('general'))
+        if parser.has_section("general"):
+            data = dict(parser.items("general"))
             config.general = GeneralConfig(
-                bot_name=data.get('bot_name', 'MeshBot'),
-                respond_by_dm_only=_str_to_bool(data.get('respond_by_dm_only', True)),
-                auto_ping_in_channel=_str_to_bool(data.get('autopinginchannel', False)),
-                default_channel=int(data.get('defaultchannel', 0)),
-                ignore_default_channel=_str_to_bool(data.get('ignoredefaultchannel', False)),
-                ignore_channels=_str_to_int_list(data.get('ignorechannels', '')),
-                cmd_bang=_str_to_bool(data.get('cmdbang', False)),
-                explicit_cmd=_str_to_bool(data.get('explicitcmd', True)),
-                favorite_nodes=_str_to_list(data.get('favoritenodelist', '')),
-                admin_nodes=_str_to_list(data.get('bbs_admin_list', '')),
-                motd=data.get('motd', ''),
-                welcome_message=data.get('welcome_message', ''),
-                zulu_time=_str_to_bool(data.get('zulutime', False)),
-                url_timeout=int(data.get('urltimeout', 15)),
-                log_messages=_str_to_bool(data.get('logmessagestofile', False)),
-                syslog_to_file=_str_to_bool(data.get('syslogtofile', True)),
-                syslog_level=data.get('sysloglevel', 'DEBUG'),
-                log_backup_count=int(data.get('log_backup_count', 32))
+                bot_name=data.get("bot_name", "MeshBot"),
+                respond_by_dm_only=_str_to_bool(data.get("respond_by_dm_only", True)),
+                auto_ping_in_channel=_str_to_bool(data.get("autopinginchannel", False)),
+                default_channel=int(data.get("defaultchannel", 0)),
+                ignore_default_channel=_str_to_bool(data.get("ignoredefaultchannel", False)),
+                ignore_channels=_str_to_int_list(data.get("ignorechannels", "")),
+                cmd_bang=_str_to_bool(data.get("cmdbang", False)),
+                explicit_cmd=_str_to_bool(data.get("explicitcmd", True)),
+                favorite_nodes=_str_to_list(data.get("favoritenodelist", "")),
+                admin_nodes=_str_to_list(data.get("bbs_admin_list", "")),
+                motd=data.get("motd", ""),
+                welcome_message=data.get("welcome_message", ""),
+                zulu_time=_str_to_bool(data.get("zulutime", False)),
+                url_timeout=int(data.get("urltimeout", 15)),
+                log_messages=_str_to_bool(data.get("logmessagestofile", False)),
+                syslog_to_file=_str_to_bool(data.get("syslogtofile", True)),
+                syslog_level=data.get("sysloglevel", "DEBUG"),
+                log_backup_count=int(data.get("log_backup_count", 32)),
             )
 
         # Load emergency handler
-        if parser.has_section('emergencyHandler'):
-            data = dict(parser.items('emergencyHandler'))
+        if parser.has_section("emergencyHandler"):
+            data = dict(parser.items("emergencyHandler"))
             config.emergency = EmergencyAlertConfig.from_dict(data)
 
         # Load sentry (maps to proximity/sentry)
-        if parser.has_section('sentry'):
-            data = dict(parser.items('sentry'))
+        if parser.has_section("sentry"):
+            data = dict(parser.items("sentry"))
             config.sentry = SentryConfig.from_upstream(data)
             config.altitude = AltitudeAlertConfig.from_upstream(data)
 
@@ -641,9 +683,9 @@ class ConfigLoader:
         for i in range(1, 10):
             # Check both formats: [interface] or [interface.1] for first, [interface.N] for rest
             if i == 1:
-                sections = ['interface', 'interface.1']
+                sections = ["interface", "interface.1"]
             else:
-                sections = [f'interface.{i}']
+                sections = [f"interface.{i}"]
 
             for section in sections:
                 if parser.has_section(section):
@@ -656,74 +698,74 @@ class ConfigLoader:
             config.interfaces = interfaces
 
         # Load general
-        if parser.has_section('general'):
-            data = dict(parser.items('general'))
-            config.general.bot_name = data.get('bot_name', 'MeshBot')
-            config.general.favorite_nodes = _str_to_list(data.get('favoritenodelist', ''))
-            config.general.admin_nodes = _str_to_list(data.get('bbs_admin_list', ''))
+        if parser.has_section("general"):
+            data = dict(parser.items("general"))
+            config.general.bot_name = data.get("bot_name", "MeshBot")
+            config.general.favorite_nodes = _str_to_list(data.get("favoritenodelist", ""))
+            config.general.admin_nodes = _str_to_list(data.get("bbs_admin_list", ""))
 
         # Load emergency handler
-        if parser.has_section('emergencyHandler'):
-            data = dict(parser.items('emergencyHandler'))
+        if parser.has_section("emergencyHandler"):
+            data = dict(parser.items("emergencyHandler"))
             config.emergency = EmergencyAlertConfig.from_dict(data)
 
         # Load proximity alert
-        if parser.has_section('proximityAlert'):
-            data = dict(parser.items('proximityAlert'))
+        if parser.has_section("proximityAlert"):
+            data = dict(parser.items("proximityAlert"))
             config.sentry = SentryConfig.from_meshforge(data)
 
         # Load altitude alert
-        if parser.has_section('altitudeAlert'):
-            data = dict(parser.items('altitudeAlert'))
+        if parser.has_section("altitudeAlert"):
+            data = dict(parser.items("altitudeAlert"))
             config.altitude = AltitudeAlertConfig(
-                enabled=_str_to_bool(data.get('enabled', False)),
-                min_altitude=int(data.get('min_altitude', 1000)),
-                channel=int(data.get('alert_channel', 0)),
-                check_interval=int(data.get('check_interval', 120)),
-                cooldown_period=int(data.get('cooldown_period', 300)),
-                log_to_file=_str_to_bool(data.get('log_to_file', True)),
-                log_file=data.get('log_file', 'logs/altitude_alerts.log')
+                enabled=_str_to_bool(data.get("enabled", False)),
+                min_altitude=int(data.get("min_altitude", 1000)),
+                channel=int(data.get("alert_channel", 0)),
+                check_interval=int(data.get("check_interval", 120)),
+                cooldown_period=int(data.get("cooldown_period", 300)),
+                log_to_file=_str_to_bool(data.get("log_to_file", True)),
+                log_file=data.get("log_file", "logs/altitude_alerts.log"),
             )
 
         # Load MQTT
-        if parser.has_section('mqtt'):
-            data = dict(parser.items('mqtt'))
+        if parser.has_section("mqtt"):
+            data = dict(parser.items("mqtt"))
             config.mqtt = MQTTConfig.from_dict(data)
 
         # Load TUI
-        if parser.has_section('tui'):
-            data = dict(parser.items('tui'))
+        if parser.has_section("tui"):
+            data = dict(parser.items("tui"))
             config.tui = TUIConfig(
-                refresh_rate=float(data.get('refresh_rate', 1.0)),
-                color_scheme=data.get('color_scheme', 'default'),
-                show_timestamps=_str_to_bool(data.get('show_timestamps', True)),
-                message_history=int(data.get('message_history', 500)),
-                alert_sound=_str_to_bool(data.get('alert_sound', True))
+                refresh_rate=float(data.get("refresh_rate", 1.0)),
+                color_scheme=data.get("color_scheme", "default"),
+                show_timestamps=_str_to_bool(data.get("show_timestamps", True)),
+                message_history=int(data.get("message_history", 500)),
+                alert_sound=_str_to_bool(data.get("alert_sound", True)),
             )
 
         # Load Web
-        if parser.has_section('web'):
-            data = dict(parser.items('web'))
+        if parser.has_section("web"):
+            data = dict(parser.items("web"))
             config.web = WebConfig(
-                host=data.get('host', '127.0.0.1'),
-                port=int(data.get('port', 8080)),
-                debug=_str_to_bool(data.get('debug', False)),
-                api_key=data.get('api_key', ''),
-                enable_auth=_str_to_bool(data.get('enable_auth', False)),
-                username=data.get('username', 'admin')
+                host=data.get("host", "127.0.0.1"),
+                port=int(data.get("port", 8080)),
+                debug=_str_to_bool(data.get("debug", False)),
+                api_key=data.get("api_key", ""),
+                enable_auth=_str_to_bool(data.get("enable_auth", False)),
+                username=data.get("username", "admin"),
             )
 
         # Load auto-update
-        if parser.has_section('auto_update'):
-            data = dict(parser.items('auto_update'))
+        if parser.has_section("auto_update"):
+            data = dict(parser.items("auto_update"))
             config.auto_update = AutoUpdateConfig(
-                enabled=_str_to_bool(data.get('enabled', False)),
-                check_meshforge=_str_to_bool(data.get('check_meshforge', True)),
-                check_upstream=_str_to_bool(data.get('check_upstream', True)),
-                schedule=data.get('schedule', 'weekly'),
-                notify_only=_str_to_bool(data.get('notify_only', True)),
-                branch=data.get('branch', 'main'),
-                last_check=data.get('last_check', '')
+                enabled=_str_to_bool(data.get("enabled", False)),
+                check_meshforge=_str_to_bool(data.get("check_meshforge", True)),
+                check_upstream=_str_to_bool(data.get("check_upstream", True)),
+                schedule=data.get("schedule", "weekly"),
+                notify_only=_str_to_bool(data.get("notify_only", True)),
+                branch=data.get("branch", "main"),
+                last_check=data.get("last_check", ""),
             )
 
         return config
@@ -742,89 +784,89 @@ class ConfigLoader:
 
         # Save interfaces (use interface.1, interface.2, etc. for MeshForge format)
         for i, iface in enumerate(config.interfaces):
-            section = f'interface.{i+1}'
+            section = f"interface.{i+1}"
             parser.add_section(section)
             for key, value in iface.to_dict().items():
                 parser.set(section, key, str(value))
 
         # Save general
-        parser.add_section('general')
-        parser.set('general', 'bot_name', config.general.bot_name)
-        parser.set('general', 'respond_by_dm_only', str(config.general.respond_by_dm_only))
-        parser.set('general', 'default_channel', str(config.general.default_channel))
-        parser.set('general', 'favoriteNodeList', ','.join(config.general.favorite_nodes))
-        parser.set('general', 'bbs_admin_list', ','.join(config.general.admin_nodes))
-        parser.set('general', 'motd', config.general.motd)
-        parser.set('general', 'log_messages', str(config.general.log_messages))
+        parser.add_section("general")
+        parser.set("general", "bot_name", config.general.bot_name)
+        parser.set("general", "respond_by_dm_only", str(config.general.respond_by_dm_only))
+        parser.set("general", "default_channel", str(config.general.default_channel))
+        parser.set("general", "favoriteNodeList", ",".join(config.general.favorite_nodes))
+        parser.set("general", "bbs_admin_list", ",".join(config.general.admin_nodes))
+        parser.set("general", "motd", config.general.motd)
+        parser.set("general", "log_messages", str(config.general.log_messages))
 
         # Save emergency handler
-        parser.add_section('emergencyHandler')
-        parser.set('emergencyHandler', 'enabled', str(config.emergency.enabled))
-        parser.set('emergencyHandler', 'emergency_keywords', ','.join(config.emergency.keywords))
-        parser.set('emergencyHandler', 'alert_channel', str(config.emergency.alert_channel))
-        parser.set('emergencyHandler', 'cooldown_period', str(config.emergency.cooldown_period))
-        parser.set('emergencyHandler', 'send_email', str(config.emergency.send_email))
-        parser.set('emergencyHandler', 'log_to_file', str(config.emergency.log_to_file))
+        parser.add_section("emergencyHandler")
+        parser.set("emergencyHandler", "enabled", str(config.emergency.enabled))
+        parser.set("emergencyHandler", "emergency_keywords", ",".join(config.emergency.keywords))
+        parser.set("emergencyHandler", "alert_channel", str(config.emergency.alert_channel))
+        parser.set("emergencyHandler", "cooldown_period", str(config.emergency.cooldown_period))
+        parser.set("emergencyHandler", "send_email", str(config.emergency.send_email))
+        parser.set("emergencyHandler", "log_to_file", str(config.emergency.log_to_file))
 
         # Save proximity alert (sentry)
-        parser.add_section('proximityAlert')
-        parser.set('proximityAlert', 'enabled', str(config.sentry.enabled))
-        parser.set('proximityAlert', 'target_latitude', str(config.sentry.target_latitude))
-        parser.set('proximityAlert', 'target_longitude', str(config.sentry.target_longitude))
-        parser.set('proximityAlert', 'radius_meters', str(config.sentry.radius_meters))
-        parser.set('proximityAlert', 'alert_channel', str(config.sentry.channel))
-        parser.set('proximityAlert', 'check_interval', str(config.sentry.check_interval))
-        parser.set('proximityAlert', 'log_to_file', str(config.sentry.log_to_file))
+        parser.add_section("proximityAlert")
+        parser.set("proximityAlert", "enabled", str(config.sentry.enabled))
+        parser.set("proximityAlert", "target_latitude", str(config.sentry.target_latitude))
+        parser.set("proximityAlert", "target_longitude", str(config.sentry.target_longitude))
+        parser.set("proximityAlert", "radius_meters", str(config.sentry.radius_meters))
+        parser.set("proximityAlert", "alert_channel", str(config.sentry.channel))
+        parser.set("proximityAlert", "check_interval", str(config.sentry.check_interval))
+        parser.set("proximityAlert", "log_to_file", str(config.sentry.log_to_file))
 
         # Save altitude alert
-        parser.add_section('altitudeAlert')
-        parser.set('altitudeAlert', 'enabled', str(config.altitude.enabled))
-        parser.set('altitudeAlert', 'min_altitude', str(config.altitude.min_altitude))
-        parser.set('altitudeAlert', 'alert_channel', str(config.altitude.channel))
-        parser.set('altitudeAlert', 'check_interval', str(config.altitude.check_interval))
-        parser.set('altitudeAlert', 'log_to_file', str(config.altitude.log_to_file))
+        parser.add_section("altitudeAlert")
+        parser.set("altitudeAlert", "enabled", str(config.altitude.enabled))
+        parser.set("altitudeAlert", "min_altitude", str(config.altitude.min_altitude))
+        parser.set("altitudeAlert", "alert_channel", str(config.altitude.channel))
+        parser.set("altitudeAlert", "check_interval", str(config.altitude.check_interval))
+        parser.set("altitudeAlert", "log_to_file", str(config.altitude.log_to_file))
 
         # Save MQTT
-        parser.add_section('mqtt')
-        parser.set('mqtt', 'enabled', str(config.mqtt.enabled))
-        parser.set('mqtt', 'broker', config.mqtt.broker)
-        parser.set('mqtt', 'port', str(config.mqtt.port))
-        parser.set('mqtt', 'use_tls', str(config.mqtt.use_tls))
-        parser.set('mqtt', 'username', config.mqtt.username)
-        parser.set('mqtt', 'password', config.mqtt.password)
-        parser.set('mqtt', 'topic_root', config.mqtt.topic_root)
-        parser.set('mqtt', 'channel', config.mqtt.channel)
-        parser.set('mqtt', 'encryption_key', config.mqtt.encryption_key)
+        parser.add_section("mqtt")
+        parser.set("mqtt", "enabled", str(config.mqtt.enabled))
+        parser.set("mqtt", "broker", config.mqtt.broker)
+        parser.set("mqtt", "port", str(config.mqtt.port))
+        parser.set("mqtt", "use_tls", str(config.mqtt.use_tls))
+        parser.set("mqtt", "username", config.mqtt.username)
+        parser.set("mqtt", "password", config.mqtt.password)
+        parser.set("mqtt", "topic_root", config.mqtt.topic_root)
+        parser.set("mqtt", "channel", config.mqtt.channel)
+        parser.set("mqtt", "encryption_key", config.mqtt.encryption_key)
 
         # Save TUI config
-        parser.add_section('tui')
-        parser.set('tui', 'refresh_rate', str(config.tui.refresh_rate))
-        parser.set('tui', 'color_scheme', config.tui.color_scheme)
-        parser.set('tui', 'show_timestamps', str(config.tui.show_timestamps))
-        parser.set('tui', 'message_history', str(config.tui.message_history))
-        parser.set('tui', 'alert_sound', str(config.tui.alert_sound))
+        parser.add_section("tui")
+        parser.set("tui", "refresh_rate", str(config.tui.refresh_rate))
+        parser.set("tui", "color_scheme", config.tui.color_scheme)
+        parser.set("tui", "show_timestamps", str(config.tui.show_timestamps))
+        parser.set("tui", "message_history", str(config.tui.message_history))
+        parser.set("tui", "alert_sound", str(config.tui.alert_sound))
 
         # Save Web config
-        parser.add_section('web')
-        parser.set('web', 'host', config.web.host)
-        parser.set('web', 'port', str(config.web.port))
-        parser.set('web', 'debug', str(config.web.debug))
-        parser.set('web', 'enable_auth', str(config.web.enable_auth))
-        parser.set('web', 'username', config.web.username)
+        parser.add_section("web")
+        parser.set("web", "host", config.web.host)
+        parser.set("web", "port", str(config.web.port))
+        parser.set("web", "debug", str(config.web.debug))
+        parser.set("web", "enable_auth", str(config.web.enable_auth))
+        parser.set("web", "username", config.web.username)
         if config.web.api_key:
-            parser.set('web', 'api_key', config.web.api_key)
+            parser.set("web", "api_key", config.web.api_key)
 
         # Save auto-update
-        parser.add_section('auto_update')
-        parser.set('auto_update', 'enabled', str(config.auto_update.enabled))
-        parser.set('auto_update', 'check_meshforge', str(config.auto_update.check_meshforge))
-        parser.set('auto_update', 'check_upstream', str(config.auto_update.check_upstream))
-        parser.set('auto_update', 'schedule', config.auto_update.schedule)
-        parser.set('auto_update', 'notify_only', str(config.auto_update.notify_only))
+        parser.add_section("auto_update")
+        parser.set("auto_update", "enabled", str(config.auto_update.enabled))
+        parser.set("auto_update", "check_meshforge", str(config.auto_update.check_meshforge))
+        parser.set("auto_update", "check_upstream", str(config.auto_update.check_upstream))
+        parser.set("auto_update", "schedule", config.auto_update.schedule)
+        parser.set("auto_update", "notify_only", str(config.auto_update.notify_only))
 
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 parser.write(f)
             # Secure permissions for config with credentials
             os.chmod(path, 0o600)
@@ -838,12 +880,13 @@ class ConfigLoader:
 # Helper Functions
 # =============================================================================
 
+
 def _str_to_bool(value: Any) -> bool:
     """Convert string to boolean."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
-        return value.lower() in ('true', 'yes', '1', 'on')
+        return value.lower() in ("true", "yes", "1", "on")
     return bool(value)
 
 
@@ -851,7 +894,7 @@ def _str_to_list(value: str) -> List[str]:
     """Convert comma-separated string to list."""
     if not value:
         return []
-    return [item.strip() for item in value.split(',') if item.strip()]
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def _str_to_int_list(value: str) -> List[int]:
@@ -859,7 +902,7 @@ def _str_to_int_list(value: str) -> List[int]:
     if not value:
         return []
     result = []
-    for item in value.split(','):
+    for item in value.split(","):
         item = item.strip()
         if item:
             try:

@@ -3,30 +3,30 @@ Data models for Meshing-Around Clients.
 Defines the core data structures used across TUI and Web clients.
 """
 
+import json
 import os
 import threading
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Union, Deque
 from enum import Enum
-import json
+from pathlib import Path
+from typing import Any, Deque, Dict, List, Optional, Union
 
 # --- Mesh congestion thresholds (from Meshtastic ROUTER_LATE documentation) ---
 # See: https://meshtastic.org/blog/demystifying-router-late/
-CHUTIL_WARNING_THRESHOLD = 25.0    # Channel utilization warning at 25%
-CHUTIL_CRITICAL_THRESHOLD = 40.0   # Channel utilization critical at 40%
+CHUTIL_WARNING_THRESHOLD = 25.0  # Channel utilization warning at 25%
+CHUTIL_CRITICAL_THRESHOLD = 40.0  # Channel utilization critical at 40%
 AIRUTILTX_WARNING_THRESHOLD = 7.0  # TX airtime warning at 7-8%
 AIRUTILTX_CRITICAL_THRESHOLD = 10.0  # TX airtime critical at 10%
 
 # --- Robustness limits ---
-STALE_NODE_HOURS = 72   # Nodes not seen in 72h considered stale
-MAX_NODES = 10000       # Maximum tracked nodes before pruning
+STALE_NODE_HOURS = 72  # Nodes not seen in 72h considered stale
+MAX_NODES = 10000  # Maximum tracked nodes before pruning
 VALID_LAT_RANGE = (-90.0, 90.0)
 VALID_LON_RANGE = (-180.0, 180.0)
-VALID_SNR_RANGE = (-50.0, 50.0)   # dB
-VALID_RSSI_RANGE = (-200, 0)      # dBm
+VALID_SNR_RANGE = (-50.0, 50.0)  # dB
+VALID_RSSI_RANGE = (-200, 0)  # dBm
 
 # UTC-aware minimum datetime for sort sentinels
 DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
@@ -38,6 +38,7 @@ ALERT_HISTORY_MAX = 500
 
 class NodeRole(Enum):
     """Node role types in the mesh network."""
+
     CLIENT = "CLIENT"
     CLIENT_MUTE = "CLIENT_MUTE"
     ROUTER = "ROUTER"
@@ -47,6 +48,7 @@ class NodeRole(Enum):
 
 class AlertType(Enum):
     """Types of alerts supported by the system."""
+
     EMERGENCY = "emergency"
     PROXIMITY = "proximity"
     ALTITUDE = "altitude"
@@ -63,6 +65,7 @@ class AlertType(Enum):
 
 class MessageType(Enum):
     """Types of messages in the mesh network."""
+
     TEXT = "text"
     POSITION = "position"
     TELEMETRY = "telemetry"
@@ -75,6 +78,7 @@ class MessageType(Enum):
 
 class ChannelRole(Enum):
     """Role of a channel in the mesh."""
+
     PRIMARY = "PRIMARY"
     SECONDARY = "SECONDARY"
     DISABLED = "DISABLED"
@@ -83,6 +87,7 @@ class ChannelRole(Enum):
 @dataclass
 class Channel:
     """Represents a Meshtastic channel configuration."""
+
     index: int  # Channel index (0-7)
     name: str = ""  # Human-readable name
     role: ChannelRole = ChannelRole.DISABLED
@@ -119,13 +124,14 @@ class Channel:
             "uplink_enabled": self.uplink_enabled,
             "downlink_enabled": self.downlink_enabled,
             "message_count": self.message_count,
-            "last_activity": self.last_activity.isoformat() if self.last_activity else None
+            "last_activity": self.last_activity.isoformat() if self.last_activity else None,
         }
 
 
 @dataclass
 class LinkQuality:
     """Signal quality metrics for a link between nodes."""
+
     snr: float = 0.0  # Signal-to-noise ratio in dB
     rssi: int = 0  # Received signal strength indicator
     hop_count: int = 0  # Number of hops to reach this node
@@ -172,13 +178,14 @@ class LinkQuality:
             "packet_count": self.packet_count,
             "packet_loss": round(self.packet_loss, 3),
             "quality_percent": self.quality_percent,
-            "last_seen": self.last_seen.isoformat() if self.last_seen else None
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
         }
 
 
 @dataclass
 class RouteHop:
     """Single hop in a mesh route."""
+
     node_id: str
     snr: float = 0.0
     timestamp: Optional[datetime] = None
@@ -187,13 +194,14 @@ class RouteHop:
         return {
             "node_id": self.node_id,
             "snr": self.snr,
-            "timestamp": self.timestamp.isoformat() if self.timestamp else None
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }
 
 
 @dataclass
 class MeshRoute:
     """A route through the mesh network to a destination."""
+
     destination_id: str
     hops: List[RouteHop] = field(default_factory=list)
     discovered: Optional[datetime] = None
@@ -219,13 +227,14 @@ class MeshRoute:
             "avg_snr": round(self.avg_snr, 2),
             "discovered": self.discovered.isoformat() if self.discovered else None,
             "last_used": self.last_used.isoformat() if self.last_used else None,
-            "is_preferred": self.is_preferred
+            "is_preferred": self.is_preferred,
         }
 
 
 @dataclass
 class Position:
     """Geographic position data."""
+
     latitude: float = 0.0
     longitude: float = 0.0
     altitude: int = 0
@@ -246,13 +255,14 @@ class Position:
             "longitude": self.longitude,
             "altitude": self.altitude,
             "time": self.time.isoformat() if self.time else None,
-            "precision_bits": self.precision_bits
+            "precision_bits": self.precision_bits,
         }
 
 
 @dataclass
 class NodeTelemetry:
     """Telemetry data from a node."""
+
     battery_level: int = 0
     voltage: float = 0.0
     channel_utilization: float = 0.0
@@ -270,8 +280,7 @@ class NodeTelemetry:
     @property
     def has_environment_data(self) -> bool:
         """Check if any environment sensor data is present."""
-        return any([self.temperature, self.humidity, self.pressure,
-                    self.gas_resistance])
+        return any([self.temperature, self.humidity, self.pressure, self.gas_resistance])
 
     @property
     def channel_utilization_status(self) -> str:
@@ -310,12 +319,14 @@ class NodeTelemetry:
         # Include environment data only when present
         if self.has_environment_data:
             result["environment"] = {
-                k: v for k, v in {
+                k: v
+                for k, v in {
                     "temperature": self.temperature,
                     "humidity": self.humidity,
                     "pressure": self.pressure,
                     "gas_resistance": self.gas_resistance,
-                }.items() if v is not None
+                }.items()
+                if v is not None
             }
         return result
 
@@ -323,6 +334,7 @@ class NodeTelemetry:
 @dataclass
 class Node:
     """Represents a node in the mesh network."""
+
     node_id: str
     node_num: int
     short_name: str = ""
@@ -414,13 +426,14 @@ class Node:
             "link_quality": self.link_quality.to_dict() if self.link_quality else None,
             "heard_by": self.heard_by,
             "neighbors": self.neighbors,
-            "routes": [r.to_dict() for r in self.routes] if self.routes else []
+            "routes": [r.to_dict() for r in self.routes] if self.routes else [],
         }
 
 
 @dataclass
 class Message:
     """Represents a message in the mesh network."""
+
     id: str
     sender_id: str
     sender_name: str = ""
@@ -467,13 +480,14 @@ class Message:
             "is_incoming": self.is_incoming,
             "ack_received": self.ack_received,
             "is_broadcast": self.is_broadcast,
-            "time_formatted": self.time_formatted
+            "time_formatted": self.time_formatted,
         }
 
 
 @dataclass
 class Alert:
     """Represents an alert in the system."""
+
     id: str
     alert_type: AlertType
     title: str
@@ -509,7 +523,7 @@ class Alert:
             "source_node": self.source_node,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
             "acknowledged": self.acknowledged,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
 
@@ -519,11 +533,10 @@ class MeshNetwork:
 
     Thread-safe: all mutating operations are protected by a lock.
     """
+
     nodes: Dict[str, Node] = field(default_factory=dict)
-    messages: Deque[Message] = field(
-        default_factory=lambda: deque(maxlen=MESSAGE_HISTORY_MAX))
-    alerts: Deque[Alert] = field(
-        default_factory=lambda: deque(maxlen=ALERT_HISTORY_MAX))
+    messages: Deque[Message] = field(default_factory=lambda: deque(maxlen=MESSAGE_HISTORY_MAX))
+    alerts: Deque[Alert] = field(default_factory=lambda: deque(maxlen=ALERT_HISTORY_MAX))
     my_node_id: str = ""
     connection_status: str = "disconnected"
     channel_count: int = 8
@@ -612,8 +625,7 @@ class MeshNetwork:
 
     def get_messages_for_node(self, node_id: str) -> List[Message]:
         with self._lock:
-            return [m for m in self.messages
-                    if m.sender_id == node_id or m.recipient_id == node_id]
+            return [m for m in self.messages if m.sender_id == node_id or m.recipient_id == node_id]
 
     # Maximum seen messages to prevent unbounded memory growth
     _MAX_SEEN_MESSAGES = 10000
@@ -624,14 +636,11 @@ class MeshNetwork:
             now = datetime.now(timezone.utc)
             cutoff = now - timedelta(seconds=window_seconds)
             # Clean old entries (and enforce size bound)
-            self._seen_messages = {
-                mid: ts for mid, ts in self._seen_messages.items()
-                if ts > cutoff
-            }
+            self._seen_messages = {mid: ts for mid, ts in self._seen_messages.items() if ts > cutoff}
             # If still over size limit, prune oldest entries
             if len(self._seen_messages) > self._MAX_SEEN_MESSAGES:
                 sorted_msgs = sorted(self._seen_messages.items(), key=lambda x: x[1])
-                self._seen_messages = dict(sorted_msgs[-self._MAX_SEEN_MESSAGES:])
+                self._seen_messages = dict(sorted_msgs[-self._MAX_SEEN_MESSAGES :])
             # Check and add
             if message_id in self._seen_messages:
                 return True
@@ -656,8 +665,7 @@ class MeshNetwork:
             self.routes[destination_id] = route
             if destination_id in self.nodes:
                 # Update node's routes list
-                existing = [r for r in self.nodes[destination_id].routes
-                           if r.destination_id != destination_id]
+                existing = [r for r in self.nodes[destination_id].routes if r.destination_id != destination_id]
                 existing.append(route)
                 self.nodes[destination_id].routes = existing[-5:]  # Keep last 5 routes
 
@@ -667,8 +675,7 @@ class MeshNetwork:
             if node_id in self.nodes:
                 self.nodes[node_id].link_quality.update(snr, rssi, hop_count)
 
-    def cleanup_stale_nodes(self, stale_hours: int = STALE_NODE_HOURS,
-                            max_nodes: int = MAX_NODES) -> int:
+    def cleanup_stale_nodes(self, stale_hours: int = STALE_NODE_HOURS, max_nodes: int = MAX_NODES) -> int:
         """Remove nodes not seen within stale_hours, or prune to max_nodes.
 
         Returns number of nodes removed.
@@ -677,9 +684,9 @@ class MeshNetwork:
         now = datetime.now(timezone.utc)
         with self._lock:
             stale_ids = [
-                nid for nid, node in self.nodes.items()
-                if node.last_heard and
-                (now - node.last_heard).total_seconds() > stale_hours * 3600
+                nid
+                for nid, node in self.nodes.items()
+                if node.last_heard and (now - node.last_heard).total_seconds() > stale_hours * 3600
             ]
             for nid in stale_ids:
                 del self.nodes[nid]
@@ -687,10 +694,7 @@ class MeshNetwork:
 
             # If still over limit, prune oldest
             if len(self.nodes) > max_nodes:
-                sorted_nodes = sorted(
-                    self.nodes.items(),
-                    key=lambda x: x[1].last_heard or DATETIME_MIN_UTC
-                )
+                sorted_nodes = sorted(self.nodes.items(), key=lambda x: x[1].last_heard or DATETIME_MIN_UTC)
                 to_remove = len(self.nodes) - max_nodes
                 for nid, _ in sorted_nodes[:to_remove]:
                     del self.nodes[nid]
@@ -710,14 +714,16 @@ class MeshNetwork:
 
             # Average SNR across all nodes with link quality data
             snr_values = [
-                n.link_quality.snr_avg for n in self.nodes.values()
+                n.link_quality.snr_avg
+                for n in self.nodes.values()
                 if n.link_quality and n.link_quality.packet_count > 0
             ]
             avg_snr = sum(snr_values) / len(snr_values) if snr_values else 0
 
             # Average channel utilization
             util_values = [
-                n.telemetry.channel_utilization for n in self.nodes.values()
+                n.telemetry.channel_utilization
+                for n in self.nodes.values()
                 if n.telemetry and n.telemetry.channel_utilization > 0
             ]
             avg_utilization = sum(util_values) / len(util_values) if util_values else 0
@@ -746,7 +752,7 @@ class MeshNetwork:
                 "online_nodes": online_count,
                 "total_nodes": total_count,
                 "avg_snr": round(avg_snr, 2),
-                "avg_channel_utilization": round(avg_utilization, 2)
+                "avg_channel_utilization": round(avg_utilization, 2),
             }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -767,14 +773,14 @@ class MeshNetwork:
                 "total_node_count": total_count,
                 "unread_alert_count": len([a for a in self.alerts if not a.acknowledged]),
                 "routes": {k: v.to_dict() for k, v in self.routes.items()},
-                "last_update": self.last_update.isoformat() if self.last_update else None
+                "last_update": self.last_update.isoformat() if self.last_update else None,
             }
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'MeshNetwork':
+    def from_dict(cls, data: Dict[str, Any]) -> "MeshNetwork":
         """Create MeshNetwork from dictionary (restore state).
 
         Note: This restores essential state (nodes, channels) but not
@@ -784,12 +790,12 @@ class MeshNetwork:
         network = cls()
 
         # Restore basic state
-        network.my_node_id = data.get('my_node_id', '')
-        network.connection_status = data.get('connection_status', 'disconnected')
-        network.channel_count = data.get('channel_count', 0)
+        network.my_node_id = data.get("my_node_id", "")
+        network.connection_status = data.get("connection_status", "disconnected")
+        network.channel_count = data.get("channel_count", 0)
 
         # Restore last_update
-        last_update = data.get('last_update')
+        last_update = data.get("last_update")
         if last_update:
             try:
                 dt = datetime.fromisoformat(last_update)
@@ -800,27 +806,27 @@ class MeshNetwork:
                 network.last_update = None
 
         # Restore nodes
-        nodes_data = data.get('nodes', {})
+        nodes_data = data.get("nodes", {})
         for node_id, node_dict in nodes_data.items():
             try:
                 # Get role, handling both string and missing values
-                role_str = node_dict.get('role', 'CLIENT')
+                role_str = node_dict.get("role", "CLIENT")
                 try:
                     role = NodeRole(role_str) if role_str else NodeRole.CLIENT
                 except ValueError:
                     role = NodeRole.CLIENT
 
                 node = Node(
-                    node_id=node_dict.get('node_id', node_id),
-                    node_num=node_dict.get('node_num', 0),
-                    short_name=node_dict.get('short_name', ''),
-                    long_name=node_dict.get('long_name', ''),
-                    hardware_model=node_dict.get('hardware_model', node_dict.get('hardware', 'UNKNOWN')),
-                    is_online=node_dict.get('is_online', False),
-                    role=role
+                    node_id=node_dict.get("node_id", node_id),
+                    node_num=node_dict.get("node_num", 0),
+                    short_name=node_dict.get("short_name", ""),
+                    long_name=node_dict.get("long_name", ""),
+                    hardware_model=node_dict.get("hardware_model", node_dict.get("hardware", "UNKNOWN")),
+                    is_online=node_dict.get("is_online", False),
+                    role=role,
                 )
                 # Restore timestamps
-                last_heard = node_dict.get('last_heard')
+                last_heard = node_dict.get("last_heard")
                 if last_heard:
                     try:
                         dt = datetime.fromisoformat(last_heard)
@@ -829,7 +835,7 @@ class MeshNetwork:
                         node.last_heard = dt
                     except (ValueError, TypeError):
                         pass
-                first_seen = node_dict.get('first_seen')
+                first_seen = node_dict.get("first_seen")
                 if first_seen:
                     try:
                         dt = datetime.fromisoformat(first_seen)
@@ -843,19 +849,19 @@ class MeshNetwork:
                 continue  # Skip invalid node data
 
         # Restore channels
-        channels_data = data.get('channels', {})
+        channels_data = data.get("channels", {})
         for idx_str, ch_dict in channels_data.items():
             try:
                 idx = int(idx_str)
                 channel = Channel(
                     index=idx,
-                    name=ch_dict.get('name', ''),
-                    role=ChannelRole(ch_dict.get('role', 'DISABLED')),
-                    uplink_enabled=ch_dict.get('uplink_enabled', False),
-                    downlink_enabled=ch_dict.get('downlink_enabled', False),
-                    message_count=ch_dict.get('message_count', 0)
+                    name=ch_dict.get("name", ""),
+                    role=ChannelRole(ch_dict.get("role", "DISABLED")),
+                    uplink_enabled=ch_dict.get("uplink_enabled", False),
+                    downlink_enabled=ch_dict.get("downlink_enabled", False),
+                    message_count=ch_dict.get("message_count", 0),
                 )
-                last_activity = ch_dict.get('last_activity')
+                last_activity = ch_dict.get("last_activity")
                 if last_activity:
                     try:
                         dt = datetime.fromisoformat(last_activity)
@@ -871,7 +877,7 @@ class MeshNetwork:
         return network
 
     @classmethod
-    def from_json(cls, json_str: str) -> 'MeshNetwork':
+    def from_json(cls, json_str: str) -> "MeshNetwork":
         """Create MeshNetwork from JSON string."""
         try:
             data = json.loads(json_str)
@@ -891,7 +897,7 @@ class MeshNetwork:
         path = Path(path)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, 'w') as f:
+            with open(path, "w") as f:
                 f.write(self.to_json())
             # Set restrictive permissions
             os.chmod(path, 0o600)
@@ -900,7 +906,7 @@ class MeshNetwork:
             return False
 
     @classmethod
-    def load_from_file(cls, path: Union[str, Path]) -> 'MeshNetwork':
+    def load_from_file(cls, path: Union[str, Path]) -> "MeshNetwork":
         """Load network state from file.
 
         Args:
@@ -913,7 +919,7 @@ class MeshNetwork:
         if not path.exists():
             return cls()
         try:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 return cls.from_json(f.read())
         except (OSError, json.JSONDecodeError):
             return cls()
