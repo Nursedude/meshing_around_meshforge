@@ -903,9 +903,7 @@ class MeshNetwork:
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             # Write to temp file first, then atomic rename
-            fd, tmp_path = tempfile.mkstemp(
-                dir=str(path.parent), suffix=".tmp", prefix=".meshforge_"
-            )
+            fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".meshforge_")
             try:
                 with os.fdopen(fd, "w") as f:
                     f.write(self.to_json())

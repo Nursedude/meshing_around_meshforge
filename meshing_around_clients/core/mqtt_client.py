@@ -1294,11 +1294,7 @@ class MQTTMeshtasticClient:
 
     def get_congested_nodes(self, threshold: float = CHUTIL_WARNING_THRESHOLD) -> List[Node]:
         """Get nodes reporting channel utilization above threshold."""
-        return [
-            n
-            for n in self.get_nodes()
-            if n.telemetry and n.telemetry.channel_utilization >= threshold
-        ]
+        return [n for n in self.get_nodes() if n.telemetry and n.telemetry.channel_utilization >= threshold]
 
 
 class MQTTConnectionManager:
