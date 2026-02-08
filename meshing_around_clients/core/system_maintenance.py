@@ -14,29 +14,26 @@ Extracted from configure_bot.py for reusability.
 
 import os
 import subprocess
-import shutil
 import tempfile
-from pathlib import Path
-from datetime import datetime, timedelta, timezone
-from typing import Tuple, Optional, List, Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Callable, List, Optional, Tuple
 
 from .pi_utils import (
     get_pip_command,
     get_pip_install_flags,
-    get_python_command,
-    check_pep668_environment,
-    is_raspberry_pi
 )
-
 
 # =============================================================================
 # Data Classes
 # =============================================================================
 
+
 @dataclass
 class UpdateResult:
     """Result of an update operation."""
+
     success: bool
     message: str
     changes: List[str] = field(default_factory=list)
@@ -47,6 +44,7 @@ class UpdateResult:
 @dataclass
 class VersionInfo:
     """Version information for a component."""
+
     current: str
     latest: str
     has_update: bool
@@ -57,12 +55,9 @@ class VersionInfo:
 # Command Execution
 # =============================================================================
 
+
 def run_command(
-    cmd: List[str],
-    timeout: int = 600,
-    capture: bool = True,
-    sudo: bool = False,
-    cwd: Optional[Path] = None
+    cmd: List[str], timeout: int = 600, capture: bool = True, sudo: bool = False, cwd: Optional[Path] = None
 ) -> Tuple[int, str, str]:
     """Run a shell command with optional sudo.
 
@@ -77,16 +72,10 @@ def run_command(
         Tuple of (return_code, stdout, stderr)
     """
     if sudo:
-        cmd = ['sudo'] + cmd
+        cmd = ["sudo"] + cmd
 
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=capture,
-            text=True,
-            timeout=timeout,
-            cwd=str(cwd) if cwd else None
-        )
+        result = subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout, cwd=str(cwd) if cwd else None)
         stdout = result.stdout if capture else ""
         stderr = result.stderr if capture else ""
         return result.returncode, stdout, stderr
@@ -102,10 +91,9 @@ def run_command(
 # System Updates (apt)
 # =============================================================================
 
+
 def system_update(
-    upgrade: bool = True,
-    autoremove: bool = True,
-    progress_callback: Optional[Callable[[str], None]] = None
+    upgrade: bool = True, autoremove: bool = True, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
     """Run apt update and optionally upgrade.
 
@@ -117,6 +105,7 @@ def system_update(
     Returns:
         UpdateResult with success status and messages
     """
+
     def report(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -126,7 +115,7 @@ def system_update(
 
     # apt update
     report("Updating package lists...")
-    ret, stdout, stderr = run_command(['apt', 'update'], sudo=True)
+    ret, stdout, stderr = run_command(["apt", "update"], sudo=True)
     if ret != 0:
         result.errors.append(f"apt update failed: {stderr[:100]}")
         result.success = False
@@ -137,19 +126,19 @@ def system_update(
     # apt upgrade
     if upgrade:
         report("Upgrading packages...")
-        ret, stdout, stderr = run_command(['apt', 'upgrade', '-y'], sudo=True)
+        ret, stdout, stderr = run_command(["apt", "upgrade", "-y"], sudo=True)
         if ret != 0:
             result.errors.append(f"apt upgrade failed: {stderr[:100]}")
             result.success = False
         else:
             messages.append("Packages upgraded")
-            if 'newly installed' in stdout or 'upgraded' in stdout:
+            if "newly installed" in stdout or "upgraded" in stdout:
                 result.changes.append("Upgraded system packages")
 
     # apt autoremove
     if autoremove:
         report("Cleaning up...")
-        run_command(['apt', 'autoremove', '-y'], sudo=True)
+        run_command(["apt", "autoremove", "-y"], sudo=True)
         messages.append("Cleaned up")
 
     result.message = "; ".join(messages) if messages else "Update completed"
@@ -167,11 +156,11 @@ def install_package(package: str, sudo: bool = True) -> Tuple[bool, str]:
         Tuple of (success, message)
     """
     # Check if already installed
-    ret, _, _ = run_command(['dpkg', '-l', package], capture=True)
+    ret, _, _ = run_command(["dpkg", "-l", package], capture=True)
     if ret == 0:
         return True, f"{package} already installed"
 
-    ret, _, stderr = run_command(['apt', 'install', '-y', package], sudo=sudo)
+    ret, _, stderr = run_command(["apt", "install", "-y", package], sudo=sudo)
     if ret == 0:
         return True, f"Installed {package}"
     else:
@@ -189,7 +178,7 @@ def check_required_packages(packages: List[str]) -> List[str]:
     """
     missing = []
     for pkg in packages:
-        ret, _, _ = run_command(['dpkg', '-s', pkg], capture=True)
+        ret, _, _ = run_command(["dpkg", "-s", pkg], capture=True)
         if ret != 0:
             missing.append(pkg)
     return missing
@@ -198,6 +187,7 @@ def check_required_packages(packages: List[str]) -> List[str]:
 # =============================================================================
 # Git-based Updates
 # =============================================================================
+
 
 def find_meshing_around() -> Optional[Path]:
     """Find the meshing-around installation directory."""
@@ -217,13 +207,13 @@ def find_meshing_around() -> Optional[Path]:
     # Try to find with locate
     try:
         result = subprocess.run(
-            ['find', str(Path.home()), '-name', 'mesh_bot.py', '-type', 'f', '-maxdepth', '4'],
+            ["find", str(Path.home()), "-name", "mesh_bot.py", "-type", "f", "-maxdepth", "4"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
-            bot_path = Path(result.stdout.strip().split('\n')[0]).parent
+            bot_path = Path(result.stdout.strip().split("\n")[0]).parent
             return bot_path
     except (subprocess.TimeoutExpired, subprocess.SubprocessError):
         pass
@@ -233,10 +223,7 @@ def find_meshing_around() -> Optional[Path]:
 
 def get_git_remote_url(repo_path: Path, remote: str = "origin") -> Optional[str]:
     """Get the URL of a git remote."""
-    ret, stdout, _ = run_command(
-        ['git', 'remote', 'get-url', remote],
-        cwd=repo_path
-    )
+    ret, stdout, _ = run_command(["git", "remote", "get-url", remote], cwd=repo_path)
     if ret == 0:
         return stdout.strip()
     return None
@@ -244,10 +231,7 @@ def get_git_remote_url(repo_path: Path, remote: str = "origin") -> Optional[str]
 
 def get_git_current_branch(repo_path: Path) -> Optional[str]:
     """Get the current git branch."""
-    ret, stdout, _ = run_command(
-        ['git', 'branch', '--show-current'],
-        cwd=repo_path
-    )
+    ret, stdout, _ = run_command(["git", "branch", "--show-current"], cwd=repo_path)
     if ret == 0:
         return stdout.strip()
     return None
@@ -255,10 +239,10 @@ def get_git_current_branch(repo_path: Path) -> Optional[str]:
 
 def get_git_commit_hash(repo_path: Path, short: bool = True) -> Optional[str]:
     """Get the current commit hash."""
-    cmd = ['git', 'rev-parse']
+    cmd = ["git", "rev-parse"]
     if short:
-        cmd.append('--short')
-    cmd.append('HEAD')
+        cmd.append("--short")
+    cmd.append("HEAD")
 
     ret, stdout, _ = run_command(cmd, cwd=repo_path)
     if ret == 0:
@@ -266,11 +250,7 @@ def get_git_commit_hash(repo_path: Path, short: bool = True) -> Optional[str]:
     return None
 
 
-def check_for_updates(
-    repo_path: Path,
-    remote: str = "origin",
-    branch: str = "main"
-) -> Tuple[bool, str, int]:
+def check_for_updates(repo_path: Path, remote: str = "origin", branch: str = "main") -> Tuple[bool, str, int]:
     """Check if a git repository has updates available.
 
     Args:
@@ -282,18 +262,12 @@ def check_for_updates(
         Tuple of (has_updates, message, commits_behind)
     """
     # Fetch latest
-    ret, _, stderr = run_command(
-        ['git', 'fetch', remote, branch],
-        cwd=repo_path
-    )
+    ret, _, stderr = run_command(["git", "fetch", remote, branch], cwd=repo_path)
     if ret != 0:
         return False, f"Failed to fetch: {stderr[:50]}", 0
 
     # Count commits behind
-    ret, stdout, _ = run_command(
-        ['git', 'rev-list', '--count', f'HEAD..{remote}/{branch}'],
-        cwd=repo_path
-    )
+    ret, stdout, _ = run_command(["git", "rev-list", "--count", f"HEAD..{remote}/{branch}"], cwd=repo_path)
     if ret == 0:
         commits_behind = int(stdout.strip())
         if commits_behind > 0:
@@ -304,12 +278,7 @@ def check_for_updates(
     return False, "Could not determine update status", 0
 
 
-def git_pull(
-    repo_path: Path,
-    remote: str = "origin",
-    branch: str = "main",
-    stash_changes: bool = True
-) -> UpdateResult:
+def git_pull(repo_path: Path, remote: str = "origin", branch: str = "main", stash_changes: bool = True) -> UpdateResult:
     """Pull latest changes from git remote.
 
     Args:
@@ -324,34 +293,28 @@ def git_pull(
     result = UpdateResult(success=True, message="")
 
     # Check for uncommitted changes
-    ret, stdout, _ = run_command(['git', 'status', '--porcelain'], cwd=repo_path)
+    ret, stdout, _ = run_command(["git", "status", "--porcelain"], cwd=repo_path)
     has_changes = bool(stdout.strip())
 
     if has_changes and stash_changes:
-        ret, _, stderr = run_command(['git', 'stash'], cwd=repo_path)
+        ret, _, stderr = run_command(["git", "stash"], cwd=repo_path)
         if ret != 0:
             result.errors.append(f"Failed to stash changes: {stderr[:50]}")
 
     # Pull
-    ret, stdout, stderr = run_command(
-        ['git', 'pull', remote, branch],
-        cwd=repo_path
-    )
+    ret, stdout, stderr = run_command(["git", "pull", remote, branch], cwd=repo_path)
 
     if ret != 0:
         # Try other common branch names
-        for alt_branch in ['master', 'develop']:
+        for alt_branch in ["master", "develop"]:
             if alt_branch != branch:
-                ret, stdout, stderr = run_command(
-                    ['git', 'pull', remote, alt_branch],
-                    cwd=repo_path
-                )
+                ret, stdout, stderr = run_command(["git", "pull", remote, alt_branch], cwd=repo_path)
                 if ret == 0:
                     branch = alt_branch
                     break
 
     if ret == 0:
-        if 'Already up to date' in stdout:
+        if "Already up to date" in stdout:
             result.message = "Already up to date"
         else:
             result.message = f"Updated from {remote}/{branch}"
@@ -364,14 +327,13 @@ def git_pull(
 
     # Restore stashed changes
     if has_changes and stash_changes:
-        run_command(['git', 'stash', 'pop'], cwd=repo_path)
+        run_command(["git", "stash", "pop"], cwd=repo_path)
 
     return result
 
 
 def update_upstream(
-    meshing_around_path: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str], None]] = None
+    meshing_around_path: Optional[Path] = None, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
     """Update the upstream meshing-around repository.
 
@@ -382,6 +344,7 @@ def update_upstream(
     Returns:
         UpdateResult with details
     """
+
     def report(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -391,9 +354,7 @@ def update_upstream(
 
     if meshing_around_path is None:
         return UpdateResult(
-            success=False,
-            message="meshing-around not found",
-            errors=["Could not locate meshing-around installation"]
+            success=False, message="meshing-around not found", errors=["Could not locate meshing-around installation"]
         )
 
     report(f"Updating meshing-around at {meshing_around_path}...")
@@ -401,8 +362,7 @@ def update_upstream(
 
 
 def update_meshforge(
-    meshforge_path: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str], None]] = None
+    meshforge_path: Optional[Path] = None, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
     """Update the MeshForge repository.
 
@@ -413,6 +373,7 @@ def update_meshforge(
     Returns:
         UpdateResult with details
     """
+
     def report(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -428,16 +389,14 @@ def update_meshforge(
 # Auto-Update Scheduler
 # =============================================================================
 
+
 def get_last_update_check(config_path: Path) -> Optional[datetime]:
     """Get the timestamp of the last update check from config."""
     # This would read from config - placeholder for now
     return None
 
 
-def should_check_updates(
-    schedule: str,
-    last_check: Optional[datetime] = None
-) -> bool:
+def should_check_updates(schedule: str, last_check: Optional[datetime] = None) -> bool:
     """Determine if updates should be checked based on schedule.
 
     Args:
@@ -467,7 +426,7 @@ def perform_scheduled_update_check(
     check_meshforge: bool = True,
     check_upstream: bool = True,
     auto_apply: bool = False,
-    progress_callback: Optional[Callable[[str], None]] = None
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> List[UpdateResult]:
     """Perform scheduled update checks for all configured repositories.
 
@@ -489,10 +448,7 @@ def perform_scheduled_update_check(
             if auto_apply:
                 result = update_meshforge(meshforge_path, progress_callback)
             else:
-                result = UpdateResult(
-                    success=True,
-                    message=f"MeshForge update available: {msg}"
-                )
+                result = UpdateResult(success=True, message=f"MeshForge update available: {msg}")
             results.append(result)
 
     if check_upstream:
@@ -503,10 +459,7 @@ def perform_scheduled_update_check(
                 if auto_apply:
                     result = update_upstream(upstream_path, progress_callback)
                 else:
-                    result = UpdateResult(
-                        success=True,
-                        message=f"Upstream update available: {msg}"
-                    )
+                    result = UpdateResult(success=True, message=f"Upstream update available: {msg}")
                 results.append(result)
 
     return results
@@ -516,10 +469,9 @@ def perform_scheduled_update_check(
 # Python Dependencies
 # =============================================================================
 
+
 def install_python_dependencies(
-    requirements_file: Path,
-    venv_path: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str], None]] = None
+    requirements_file: Path, venv_path: Optional[Path] = None, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
     """Install Python dependencies from requirements.txt.
 
@@ -531,6 +483,7 @@ def install_python_dependencies(
     Returns:
         UpdateResult with details
     """
+
     def report(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -538,16 +491,13 @@ def install_python_dependencies(
     result = UpdateResult(success=True, message="")
 
     if not requirements_file.exists():
-        return UpdateResult(
-            success=True,
-            message="No requirements.txt found"
-        )
+        return UpdateResult(success=True, message="No requirements.txt found")
 
     pip_cmd = get_pip_command(venv_path)
     extra_flags = get_pip_install_flags()
 
     report("Installing Python dependencies...")
-    install_cmd = pip_cmd + ['install'] + extra_flags + ['-r', str(requirements_file)]
+    install_cmd = pip_cmd + ["install"] + extra_flags + ["-r", str(requirements_file)]
 
     ret, stdout, stderr = run_command(install_cmd, timeout=300)
 
@@ -555,14 +505,11 @@ def install_python_dependencies(
         result.errors.append(f"pip install failed: {stderr[:100]}")
 
         # Try installing core packages individually
-        core_packages = [
-            'meshtastic', 'PyPubSub', 'requests', 'paho-mqtt',
-            'rich', 'fastapi', 'uvicorn'
-        ]
+        core_packages = ["meshtastic", "PyPubSub", "requests", "paho-mqtt", "rich", "fastapi", "uvicorn"]
 
         report("Trying individual package installation...")
         for pkg in core_packages:
-            install_cmd = pip_cmd + ['install'] + extra_flags + [pkg]
+            install_cmd = pip_cmd + ["install"] + extra_flags + [pkg]
             ret, _, pkg_stderr = run_command(install_cmd, timeout=60)
             if ret == 0:
                 result.changes.append(f"Installed {pkg}")
@@ -581,13 +528,14 @@ def install_python_dependencies(
 # Systemd Service Management
 # =============================================================================
 
+
 def create_systemd_service(
     name: str,
     exec_start: str,
     working_dir: Path,
     user: Optional[str] = None,
     description: str = "MeshForge Service",
-    venv_path: Optional[Path] = None
+    venv_path: Optional[Path] = None,
 ) -> Tuple[bool, str]:
     """Create a systemd service file.
 
@@ -603,7 +551,7 @@ def create_systemd_service(
         Tuple of (success, message)
     """
     if user is None:
-        user = os.environ.get('USER', os.environ.get('LOGNAME', 'pi'))
+        user = os.environ.get("USER", os.environ.get("LOGNAME", "pi"))
 
     venv_env = f"Environment=VIRTUAL_ENV={venv_path}" if venv_path else ""
 
@@ -629,23 +577,20 @@ WantedBy=multi-user.target
 
     try:
         # Write to temp file first
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.service', delete=False) as tf:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".service", delete=False) as tf:
             tf.write(service_content)
             temp_path = Path(tf.name)
 
         # Copy to systemd directory
-        ret, _, stderr = run_command(
-            ['cp', str(temp_path), str(service_path)],
-            sudo=True
-        )
+        ret, _, stderr = run_command(["cp", str(temp_path), str(service_path)], sudo=True)
         if ret != 0:
             return False, f"Failed to copy service file: {stderr[:50]}"
 
         # Set permissions
-        run_command(['chmod', '644', str(service_path)], sudo=True)
+        run_command(["chmod", "644", str(service_path)], sudo=True)
 
         # Reload systemd
-        ret, _, stderr = run_command(['systemctl', 'daemon-reload'], sudo=True)
+        ret, _, stderr = run_command(["systemctl", "daemon-reload"], sudo=True)
         if ret != 0:
             return False, f"Failed to reload systemd: {stderr[:50]}"
 
@@ -655,7 +600,7 @@ WantedBy=multi-user.target
         return False, f"Failed to create service: {e}"
     finally:
         # Cleanup temp file
-        if 'temp_path' in dir() and temp_path.exists():
+        if "temp_path" in dir() and temp_path.exists():
             temp_path.unlink()
 
 
@@ -669,16 +614,13 @@ def manage_service(name: str, action: str) -> Tuple[bool, str]:
     Returns:
         Tuple of (success, message/status)
     """
-    valid_actions = ['start', 'stop', 'restart', 'enable', 'disable', 'status']
+    valid_actions = ["start", "stop", "restart", "enable", "disable", "status"]
     if action not in valid_actions:
         return False, f"Invalid action. Use: {', '.join(valid_actions)}"
 
-    ret, stdout, stderr = run_command(
-        ['systemctl', action, name],
-        sudo=True
-    )
+    ret, stdout, stderr = run_command(["systemctl", action, name], sudo=True)
 
-    if action == 'status':
+    if action == "status":
         # Status returns non-zero for stopped services
         return True, stdout or stderr
     elif ret == 0:
@@ -696,11 +638,8 @@ def check_service_status(name: str) -> Tuple[bool, str]:
     Returns:
         Tuple of (is_running, status_message)
     """
-    ret, stdout, _ = run_command(
-        ['systemctl', 'is-active', name],
-        sudo=False
-    )
-    is_running = stdout.strip() == 'active'
+    ret, stdout, _ = run_command(["systemctl", "is-active", name], sudo=False)
+    is_running = stdout.strip() == "active"
     return is_running, stdout.strip()
 
 
@@ -708,9 +647,9 @@ def check_service_status(name: str) -> Tuple[bool, str]:
 # Clone/Install meshing-around
 # =============================================================================
 
+
 def clone_meshing_around(
-    install_path: Optional[Path] = None,
-    progress_callback: Optional[Callable[[str], None]] = None
+    install_path: Optional[Path] = None, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
     """Clone the meshing-around repository.
 
@@ -721,6 +660,7 @@ def clone_meshing_around(
     Returns:
         UpdateResult with details
     """
+
     def report(msg: str):
         if progress_callback:
             progress_callback(msg)
@@ -732,24 +672,19 @@ def clone_meshing_around(
 
     if install_path.exists():
         if (install_path / "mesh_bot.py").exists():
-            return UpdateResult(
-                success=True,
-                message=f"meshing-around already installed at {install_path}"
-            )
+            return UpdateResult(success=True, message=f"meshing-around already installed at {install_path}")
         else:
             return UpdateResult(
                 success=False,
                 message=f"Directory exists but doesn't contain meshing-around: {install_path}",
-                errors=["Path exists but is not meshing-around"]
+                errors=["Path exists but is not meshing-around"],
             )
 
     report(f"Cloning meshing-around to {install_path}...")
 
-    ret, stdout, stderr = run_command([
-        'git', 'clone',
-        'https://github.com/SpudGunMan/meshing-around.git',
-        str(install_path)
-    ])
+    ret, stdout, stderr = run_command(
+        ["git", "clone", "https://github.com/SpudGunMan/meshing-around.git", str(install_path)]
+    )
 
     if ret == 0:
         result.message = f"Cloned meshing-around to {install_path}"

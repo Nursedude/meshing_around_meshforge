@@ -163,9 +163,9 @@ async function loadTopology() {
                 <tr>
                     <td>${escapeHtml(route.destination_id)}</td>
                     <td>${route.hop_count}</td>
-                    <td>${(route.snr_avg || 0).toFixed(1)} dB</td>
+                    <td>${(route.avg_snr || 0).toFixed(1)} dB</td>
                     <td>${route.hops ? route.hops.map(h => escapeHtml(h.node_id || '')).join(' → ') : 'Direct'}</td>
-                    <td>${route.last_update ? new Date(route.last_update).toLocaleTimeString() : '-'}</td>
+                    <td>${route.last_used ? new Date(route.last_used).toLocaleTimeString() : '-'}</td>
                 </tr>
             `).join('');
         } else {

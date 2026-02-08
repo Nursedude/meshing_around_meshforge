@@ -10,18 +10,19 @@ Provides detection logic for various alert types including:
 import math
 import threading
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Callable, Tuple
-from dataclasses import dataclass, field
 from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Dict, List, Optional
 
-from .models import Alert, AlertType, Node, Message, Position
 from .config import Config
+from .models import Alert, AlertType, Message, Node, Position
 
 
 @dataclass
 class ProximityZone:
     """Defines a geographic zone for proximity alerts."""
+
     name: str
     latitude: float
     longitude: float
@@ -33,6 +34,7 @@ class ProximityZone:
 @dataclass
 class AlertDetectorConfig:
     """Configuration for alert detection."""
+
     # Disconnect detection
     disconnect_enabled: bool = True
     disconnect_timeout_seconds: int = 600  # 10 minutes
@@ -114,8 +116,7 @@ class AlertDetector:
         delta_phi = math.radians(lat2 - lat1)
         delta_lambda = math.radians(lon2 - lon1)
 
-        a = (math.sin(delta_phi / 2) ** 2 +
-             math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2)
+        a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
         return R * c
@@ -150,9 +151,7 @@ class AlertDetector:
 
             # Clean old entries outside the time window
             cutoff = ts - timedelta(seconds=self.detector_config.noisy_node_period_seconds)
-            self._message_counts[node_id] = [
-                t for t in self._message_counts[node_id] if t > cutoff
-            ]
+            self._message_counts[node_id] = [t for t in self._message_counts[node_id] if t > cutoff]
 
             # Check threshold
             count = len(self._message_counts[node_id])
@@ -169,13 +168,10 @@ class AlertDetector:
                     alert_type=AlertType.NOISY_NODE,
                     title="Noisy Node Detected",
                     message=f"Node {node_id[-6:]} sent {count} messages in "
-                            f"{self.detector_config.noisy_node_period_seconds}s",
+                    f"{self.detector_config.noisy_node_period_seconds}s",
                     severity=2,
                     source_node=node_id,
-                    metadata={
-                        "message_count": count,
-                        "period_seconds": self.detector_config.noisy_node_period_seconds
-                    }
+                    metadata={"message_count": count, "period_seconds": self.detector_config.noisy_node_period_seconds},
                 )
                 self._emit_alert(alert)
                 return alert
@@ -217,8 +213,8 @@ class AlertDetector:
                         source_node=node_id,
                         metadata={
                             "last_seen": last_seen.isoformat(),
-                            "timeout_seconds": self.detector_config.disconnect_timeout_seconds
-                        }
+                            "timeout_seconds": self.detector_config.disconnect_timeout_seconds,
+                        },
                     )
                     alerts.append(alert)
                     self._emit_alert(alert)
@@ -253,10 +249,7 @@ class AlertDetector:
 
         with self._lock:
             for zone in self.detector_config.proximity_zones:
-                distance = self.haversine_distance(
-                    position.latitude, position.longitude,
-                    zone.latitude, zone.longitude
-                )
+                distance = self.haversine_distance(position.latitude, position.longitude, zone.latitude, zone.longitude)
 
                 in_zone = distance <= zone.radius_meters
                 was_in_zone = self._node_in_zone[node_id].get(zone.name, False)
@@ -270,15 +263,10 @@ class AlertDetector:
                         id=str(uuid.uuid4()),
                         alert_type=AlertType.PROXIMITY,
                         title=f"Entered Zone: {zone.name}",
-                        message=f"Node {node_id[-6:]} entered {zone.name} "
-                                f"({distance:.0f}m from center)",
+                        message=f"Node {node_id[-6:]} entered {zone.name} " f"({distance:.0f}m from center)",
                         severity=2,
                         source_node=node_id,
-                        metadata={
-                            "zone_name": zone.name,
-                            "distance_meters": distance,
-                            "event": "enter"
-                        }
+                        metadata={"zone_name": zone.name, "distance_meters": distance, "event": "enter"},
                     )
                     alerts.append(alert)
                     self._emit_alert(alert)
@@ -291,11 +279,7 @@ class AlertDetector:
                         message=f"Node {node_id[-6:]} left {zone.name}",
                         severity=1,
                         source_node=node_id,
-                        metadata={
-                            "zone_name": zone.name,
-                            "distance_meters": distance,
-                            "event": "exit"
-                        }
+                        metadata={"zone_name": zone.name, "distance_meters": distance, "event": "exit"},
                     )
                     alerts.append(alert)
                     self._emit_alert(alert)
@@ -326,10 +310,7 @@ class AlertDetector:
                 message=f"Node {node_id[-6:]} has low SNR: {snr:.1f}dB",
                 severity=1,
                 source_node=node_id,
-                metadata={
-                    "snr": snr,
-                    "threshold": self.detector_config.snr_threshold
-                }
+                metadata={"snr": snr, "threshold": self.detector_config.snr_threshold},
             )
             self._emit_alert(alert)
             return alert

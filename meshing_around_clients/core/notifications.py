@@ -9,24 +9,24 @@ requires valid credentials to be configured in the config file.
 import logging
 import smtplib
 import threading
-import urllib.request
 import urllib.parse
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Callable, Any
+import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from enum import Enum
+from typing import Any, Dict, List, Optional
 
-from .models import Alert
 from .config import Config
-
+from .models import Alert
 
 logger = logging.getLogger(__name__)
 
 
 class NotificationType(Enum):
     """Types of notifications."""
+
     EMAIL = "email"
     SMS = "sms"
     WEBHOOK = "webhook"
@@ -36,6 +36,7 @@ class NotificationType(Enum):
 @dataclass
 class EmailConfig:
     """Email notification configuration."""
+
     enabled: bool = False
     smtp_server: str = ""
     smtp_port: int = 587
@@ -50,6 +51,7 @@ class EmailConfig:
 @dataclass
 class SMSConfig:
     """SMS notification configuration via gateway."""
+
     enabled: bool = False
     gateway_type: str = "email"  # email, twilio, http
     # Email-to-SMS gateway settings
@@ -67,6 +69,7 @@ class SMSConfig:
 @dataclass
 class NotificationConfig:
     """Overall notification configuration."""
+
     email: EmailConfig = field(default_factory=EmailConfig)
     sms: SMSConfig = field(default_factory=SMSConfig)
     # Rate limiting
@@ -167,8 +170,9 @@ class NotificationManager:
         if not email_config.enabled:
             return False
 
-        if not all([email_config.smtp_server, email_config.username,
-                    email_config.from_address, email_config.to_addresses]):
+        if not all(
+            [email_config.smtp_server, email_config.username, email_config.from_address, email_config.to_addresses]
+        ):
             logger.warning("Email notification not configured properly")
             return False
 
@@ -178,12 +182,12 @@ class NotificationManager:
         try:
             # Create message
             msg = MIMEMultipart()
-            msg['From'] = email_config.from_address
-            msg['To'] = ", ".join(email_config.to_addresses)
-            msg['Subject'] = f"{email_config.subject_prefix} {alert.title}"
+            msg["From"] = email_config.from_address
+            msg["To"] = ", ".join(email_config.to_addresses)
+            msg["Subject"] = f"{email_config.subject_prefix} {alert.title}"
 
             body = self._format_email_body(alert)
-            msg.attach(MIMEText(body, 'plain'))
+            msg.attach(MIMEText(body, "plain"))
 
             # Send email
             with smtplib.SMTP(email_config.smtp_server, email_config.smtp_port) as server:
@@ -191,11 +195,7 @@ class NotificationManager:
                     server.starttls()
                 if email_config.password:
                     server.login(email_config.username, email_config.password)
-                server.sendmail(
-                    email_config.from_address,
-                    email_config.to_addresses,
-                    msg.as_string()
-                )
+                server.sendmail(email_config.from_address, email_config.to_addresses, msg.as_string())
 
             self._record_notification(alert)
             logger.info("Email notification sent for alert: %s", alert.title)
@@ -283,14 +283,14 @@ Configure notifications in mesh_client.ini to change these settings.
         success = False
         for phone in sms_config.phone_numbers:
             # Clean phone number (remove non-digits)
-            clean_phone = ''.join(c for c in phone if c.isdigit())
+            clean_phone = "".join(c for c in phone if c.isdigit())
             sms_address = f"{clean_phone}@{sms_config.carrier_gateway}"
 
             try:
                 msg = MIMEText(sms_text)
-                msg['From'] = email_config.from_address
-                msg['To'] = sms_address
-                msg['Subject'] = ""  # SMS gateways often ignore subject
+                msg["From"] = email_config.from_address
+                msg["To"] = sms_address
+                msg["Subject"] = ""  # SMS gateways often ignore subject
 
                 with smtplib.SMTP(email_config.smtp_server, email_config.smtp_port) as server:
                     if email_config.use_tls:
@@ -321,18 +321,16 @@ Configure notifications in mesh_client.ini to change these settings.
 
         success = False
         for phone in sms_config.phone_numbers:
-            clean_phone = ''.join(c for c in phone if c.isdigit())
+            clean_phone = "".join(c for c in phone if c.isdigit())
 
             try:
                 # Generic HTTP POST - adapt parameters to your gateway
-                data = urllib.parse.urlencode({
-                    'api_key': sms_config.api_key,
-                    'to': clean_phone,
-                    'message': sms_text
-                }).encode('utf-8')
+                data = urllib.parse.urlencode(
+                    {"api_key": sms_config.api_key, "to": clean_phone, "message": sms_text}
+                ).encode("utf-8")
 
                 req = urllib.request.Request(sms_config.api_url, data=data)
-                req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+                req.add_header("Content-Type", "application/x-www-form-urlencoded")
 
                 with urllib.request.urlopen(req, timeout=10) as response:
                     if response.status == 200:
@@ -352,8 +350,7 @@ Configure notifications in mesh_client.ini to change these settings.
         """Send SMS via Twilio API."""
         sms_config = self.notification_config.sms
 
-        if not all([sms_config.twilio_account_sid, sms_config.twilio_auth_token,
-                    sms_config.twilio_from_number]):
+        if not all([sms_config.twilio_account_sid, sms_config.twilio_auth_token, sms_config.twilio_from_number]):
             logger.warning("Twilio SMS not configured")
             return False
 
@@ -361,24 +358,23 @@ Configure notifications in mesh_client.ini to change these settings.
 
         success = False
         for phone in sms_config.phone_numbers:
-            clean_phone = ''.join(c for c in phone if c.isdigit())
-            if not clean_phone.startswith('+'):
-                clean_phone = '+1' + clean_phone  # Default to US
+            clean_phone = "".join(c for c in phone if c.isdigit())
+            if not clean_phone.startswith("+"):
+                clean_phone = "+1" + clean_phone  # Default to US
 
             try:
                 url = f"https://api.twilio.com/2010-04-01/Accounts/{sms_config.twilio_account_sid}/Messages.json"
-                data = urllib.parse.urlencode({
-                    'From': sms_config.twilio_from_number,
-                    'To': clean_phone,
-                    'Body': sms_text
-                }).encode('utf-8')
+                data = urllib.parse.urlencode(
+                    {"From": sms_config.twilio_from_number, "To": clean_phone, "Body": sms_text}
+                ).encode("utf-8")
 
                 # Create request with basic auth
                 req = urllib.request.Request(url, data=data)
                 credentials = f"{sms_config.twilio_account_sid}:{sms_config.twilio_auth_token}"
                 import base64
+
                 auth_header = base64.b64encode(credentials.encode()).decode()
-                req.add_header('Authorization', f'Basic {auth_header}')
+                req.add_header("Authorization", f"Basic {auth_header}")
 
                 with urllib.request.urlopen(req, timeout=10) as response:
                     if response.status in (200, 201):
@@ -432,9 +428,9 @@ Configure notifications in mesh_client.ini to change these settings.
 
         for channel in channels:
             if channel == NotificationType.EMAIL:
-                results['email'] = self.send_email(alert)
+                results["email"] = self.send_email(alert)
             elif channel == NotificationType.SMS:
-                results['sms'] = self.send_sms(alert)
+                results["sms"] = self.send_sms(alert)
 
         return results
 
@@ -446,17 +442,13 @@ Configure notifications in mesh_client.ini to change these settings.
             alert: The alert to send
             channels: List of notification types, or None for all enabled
         """
-        thread = threading.Thread(
-            target=self.notify,
-            args=(alert, channels),
-            daemon=True
-        )
+        thread = threading.Thread(target=self.notify, args=(alert, channels), daemon=True)
         thread.start()
 
     # ==================== Configuration Loading ====================
 
     @classmethod
-    def from_config_parser(cls, config: Config, parser) -> 'NotificationManager':
+    def from_config_parser(cls, config: Config, parser) -> "NotificationManager":
         """
         Create NotificationManager from ConfigParser sections.
 
@@ -467,55 +459,49 @@ Configure notifications in mesh_client.ini to change these settings.
         notification_config = NotificationConfig()
 
         # Email configuration
-        if parser.has_section('email_notifications'):
+        if parser.has_section("email_notifications"):
             notification_config.email = EmailConfig(
-                enabled=parser.getboolean('email_notifications', 'enabled', fallback=False),
-                smtp_server=parser.get('email_notifications', 'smtp_server', fallback=''),
-                smtp_port=parser.getint('email_notifications', 'smtp_port', fallback=587),
-                use_tls=parser.getboolean('email_notifications', 'use_tls', fallback=True),
-                username=parser.get('email_notifications', 'username', fallback=''),
-                password=parser.get('email_notifications', 'password', fallback=''),
-                from_address=parser.get('email_notifications', 'from_address', fallback=''),
+                enabled=parser.getboolean("email_notifications", "enabled", fallback=False),
+                smtp_server=parser.get("email_notifications", "smtp_server", fallback=""),
+                smtp_port=parser.getint("email_notifications", "smtp_port", fallback=587),
+                use_tls=parser.getboolean("email_notifications", "use_tls", fallback=True),
+                username=parser.get("email_notifications", "username", fallback=""),
+                password=parser.get("email_notifications", "password", fallback=""),
+                from_address=parser.get("email_notifications", "from_address", fallback=""),
                 to_addresses=[
                     addr.strip()
-                    for addr in parser.get('email_notifications', 'to_addresses', fallback='').split(',')
+                    for addr in parser.get("email_notifications", "to_addresses", fallback="").split(",")
                     if addr.strip()
                 ],
-                subject_prefix=parser.get('email_notifications', 'subject_prefix', fallback='[MeshForge Alert]')
+                subject_prefix=parser.get("email_notifications", "subject_prefix", fallback="[MeshForge Alert]"),
             )
 
         # SMS configuration
-        if parser.has_section('sms_notifications'):
+        if parser.has_section("sms_notifications"):
             notification_config.sms = SMSConfig(
-                enabled=parser.getboolean('sms_notifications', 'enabled', fallback=False),
-                gateway_type=parser.get('sms_notifications', 'gateway_type', fallback='email'),
-                carrier_gateway=parser.get('sms_notifications', 'carrier_gateway', fallback=''),
+                enabled=parser.getboolean("sms_notifications", "enabled", fallback=False),
+                gateway_type=parser.get("sms_notifications", "gateway_type", fallback="email"),
+                carrier_gateway=parser.get("sms_notifications", "carrier_gateway", fallback=""),
                 phone_numbers=[
                     num.strip()
-                    for num in parser.get('sms_notifications', 'phone_numbers', fallback='').split(',')
+                    for num in parser.get("sms_notifications", "phone_numbers", fallback="").split(",")
                     if num.strip()
                 ],
-                api_url=parser.get('sms_notifications', 'api_url', fallback=''),
-                api_key=parser.get('sms_notifications', 'api_key', fallback=''),
-                twilio_account_sid=parser.get('sms_notifications', 'twilio_account_sid', fallback=''),
-                twilio_auth_token=parser.get('sms_notifications', 'twilio_auth_token', fallback=''),
-                twilio_from_number=parser.get('sms_notifications', 'twilio_from_number', fallback='')
+                api_url=parser.get("sms_notifications", "api_url", fallback=""),
+                api_key=parser.get("sms_notifications", "api_key", fallback=""),
+                twilio_account_sid=parser.get("sms_notifications", "twilio_account_sid", fallback=""),
+                twilio_auth_token=parser.get("sms_notifications", "twilio_auth_token", fallback=""),
+                twilio_from_number=parser.get("sms_notifications", "twilio_from_number", fallback=""),
             )
 
         # Global notification settings
-        if parser.has_section('notifications'):
+        if parser.has_section("notifications"):
             notification_config.min_alert_interval_seconds = parser.getint(
-                'notifications', 'min_interval_seconds', fallback=60
+                "notifications", "min_interval_seconds", fallback=60
             )
-            notification_config.quiet_hours_start = parser.get(
-                'notifications', 'quiet_hours_start', fallback=None
-            )
-            notification_config.quiet_hours_end = parser.get(
-                'notifications', 'quiet_hours_end', fallback=None
-            )
-            notification_config.min_severity = parser.getint(
-                'notifications', 'min_severity', fallback=2
-            )
+            notification_config.quiet_hours_start = parser.get("notifications", "quiet_hours_start", fallback=None)
+            notification_config.quiet_hours_end = parser.get("notifications", "quiet_hours_end", fallback=None)
+            notification_config.min_severity = parser.getint("notifications", "min_severity", fallback=2)
 
         return cls(config, notification_config)
 
@@ -525,17 +511,17 @@ Configure notifications in mesh_client.ini to change these settings.
             "email": {
                 "enabled": self.notification_config.email.enabled,
                 "configured": bool(self.notification_config.email.smtp_server),
-                "recipients": len(self.notification_config.email.to_addresses)
+                "recipients": len(self.notification_config.email.to_addresses),
             },
             "sms": {
                 "enabled": self.notification_config.sms.enabled,
                 "gateway_type": self.notification_config.sms.gateway_type,
-                "recipients": len(self.notification_config.sms.phone_numbers)
+                "recipients": len(self.notification_config.sms.phone_numbers),
             },
             "quiet_hours": {
                 "active": self._is_quiet_hours(),
                 "start": self.notification_config.quiet_hours_start,
-                "end": self.notification_config.quiet_hours_end
+                "end": self.notification_config.quiet_hours_end,
             },
-            "min_severity": self.notification_config.min_severity
+            "min_severity": self.notification_config.min_severity,
         }

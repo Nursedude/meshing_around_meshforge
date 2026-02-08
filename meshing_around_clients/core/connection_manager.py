@@ -14,15 +14,15 @@ Includes connection cooldown and ConnectionBusy handling
 
 import logging
 import random
-import time
 import threading
-from enum import Enum
-from typing import Optional, Callable, Dict, List, Any, Union
-from dataclasses import dataclass, field
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
+from typing import Any, Callable, Dict, List, Optional
 
-from .models import Node, Message, Alert, MeshNetwork
 from .config import Config
+from .models import Alert, MeshNetwork, Message, Node
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ CONNECTION_COOLDOWN = 1.0  # seconds
 
 class ConnectionType(Enum):
     """Available connection types."""
+
     SERIAL = "serial"
     TCP = "tcp"
     MQTT = "mqtt"
@@ -42,12 +43,14 @@ class ConnectionType(Enum):
 
 class ConnectionBusy(Exception):
     """Raised when connection is busy and non-blocking mode requested."""
+
     pass
 
 
 @dataclass
 class ConnectionStatus:
     """Current connection status."""
+
     connected: bool = False
     connection_type: ConnectionType = ConnectionType.DEMO
     device_info: str = ""
@@ -107,7 +110,7 @@ class ConnectionManager:
     @property
     def available_interfaces(self) -> int:
         """Get number of available interfaces."""
-        if hasattr(self.config, 'interfaces'):
+        if hasattr(self.config, "interfaces"):
             return len(self.config.interfaces)
         return 1
 
@@ -121,7 +124,7 @@ class ConnectionManager:
         Returns:
             True if switch was successful
         """
-        if not hasattr(self.config, 'interfaces'):
+        if not hasattr(self.config, "interfaces"):
             return index == 0
 
         if index < 0 or index >= len(self.config.interfaces):
@@ -163,13 +166,9 @@ class ConnectionManager:
             "device_info": self._status.device_info,
             "error_message": self._status.error_message,
             "reconnect_attempts": self._status.reconnect_attempts,
-            "last_connected": (
-                self._status.last_connected.isoformat()
-                if self._status.last_connected else None
-            ),
+            "last_connected": (self._status.last_connected.isoformat() if self._status.last_connected else None),
             "last_disconnected": (
-                self._status.last_disconnected.isoformat()
-                if self._status.last_disconnected else None
+                self._status.last_disconnected.isoformat() if self._status.last_disconnected else None
             ),
             "interface_index": self._interface_index,
             "available_interfaces": self.available_interfaces,
@@ -201,7 +200,7 @@ class ConnectionManager:
 
     def _get_current_interface(self):
         """Get the current interface config."""
-        if hasattr(self.config, 'interfaces') and self.config.interfaces:
+        if hasattr(self.config, "interfaces") and self.config.interfaces:
             if self._interface_index < len(self.config.interfaces):
                 return self.config.interfaces[self._interface_index]
         return self.config.interface
@@ -219,6 +218,7 @@ class ConnectionManager:
 
         # Try to detect serial ports
         import glob
+
         serial_ports = []
         for pattern in ["/dev/ttyUSB*", "/dev/ttyACM*", "/dev/ttyAMA*"]:
             serial_ports.extend(glob.glob(pattern))
@@ -249,12 +249,7 @@ class ConnectionManager:
         self._status.connection_type = connection_type
 
         # Define fallback order
-        fallback_order = [
-            ConnectionType.SERIAL,
-            ConnectionType.TCP,
-            ConnectionType.MQTT,
-            ConnectionType.DEMO
-        ]
+        fallback_order = [ConnectionType.SERIAL, ConnectionType.TCP, ConnectionType.MQTT, ConnectionType.DEMO]
 
         # Start from requested type
         if connection_type in fallback_order:
@@ -352,7 +347,7 @@ class ConnectionManager:
     def _connect_mqtt(self) -> bool:
         """Connect via MQTT broker."""
         try:
-            from .mqtt_client import MQTTMeshtasticClient, MQTTConfig
+            from .mqtt_client import MQTTConfig, MQTTMeshtasticClient
 
             # Build MQTT config from Config object's mqtt settings
             mqtt_config = MQTTConfig.from_config(self.config)
@@ -442,10 +437,7 @@ class ConnectionManager:
             return
 
         self._running = True
-        self._reconnect_thread = threading.Thread(
-            target=self._reconnect_loop,
-            daemon=True
-        )
+        self._reconnect_thread = threading.Thread(target=self._reconnect_loop, daemon=True)
         self._reconnect_thread.start()
 
     def _reconnect_loop(self):
@@ -457,7 +449,7 @@ class ConnectionManager:
                 break
 
             # Check if still connected
-            if self._api and hasattr(self._api, 'is_connected'):
+            if self._api and hasattr(self._api, "is_connected"):
                 if not self._api.is_connected:
                     self._handle_disconnect()
 
@@ -480,15 +472,15 @@ class ConnectionManager:
 
         if self._status.reconnect_attempts <= self._max_reconnect_attempts:
             # Exponential backoff with jitter to prevent thundering herd
-            base_delay = min(
-                self._reconnect_delay * (1.5 ** (self._status.reconnect_attempts - 1)),
-                300
-            )
+            base_delay = min(self._reconnect_delay * (1.5 ** (self._status.reconnect_attempts - 1)), 300)
             # Add +/-25% jitter
             delay = base_delay * (0.75 + random.random() * 0.5)
-            logger.info("Reconnecting in %.0fs (attempt %d/%d)...",
-                        delay, self._status.reconnect_attempts,
-                        self._max_reconnect_attempts)
+            logger.info(
+                "Reconnecting in %.0fs (attempt %d/%d)...",
+                delay,
+                self._status.reconnect_attempts,
+                self._max_reconnect_attempts,
+            )
             time.sleep(delay)
 
             if not self._running:
@@ -507,8 +499,7 @@ class ConnectionManager:
             else:
                 logger.warning("Reconnection failed")
         else:
-            logger.error("Max reconnection attempts (%d) reached",
-                         self._max_reconnect_attempts)
+            logger.error("Max reconnection attempts (%d) reached", self._max_reconnect_attempts)
 
     # Forwarded API methods
 
@@ -538,7 +529,7 @@ class ConnectionManager:
 
     def acknowledge_alert(self, alert_id: str) -> bool:
         """Acknowledge an alert."""
-        if self._api and hasattr(self._api, 'acknowledge_alert'):
+        if self._api and hasattr(self._api, "acknowledge_alert"):
             return self._api.acknowledge_alert(alert_id)
         return False
 
@@ -554,10 +545,10 @@ class ConnectionManager:
             "last_connected": self._status.last_connected.isoformat() if self._status.last_connected else None,
             "interface_index": self._interface_index,
             "available_interfaces": self.available_interfaces,
-            "interface_type": iface.type if hasattr(iface, 'type') else "unknown",
+            "interface_type": iface.type if hasattr(iface, "type") else "unknown",
         }
 
-        if self._api and hasattr(self._api, 'connection_health'):
+        if self._api and hasattr(self._api, "connection_health"):
             # Get detailed health from the underlying API
             api_health = self._api.connection_health
             health.update(api_health)

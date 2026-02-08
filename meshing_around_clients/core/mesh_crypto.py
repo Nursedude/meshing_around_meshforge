@@ -12,9 +12,8 @@ import base64
 import binascii
 import hashlib
 import struct
-from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
-from datetime import datetime
+from typing import Any, Dict, Optional
 
 # Try to import cryptography library
 # Use BaseException to catch pyo3_runtime.PanicException from broken Rust backends
@@ -25,8 +24,9 @@ modes = None
 default_backend = None
 
 try:
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
     CRYPTO_AVAILABLE = True
 except BaseException:
     # Catch any exception including pyo3 panics from broken cryptography backend
@@ -34,13 +34,14 @@ except BaseException:
 
 # Try to import meshtastic protobuf definitions
 try:
-    from meshtastic.protobuf import mesh_pb2, portnums_pb2, telemetry_pb2
-    from meshtastic.protobuf import admin_pb2, channel_pb2
+    from meshtastic.protobuf import mesh_pb2, telemetry_pb2
+
     PROTOBUF_AVAILABLE = True
 except ImportError:
     try:
         # Alternative import path for older versions
-        from meshtastic import mesh_pb2, portnums_pb2, telemetry_pb2
+        from meshtastic import mesh_pb2, telemetry_pb2
+
         PROTOBUF_AVAILABLE = True
     except ImportError:
         PROTOBUF_AVAILABLE = False
@@ -63,6 +64,7 @@ CHANNEL_PRESETS = {
 @dataclass
 class DecryptedPacket:
     """Result of packet decryption."""
+
     success: bool
     portnum: int = 0
     portnum_name: str = ""
@@ -165,8 +167,8 @@ class MeshCrypto:
         - Bytes 8-11: Sender node number (little-endian uint32)
         - Bytes 12-15: Zero padding
         """
-        nonce = struct.pack('<QI', packet_id, sender)
-        nonce += b'\x00' * 4  # Pad to 16 bytes
+        nonce = struct.pack("<QI", packet_id, sender)
+        nonce += b"\x00" * 4  # Pad to 16 bytes
         return nonce
 
     def decrypt(self, encrypted_data: bytes, packet_id: int, sender: int) -> bytes:
@@ -190,11 +192,7 @@ class MeshCrypto:
 
         try:
             nonce = self._create_nonce(packet_id, sender)
-            cipher = Cipher(
-                algorithms.AES(self._derived_key),
-                modes.CTR(nonce),
-                backend=default_backend()
-            )
+            cipher = Cipher(algorithms.AES(self._derived_key), modes.CTR(nonce), backend=default_backend())
             decryptor = cipher.decryptor()
             return decryptor.update(encrypted_data) + decryptor.finalize()
 
@@ -224,11 +222,7 @@ class MeshCrypto:
 
         try:
             nonce = self._create_nonce(packet_id, sender)
-            cipher = Cipher(
-                algorithms.AES(self._derived_key),
-                modes.CTR(nonce),
-                backend=default_backend()
-            )
+            cipher = Cipher(algorithms.AES(self._derived_key), modes.CTR(nonce), backend=default_backend())
             encryptor = cipher.encryptor()
             return encryptor.update(plaintext) + encryptor.finalize()
 
@@ -301,22 +295,22 @@ class ProtobufDecoder:
             packet.ParseFromString(data)
 
             result = {
-                "from": packet.source if hasattr(packet, 'source') else getattr(packet, 'from', 0),
-                "to": packet.dest if hasattr(packet, 'dest') else getattr(packet, 'to', 0),
+                "from": packet.source if hasattr(packet, "source") else getattr(packet, "from", 0),
+                "to": packet.dest if hasattr(packet, "dest") else getattr(packet, "to", 0),
                 "id": packet.id,
                 "channel": packet.channel,
                 "hop_limit": packet.hop_limit,
                 "want_ack": packet.want_ack,
                 "rx_time": packet.rx_time if packet.rx_time else None,
-                "rx_snr": packet.rx_snr if hasattr(packet, 'rx_snr') else 0,
-                "rx_rssi": packet.rx_rssi if hasattr(packet, 'rx_rssi') else 0,
+                "rx_snr": packet.rx_snr if hasattr(packet, "rx_snr") else 0,
+                "rx_rssi": packet.rx_rssi if hasattr(packet, "rx_rssi") else 0,
             }
 
             # Check for encrypted vs decoded payload
-            if packet.HasField('encrypted'):
+            if packet.HasField("encrypted"):
                 result["encrypted"] = packet.encrypted
                 result["is_encrypted"] = True
-            elif packet.HasField('decoded'):
+            elif packet.HasField("decoded"):
                 decoded = self._decode_data_payload(packet.decoded)
                 result.update(decoded)
                 result["is_encrypted"] = False
@@ -340,7 +334,7 @@ class ProtobufDecoder:
 
         try:
             if data.portnum == 1:  # TEXT_MESSAGE_APP
-                result["text"] = data.payload.decode('utf-8')
+                result["text"] = data.payload.decode("utf-8")
                 result["type"] = "text"
 
             elif data.portnum == 3:  # POSITION_APP
@@ -390,12 +384,12 @@ class ProtobufDecoder:
                 "position": {
                     "latitude": pos.latitude_i / 1e7 if pos.latitude_i else 0,
                     "longitude": pos.longitude_i / 1e7 if pos.longitude_i else 0,
-                    "altitude": pos.altitude if hasattr(pos, 'altitude') else 0,
+                    "altitude": pos.altitude if hasattr(pos, "altitude") else 0,
                     "time": pos.time if pos.time else None,
-                    "ground_speed": pos.ground_speed if hasattr(pos, 'ground_speed') else 0,
-                    "ground_track": pos.ground_track if hasattr(pos, 'ground_track') else 0,
-                    "sats_in_view": pos.sats_in_view if hasattr(pos, 'sats_in_view') else 0,
-                    "precision_bits": pos.precision_bits if hasattr(pos, 'precision_bits') else 0,
+                    "ground_speed": pos.ground_speed if hasattr(pos, "ground_speed") else 0,
+                    "ground_track": pos.ground_track if hasattr(pos, "ground_track") else 0,
+                    "sats_in_view": pos.sats_in_view if hasattr(pos, "sats_in_view") else 0,
+                    "precision_bits": pos.precision_bits if hasattr(pos, "precision_bits") else 0,
                 }
             }
         except (ValueError, TypeError, AttributeError) as e:
@@ -418,9 +412,9 @@ class ProtobufDecoder:
                     "id": user.id,
                     "long_name": user.long_name,
                     "short_name": user.short_name,
-                    "hw_model": user.hw_model if hasattr(user, 'hw_model') else 0,
-                    "is_licensed": user.is_licensed if hasattr(user, 'is_licensed') else False,
-                    "role": user.role if hasattr(user, 'role') else 0,
+                    "hw_model": user.hw_model if hasattr(user, "hw_model") else 0,
+                    "is_licensed": user.is_licensed if hasattr(user, "is_licensed") else False,
+                    "role": user.role if hasattr(user, "role") else 0,
                 }
             }
         except (ValueError, TypeError, AttributeError) as e:
@@ -441,24 +435,24 @@ class ProtobufDecoder:
             result = {"telemetry": {"time": telemetry.time if telemetry.time else None}}
 
             # Device metrics
-            if telemetry.HasField('device_metrics'):
+            if telemetry.HasField("device_metrics"):
                 dm = telemetry.device_metrics
                 result["telemetry"]["device_metrics"] = {
-                    "battery_level": dm.battery_level if hasattr(dm, 'battery_level') else 0,
-                    "voltage": dm.voltage if hasattr(dm, 'voltage') else 0,
-                    "channel_utilization": dm.channel_utilization if hasattr(dm, 'channel_utilization') else 0,
-                    "air_util_tx": dm.air_util_tx if hasattr(dm, 'air_util_tx') else 0,
-                    "uptime_seconds": dm.uptime_seconds if hasattr(dm, 'uptime_seconds') else 0,
+                    "battery_level": dm.battery_level if hasattr(dm, "battery_level") else 0,
+                    "voltage": dm.voltage if hasattr(dm, "voltage") else 0,
+                    "channel_utilization": dm.channel_utilization if hasattr(dm, "channel_utilization") else 0,
+                    "air_util_tx": dm.air_util_tx if hasattr(dm, "air_util_tx") else 0,
+                    "uptime_seconds": dm.uptime_seconds if hasattr(dm, "uptime_seconds") else 0,
                 }
 
             # Environment metrics
-            if telemetry.HasField('environment_metrics'):
+            if telemetry.HasField("environment_metrics"):
                 em = telemetry.environment_metrics
                 result["telemetry"]["environment_metrics"] = {
-                    "temperature": em.temperature if hasattr(em, 'temperature') else 0,
-                    "relative_humidity": em.relative_humidity if hasattr(em, 'relative_humidity') else 0,
-                    "barometric_pressure": em.barometric_pressure if hasattr(em, 'barometric_pressure') else 0,
-                    "gas_resistance": em.gas_resistance if hasattr(em, 'gas_resistance') else 0,
+                    "temperature": em.temperature if hasattr(em, "temperature") else 0,
+                    "relative_humidity": em.relative_humidity if hasattr(em, "relative_humidity") else 0,
+                    "barometric_pressure": em.barometric_pressure if hasattr(em, "barometric_pressure") else 0,
+                    "gas_resistance": em.gas_resistance if hasattr(em, "gas_resistance") else 0,
                 }
 
             return result
@@ -480,10 +474,10 @@ class ProtobufDecoder:
 
             return {
                 "traceroute": {
-                    "route": list(route.route) if hasattr(route, 'route') else [],
-                    "snr_towards": list(route.snr_towards) if hasattr(route, 'snr_towards') else [],
-                    "route_back": list(route.route_back) if hasattr(route, 'route_back') else [],
-                    "snr_back": list(route.snr_back) if hasattr(route, 'snr_back') else [],
+                    "route": list(route.route) if hasattr(route, "route") else [],
+                    "snr_towards": list(route.snr_towards) if hasattr(route, "snr_towards") else [],
+                    "route_back": list(route.route_back) if hasattr(route, "route_back") else [],
+                    "snr_back": list(route.snr_back) if hasattr(route, "snr_back") else [],
                 }
             }
         except (ValueError, TypeError, AttributeError) as e:
@@ -502,18 +496,24 @@ class ProtobufDecoder:
             neighbor.ParseFromString(payload)
 
             neighbors = []
-            if hasattr(neighbor, 'neighbors'):
+            if hasattr(neighbor, "neighbors"):
                 for n in neighbor.neighbors:
-                    neighbors.append({
-                        "node_id": n.node_id if hasattr(n, 'node_id') else 0,
-                        "snr": n.snr if hasattr(n, 'snr') else 0,
-                    })
+                    neighbors.append(
+                        {
+                            "node_id": n.node_id if hasattr(n, "node_id") else 0,
+                            "snr": n.snr if hasattr(n, "snr") else 0,
+                        }
+                    )
 
             return {
                 "neighborinfo": {
-                    "node_id": neighbor.node_id if hasattr(neighbor, 'node_id') else 0,
-                    "last_sent_by_id": neighbor.last_sent_by_id if hasattr(neighbor, 'last_sent_by_id') else 0,
-                    "node_broadcast_interval_secs": neighbor.node_broadcast_interval_secs if hasattr(neighbor, 'node_broadcast_interval_secs') else 0,
+                    "node_id": neighbor.node_id if hasattr(neighbor, "node_id") else 0,
+                    "last_sent_by_id": neighbor.last_sent_by_id if hasattr(neighbor, "last_sent_by_id") else 0,
+                    "node_broadcast_interval_secs": (
+                        neighbor.node_broadcast_interval_secs
+                        if hasattr(neighbor, "node_broadcast_interval_secs")
+                        else 0
+                    ),
                     "neighbors": neighbors,
                 }
             }
@@ -534,18 +534,18 @@ class ProtobufDecoder:
 
             result = {"routing": {}}
 
-            if routing.HasField('error_reason'):
+            if routing.HasField("error_reason"):
                 result["routing"]["error_reason"] = routing.error_reason
 
-            if routing.HasField('route_request'):
+            if routing.HasField("route_request"):
                 result["routing"]["route_request"] = {
-                    "route": list(routing.route_request.route) if hasattr(routing.route_request, 'route') else [],
-                    "dest": routing.route_request.dest if hasattr(routing.route_request, 'dest') else 0,
+                    "route": list(routing.route_request.route) if hasattr(routing.route_request, "route") else [],
+                    "dest": routing.route_request.dest if hasattr(routing.route_request, "dest") else 0,
                 }
 
-            if routing.HasField('route_reply'):
+            if routing.HasField("route_reply"):
                 result["routing"]["route_reply"] = {
-                    "route": list(routing.route_reply.route) if hasattr(routing.route_reply, 'route') else [],
+                    "route": list(routing.route_reply.route) if hasattr(routing.route_reply, "route") else [],
                 }
 
             return result
@@ -574,12 +574,7 @@ class MeshPacketProcessor:
         """Set the channel encryption key."""
         return self.crypto.set_key(key)
 
-    def process_encrypted_packet(
-        self,
-        raw_data: bytes,
-        packet_id: int = 0,
-        sender: int = 0
-    ) -> DecryptedPacket:
+    def process_encrypted_packet(self, raw_data: bytes, packet_id: int = 0, sender: int = 0) -> DecryptedPacket:
         """
         Process an encrypted packet: decrypt and decode.
 
@@ -652,20 +647,20 @@ class MeshPacketProcessor:
             envelope = mesh_pb2.ServiceEnvelope()
             envelope.ParseFromString(data)
 
-            if envelope.HasField('packet'):
+            if envelope.HasField("packet"):
                 packet = envelope.packet
                 result = {
                     "packet_id": packet.id,
-                    "sender": getattr(packet, 'from', 0) or getattr(packet, 'source', 0),
-                    "destination": getattr(packet, 'to', 0) or getattr(packet, 'dest', 0),
+                    "sender": getattr(packet, "from", 0) or getattr(packet, "source", 0),
+                    "destination": getattr(packet, "to", 0) or getattr(packet, "dest", 0),
                     "channel": packet.channel,
                     "hop_limit": packet.hop_limit,
                     "want_ack": packet.want_ack,
                 }
 
-                if packet.HasField('encrypted'):
+                if packet.HasField("encrypted"):
                     result["encrypted"] = packet.encrypted
-                elif packet.HasField('decoded'):
+                elif packet.HasField("decoded"):
                     result["decoded"] = packet.decoded
 
                 return result

@@ -11,27 +11,27 @@ Features:
 - Message history and sending
 """
 
-import sys
 import asyncio
 import json
 import logging
-import uuid
+import sys
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from contextlib import asynccontextmanager
+from typing import List, Optional
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Check for required libraries - do NOT auto-install (PEP 668 compliance)
 try:
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, HTTPException, Depends
-    from fastapi.responses import HTMLResponse, JSONResponse
+    import uvicorn
+    from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+    from fastapi.responses import HTMLResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     from pydantic import BaseModel
-    import uvicorn
+
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
@@ -40,9 +40,8 @@ except ImportError:
     print("  or run: python3 mesh_client.py --install-deps")
     sys.exit(1)
 
-import hashlib
-import hmac
-import secrets
+import hashlib  # noqa: E402
+import hmac  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -51,11 +50,8 @@ WS_HEARTBEAT_INTERVAL = 30
 # WebSocket receive timeout (seconds) - should be > heartbeat interval
 WS_RECEIVE_TIMEOUT = 90
 
-from meshing_around_clients.core import (
-    Config, MeshtasticAPI, MessageHandler,
-    Node, Message, Alert, MeshNetwork
-)
-from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
+from meshing_around_clients.core import Alert, Config, MeshtasticAPI, Message, MessageHandler  # noqa: E402
+from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
 
 # Version
 VERSION = "0.5.0-beta"
@@ -110,11 +106,7 @@ class ConnectionManager:
 
     async def broadcast_update(self, update_type: str, data: dict):
         """Broadcast an update event."""
-        await self.broadcast({
-            "type": update_type,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "data": data
-        })
+        await self.broadcast({"type": update_type, "timestamp": datetime.now(timezone.utc).isoformat(), "data": data})
 
 
 class WebApplication:
@@ -172,7 +164,7 @@ class WebApplication:
             title="Meshing-Around Web Client",
             description="Web interface for Meshtastic mesh network management",
             version=VERSION,
-            lifespan=lifespan
+            lifespan=lifespan,
         )
 
         # Mount static files
@@ -216,23 +208,16 @@ class WebApplication:
         """Register API callbacks for real-time updates."""
 
         def on_message(message: Message):
-            self._schedule_async(
-                self.ws_manager.broadcast_update("message", message.to_dict())
-            )
+            self._schedule_async(self.ws_manager.broadcast_update("message", message.to_dict()))
 
         def on_alert(alert: Alert):
-            self._schedule_async(
-                self.ws_manager.broadcast_update("alert", alert.to_dict())
-            )
+            self._schedule_async(self.ws_manager.broadcast_update("alert", alert.to_dict()))
 
         def on_node_update(node_id: str, is_new: bool):
             node = self.api.network.nodes.get(node_id)
             if node:
                 self._schedule_async(
-                    self.ws_manager.broadcast_update(
-                        "node_new" if is_new else "node_update",
-                        node.to_dict()
-                    )
+                    self.ws_manager.broadcast_update("node_new" if is_new else "node_update", node.to_dict())
                 )
 
         self.api.register_callback("on_message", on_message)
@@ -252,13 +237,16 @@ class WebApplication:
         auth_header = request.headers.get("Authorization", "")
         if auth_header.startswith("Basic "):
             import base64
+
             try:
                 decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
                 username, password = decoded.split(":", 1)
                 pw_hash = hashlib.sha256(password.encode()).hexdigest()
-                if (hmac.compare_digest(username, self.config.web.username) and
-                        self.config.web.password_hash and
-                        hmac.compare_digest(pw_hash, self.config.web.password_hash)):
+                if (
+                    hmac.compare_digest(username, self.config.web.username)
+                    and self.config.web.password_hash
+                    and hmac.compare_digest(pw_hash, self.config.web.password_hash)
+                ):
                     return
             except (ValueError, UnicodeDecodeError):
                 pass
@@ -280,12 +268,7 @@ class WebApplication:
             """Main dashboard page."""
             if templates:
                 return templates.TemplateResponse(
-                    "index.html",
-                    {
-                        "request": request,
-                        "version": VERSION,
-                        "demo_mode": self.demo_mode
-                    }
+                    "index.html", {"request": request, "version": VERSION, "demo_mode": self.demo_mode}
                 )
             return HTMLResponse(self._get_embedded_html())
 
@@ -293,40 +276,28 @@ class WebApplication:
         async def nodes_page(request: Request):
             """Nodes list page."""
             if templates:
-                return templates.TemplateResponse(
-                    "nodes.html",
-                    {"request": request, "version": VERSION}
-                )
+                return templates.TemplateResponse("nodes.html", {"request": request, "version": VERSION})
             return HTMLResponse(self._get_embedded_html())
 
         @app.get("/messages", response_class=HTMLResponse)
         async def messages_page(request: Request):
             """Messages page."""
             if templates:
-                return templates.TemplateResponse(
-                    "messages.html",
-                    {"request": request, "version": VERSION}
-                )
+                return templates.TemplateResponse("messages.html", {"request": request, "version": VERSION})
             return HTMLResponse(self._get_embedded_html())
 
         @app.get("/alerts", response_class=HTMLResponse)
         async def alerts_page(request: Request):
             """Alerts page."""
             if templates:
-                return templates.TemplateResponse(
-                    "alerts.html",
-                    {"request": request, "version": VERSION}
-                )
+                return templates.TemplateResponse("alerts.html", {"request": request, "version": VERSION})
             return HTMLResponse(self._get_embedded_html())
 
         @app.get("/topology", response_class=HTMLResponse)
         async def topology_page(request: Request):
             """Topology visualization page."""
             if templates:
-                return templates.TemplateResponse(
-                    "topology.html",
-                    {"request": request, "version": VERSION}
-                )
+                return templates.TemplateResponse("topology.html", {"request": request, "version": VERSION})
             return HTMLResponse(self._get_topology_html())
 
         # ==================== API Routes ====================
@@ -343,7 +314,7 @@ class WebApplication:
                 "online_nodes": len(self.api.network.online_nodes),
                 "message_count": self.api.network.total_messages,
                 "unread_alerts": len(self.api.network.unread_alerts),
-                "demo_mode": self.demo_mode
+                "demo_mode": self.demo_mode,
             }
 
         @app.get("/api/network")
@@ -357,7 +328,7 @@ class WebApplication:
             return {
                 "nodes": [n.to_dict() for n in self.api.get_nodes()],
                 "total": len(self.api.network.nodes),
-                "online": len(self.api.network.online_nodes)
+                "online": len(self.api.network.online_nodes),
             }
 
         @app.get("/api/nodes/{node_id}")
@@ -372,19 +343,12 @@ class WebApplication:
         async def api_messages(channel: Optional[int] = None, limit: int = 100):
             """Get messages."""
             messages = self.api.get_messages(channel=channel, limit=limit)
-            return {
-                "messages": [m.to_dict() for m in messages],
-                "total": len(messages)
-            }
+            return {"messages": [m.to_dict() for m in messages], "total": len(messages)}
 
         @app.post("/api/messages/send", dependencies=[Depends(require_auth)])
         async def api_send_message(request: SendMessageRequest):
             """Send a message."""
-            success = self.api.send_message(
-                request.text,
-                request.destination,
-                request.channel
-            )
+            success = self.api.send_message(request.text, request.destination, request.channel)
             if success:
                 return {"status": "sent", "message": request.text}
             raise HTTPException(status_code=500, detail="Failed to send message")
@@ -396,7 +360,7 @@ class WebApplication:
             return {
                 "alerts": [a.to_dict() for a in alerts],
                 "total": len(alerts),
-                "unread": len(self.api.network.unread_alerts)
+                "unread": len(self.api.network.unread_alerts),
             }
 
         @app.post("/api/alerts/acknowledge", dependencies=[Depends(require_auth)])
@@ -454,18 +418,14 @@ class WebApplication:
                     edge_key = tuple(sorted([node.node_id, neighbor_id]))
                     if edge_key not in seen_edges:
                         seen_edges.add(edge_key)
-                        edges.append({
-                            "source": node.node_id,
-                            "target": neighbor_id,
-                            "type": "neighbor"
-                        })
+                        edges.append({"source": node.node_id, "target": neighbor_id, "type": "neighbor"})
 
             return {
                 "nodes": nodes_data,
                 "routes": routes_data,
                 "edges": edges,
                 "total_nodes": len(network.nodes),
-                "online_nodes": len(network.online_nodes)
+                "online_nodes": len(network.online_nodes),
             }
 
         @app.get("/api/health")
@@ -482,17 +442,14 @@ class WebApplication:
             for idx, channel in sorted(network.channels.items()):
                 channels_data.append(channel.to_dict())
 
-            return {
-                "channels": channels_data,
-                "active_count": len(network.get_active_channels())
-            }
+            return {"channels": channels_data, "active_count": len(network.get_active_channels())}
 
         @app.get("/api/routes")
         async def api_routes():
             """Get known mesh routes."""
             return {
                 "routes": [route.to_dict() for route in self.api.network.routes.values()],
-                "total": len(self.api.network.routes)
+                "total": len(self.api.network.routes),
             }
 
         @app.get("/api/nodes/{node_id}/neighbors")
@@ -505,7 +462,7 @@ class WebApplication:
                 "node_id": node_id,
                 "neighbors": node.neighbors,
                 "heard_by": node.heard_by,
-                "link_quality": node.link_quality.to_dict() if node.link_quality else None
+                "link_quality": node.link_quality.to_dict() if node.link_quality else None,
             }
 
         # ==================== WebSocket ====================
@@ -524,13 +481,16 @@ class WebApplication:
                     auth_header = websocket.headers.get("authorization", "")
                     if auth_header.startswith("Basic "):
                         import base64
+
                         try:
                             decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
                             username, password = decoded.split(":", 1)
                             pw_hash = hashlib.sha256(password.encode()).hexdigest()
-                            if (hmac.compare_digest(username, self.config.web.username) and
-                                    self.config.web.password_hash and
-                                    hmac.compare_digest(pw_hash, self.config.web.password_hash)):
+                            if (
+                                hmac.compare_digest(username, self.config.web.username)
+                                and self.config.web.password_hash
+                                and hmac.compare_digest(pw_hash, self.config.web.password_hash)
+                            ):
                                 auth_ok = True
                         except (ValueError, UnicodeDecodeError):
                             pass
@@ -543,18 +503,12 @@ class WebApplication:
             await self.ws_manager.connect(websocket)
             try:
                 # Send initial state
-                await websocket.send_json({
-                    "type": "init",
-                    "data": self.api.network.to_dict()
-                })
+                await websocket.send_json({"type": "init", "data": self.api.network.to_dict()})
 
                 while True:
                     try:
                         # Use timeout to detect dead connections
-                        data = await asyncio.wait_for(
-                            websocket.receive_text(),
-                            timeout=WS_RECEIVE_TIMEOUT
-                        )
+                        data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_RECEIVE_TIMEOUT)
                         try:
                             msg = json.loads(data)
                             await self._handle_ws_message(websocket, msg)
@@ -584,16 +538,10 @@ class WebApplication:
             dest = msg.get("destination", "^all")
             channel = msg.get("channel", 0)
             success = self.api.send_message(text, dest, channel)
-            await websocket.send_json({
-                "type": "message_status",
-                "success": success
-            })
+            await websocket.send_json({"type": "message_status", "success": success})
 
         elif msg_type == "refresh":
-            await websocket.send_json({
-                "type": "refresh",
-                "data": self.api.network.to_dict()
-            })
+            await websocket.send_json({"type": "refresh", "data": self.api.network.to_dict()})
 
     def _get_embedded_html(self) -> str:
         """Return embedded HTML when templates are not available."""
@@ -608,18 +556,33 @@ class WebApplication:
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; }
         .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        header { background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%);
+            padding: 20px; border-radius: 8px; margin-bottom: 20px;
+        }
         h1 { color: #00d4ff; font-size: 24px; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .grid {
+            display: grid; gap: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
         .card { background: #1a1a2e; border-radius: 8px; padding: 20px; border: 1px solid #2a2a4e; }
-        .card h2 { color: #00d4ff; font-size: 16px; margin-bottom: 15px; border-bottom: 1px solid #2a2a4e; padding-bottom: 10px; }
-        .stat { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #1a1a2e; }
+        .card h2 {
+            color: #00d4ff; font-size: 16px; margin-bottom: 15px;
+            border-bottom: 1px solid #2a2a4e; padding-bottom: 10px;
+        }
+        .stat {
+            display: flex; justify-content: space-between;
+            padding: 10px 0; border-bottom: 1px solid #1a1a2e;
+        }
         .stat-label { color: #888; }
         .stat-value { color: #00d4ff; font-weight: bold; }
         .status-connected { color: #00ff88; }
         .status-disconnected { color: #ff4444; }
         #messages, #nodes, #alerts { max-height: 400px; overflow-y: auto; }
-        .message, .node, .alert { padding: 10px; margin: 5px 0; background: #0a0a1a; border-radius: 4px; font-size: 14px; }
+        .message, .node, .alert {
+            padding: 10px; margin: 5px 0; background: #0a0a1a;
+            border-radius: 4px; font-size: 14px;
+        }
         .message .time { color: #666; font-size: 12px; }
         .message .sender { color: #00d4ff; }
         .alert.severity-4 { border-left: 3px solid #ff4444; }
@@ -627,8 +590,14 @@ class WebApplication:
         .alert.severity-2 { border-left: 3px solid #ffcc00; }
         .alert.severity-1 { border-left: 3px solid #00d4ff; }
         .send-form { margin-top: 15px; display: flex; gap: 10px; }
-        .send-form input { flex: 1; padding: 10px; background: #0a0a1a; border: 1px solid #2a2a4e; border-radius: 4px; color: #e0e0e0; }
-        .send-form button { padding: 10px 20px; background: #00d4ff; color: #000; border: none; border-radius: 4px; cursor: pointer; }
+        .send-form input {
+            flex: 1; padding: 10px; background: #0a0a1a;
+            border: 1px solid #2a2a4e; border-radius: 4px; color: #e0e0e0;
+        }
+        .send-form button {
+            padding: 10px 20px; background: #00d4ff; color: #000;
+            border: none; border-radius: 4px; cursor: pointer;
+        }
         .send-form button:hover { background: #00a8cc; }
     </style>
 </head>
@@ -642,11 +611,16 @@ class WebApplication:
         <div class="grid">
             <div class="card">
                 <h2>Network Status</h2>
-                <div class="stat"><span class="stat-label">Status</span><span class="stat-value" id="status">--</span></div>
-                <div class="stat"><span class="stat-label">My Node</span><span class="stat-value" id="my-node">--</span></div>
-                <div class="stat"><span class="stat-label">Nodes Online</span><span class="stat-value" id="nodes-online">--</span></div>
-                <div class="stat"><span class="stat-label">Messages</span><span class="stat-value" id="msg-count">--</span></div>
-                <div class="stat"><span class="stat-label">Unread Alerts</span><span class="stat-value" id="alert-count">--</span></div>
+                <div class="stat"><span class="stat-label">Status</span>
+                    <span class="stat-value" id="status">--</span></div>
+                <div class="stat"><span class="stat-label">My Node</span>
+                    <span class="stat-value" id="my-node">--</span></div>
+                <div class="stat"><span class="stat-label">Nodes Online</span>
+                    <span class="stat-value" id="nodes-online">--</span></div>
+                <div class="stat"><span class="stat-label">Messages</span>
+                    <span class="stat-value" id="msg-count">--</span></div>
+                <div class="stat"><span class="stat-label">Unread Alerts</span>
+                    <span class="stat-value" id="alert-count">--</span></div>
             </div>
 
             <div class="card">
@@ -715,7 +689,8 @@ class WebApplication:
         function updateDashboard(data) {
             document.getElementById('status').textContent = data.connection_status || 'unknown';
             document.getElementById('my-node').textContent = data.my_node_id || 'N/A';
-            document.getElementById('nodes-online').textContent = `${data.online_node_count || 0}/${data.total_node_count || 0}`;
+            document.getElementById('nodes-online').textContent =
+                `${data.online_node_count || 0}/${data.total_node_count || 0}`;
             document.getElementById('msg-count').textContent = data.messages?.length || 0;
             document.getElementById('alert-count').textContent = data.unread_alert_count || 0;
 
@@ -725,7 +700,8 @@ class WebApplication:
             Object.values(data.nodes || {}).slice(0, 10).forEach(node => {
                 const div = document.createElement('div');
                 div.className = 'node';
-                div.innerHTML = `<strong>${escapeHtml(node.display_name)}</strong> - ${escapeHtml(node.time_since_heard)}`;
+                div.innerHTML = `<strong>${escapeHtml(node.display_name)}</strong>`
+                    + ` - ${escapeHtml(node.time_since_heard)}`;
                 nodesDiv.appendChild(div);
             });
 
@@ -752,7 +728,10 @@ class WebApplication:
         function addMessageElement(container, msg, prepend = false) {
             const div = document.createElement('div');
             div.className = 'message';
-            div.innerHTML = `<span class="time">${escapeHtml(msg.time_formatted)}</span> <span class="sender">${escapeHtml(msg.sender_name || msg.sender_id)}</span>: ${escapeHtml(msg.text)}`;
+            div.innerHTML =
+                `<span class="time">${escapeHtml(msg.time_formatted)}</span> `
+                + `<span class="sender">${escapeHtml(msg.sender_name || msg.sender_id)}</span>`
+                + `: ${escapeHtml(msg.text)}`;
             if (prepend) {
                 container.insertBefore(div, container.firstChild);
             } else {
@@ -822,13 +801,21 @@ class WebApplication:
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; }
         .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
-        header { background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%);
+            padding: 20px; border-radius: 8px; margin-bottom: 20px;
+            display: flex; justify-content: space-between;
+            align-items: center;
+        }
         h1 { color: #00d4ff; font-size: 24px; }
         nav a { color: #00d4ff; text-decoration: none; margin-left: 20px; }
         nav a:hover { text-decoration: underline; }
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
         .card { background: #1a1a2e; border-radius: 8px; padding: 20px; border: 1px solid #2a2a4e; }
-        .card h2 { color: #00d4ff; font-size: 16px; margin-bottom: 15px; border-bottom: 1px solid #2a2a4e; padding-bottom: 10px; }
+        .card h2 {
+            color: #00d4ff; font-size: 16px; margin-bottom: 15px;
+            border-bottom: 1px solid #2a2a4e; padding-bottom: 10px;
+        }
         .health-bar { height: 20px; background: #0a0a1a; border-radius: 10px; overflow: hidden; margin: 10px 0; }
         .health-fill { height: 100%; transition: width 0.3s; }
         .health-excellent { background: linear-gradient(90deg, #00ff88, #00cc66); }
@@ -883,9 +870,18 @@ class WebApplication:
                     <div id="health-fill" class="health-fill health-good" style="width: 0%"></div>
                 </div>
                 <div id="health-stats">
-                    <div class="stat"><span class="stat-label">Online Nodes</span><span class="stat-value" id="online-nodes">-</span></div>
-                    <div class="stat"><span class="stat-label">Average SNR</span><span class="stat-value" id="avg-snr">-</span></div>
-                    <div class="stat"><span class="stat-label">Channel Utilization</span><span class="stat-value" id="channel-util">-</span></div>
+                    <div class="stat">
+                        <span class="stat-label">Online Nodes</span>
+                        <span class="stat-value" id="online-nodes">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Average SNR</span>
+                        <span class="stat-value" id="avg-snr">-</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Channel Utilization</span>
+                        <span class="stat-value" id="channel-util">-</span>
+                    </div>
                 </div>
             </div>
 
@@ -934,8 +930,11 @@ class WebApplication:
                 const health = await resp.json();
 
                 document.getElementById('health-status').innerHTML =
-                    `<span style="font-size: 24px; font-weight: bold; color: ${getStatusColor(health.status)}">${health.status.toUpperCase()}</span>
-                     <span style="color: #888; margin-left: 10px;">${health.score}%</span>`;
+                    '<span style="font-size: 24px; font-weight: bold; '
+                    + 'color: ' + getStatusColor(health.status) + '">'
+                    + health.status.toUpperCase() + '</span> '
+                    + '<span style="color: #888; margin-left: 10px;">'
+                    + health.score + '%</span>';
 
                 const fill = document.getElementById('health-fill');
                 fill.style.width = health.score + '%';
@@ -1010,7 +1009,9 @@ class WebApplication:
             if (node.neighbors && node.neighbors.length > 0) {
                 const list = node.neighbors.slice(0, 3).map(n => n.slice(-6)).join(', ');
                 const more = node.neighbors.length > 3 ? ` +${node.neighbors.length - 3}` : '';
-                neighbors = `<div style="font-size: 11px; color: #666; margin-left: 28px;">Hears: ${escapeHtml(list)}${more}</div>`;
+                neighbors = '<div style="font-size: 11px; color: #666; '
+                    + 'margin-left: 28px;">Hears: '
+                    + escapeHtml(list) + more + '</div>';
             }
             return `<div class="node">${status} ${escapeHtml(node.name)} ${quality}</div>${neighbors}`;
         }
@@ -1028,8 +1029,12 @@ class WebApplication:
                 }
 
                 data.routes.forEach(route => {
-                    const hopStyle = route.hop_count <= 1 ? 'color: #00ff88' : route.hop_count <= 3 ? 'color: #ffcc00' : 'color: #ff8844';
-                    const snrStyle = route.avg_snr > 0 ? 'color: #00ff88' : route.avg_snr > -10 ? 'color: #ffcc00' : 'color: #ff4444';
+                    const hopStyle = route.hop_count <= 1
+                        ? 'color: #00ff88' : route.hop_count <= 3
+                        ? 'color: #ffcc00' : 'color: #ff8844';
+                    const snrStyle = route.avg_snr > 0
+                        ? 'color: #00ff88' : route.avg_snr > -10
+                        ? 'color: #ffcc00' : 'color: #ff4444';
                     const via = route.hops && route.hops.length > 0 ? `via ${route.hops[0].node_id.slice(-6)}` : '-';
 
                     tbody.innerHTML += `<tr>
@@ -1134,11 +1139,7 @@ def main():
 
     if args.reload:
         uvicorn.run(
-            "meshing_around_clients.web.app:create_app",
-            host=args.host,
-            port=args.port,
-            reload=True,
-            factory=True
+            "meshing_around_clients.web.app:create_app", host=args.host, port=args.port, reload=True, factory=True
         )
     else:
         web_app.run(host=args.host, port=args.port)

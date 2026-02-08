@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-07
+**Last Updated:** 2026-02-08
 **Version:** 0.5.0-beta
 
 ---
@@ -30,7 +30,7 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 284 tests passing (14 skipped: MQTT integration)
+- **Test Status:** 295 tests passing (3 skipped: MQTT integration)
 - **Meshforge Remote:** `meshforge` → `Nursedude/meshforge` (733+ PRs, `src/` architecture)
 
 ### Code Health
@@ -38,6 +38,9 @@ python3 -m py_compile configure_bot.py
 - configure_bot.py decomposed (2307 → ~2000 lines)
 - New modular architecture with fallback support
 - Meshforge robustness patterns synced (input validation, stale cleanup, congestion thresholds)
+- **CI/CD linting passes:** black, isort, flake8 all clean
+- **configure_bot.py integration bugs fixed** (SerialPortInfo, run_command signatures)
+- **Web templates verified** (topology field names, nav link added)
 
 ### Recent P1-P2 Improvements (Completed)
 - **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
@@ -47,9 +50,9 @@ python3 -m py_compile configure_bot.py
 - **Crypto degradation** - mesh_crypto.py and mqtt_client.py handle missing crypto gracefully
 - **MQTT Integration** - Documentation/MQTT_INTEGRATION.md from MeshForge NOC
 - **CI/CD Pipeline** - GitHub Actions workflow (.github/workflows/ci.yml)
-  - Python 3.8-3.12 test matrix
+  - Python 3.9-3.12 test matrix
   - pytest with coverage
-  - flake8/black/isort linting
+  - flake8/black/isort linting (all passing, no longer masked by continue-on-error)
 
 ### Key Modules
 | Module | Purpose | Lines |
@@ -68,14 +71,14 @@ python3 -m py_compile configure_bot.py
 ### High Priority (P1) - Ready for Physical Testing
 - [ ] Hardware testing - Serial mode with real Meshtastic device
 - [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity with private channel
-- [ ] Integration testing - configure_bot.py modules vs fallback
+- [x] Integration testing - configure_bot.py modules vs fallback (fixed 2 crash bugs)
 
 ### Medium Priority (P2) - Code Complete
 - [x] Multi-interface support (up to 9 interfaces)
 - [x] Upstream config compatibility (ConfigLoader._load_upstream())
-- [ ] Web templates - verify all render correctly
+- [x] Web templates - verified, field names fixed, topology nav added
 - [x] Persistent storage - network state auto-saved
-- [ ] CI/CD - GitHub Actions workflow (tests failing, needs investigation)
+- [x] CI/CD - GitHub Actions linting fixed (black/isort/flake8 all passing)
 
 ### Low Priority (P3)
 - [ ] Email/SMS notification testing
@@ -151,6 +154,23 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ---
 
 ## Work History (Summary)
+
+### 2026-02-08
+- **Bug fixes:** 2 runtime crash bugs in configure_bot.py
+  - `get_serial_ports()` returns SerialPortInfo objects, not strings - crash on `', '.join(ports)`
+  - `run_command(desc=...)` param doesn't exist in real module - crash on git clone
+- **Web template fixes:** topology.html field names (`snr_avg`→`avg_snr`, `last_update`→`last_used`)
+- **Navigation:** Added /topology link to base.html navbar
+- **CI/CD pipeline fixed:**
+  - Ran isort + black on all 20 files
+  - Removed 49 unused imports across 11 files
+  - Fixed 4 unused variables, 1 f-string without placeholders, 22 long lines
+  - Added `noqa: E402` for intentional post-try/except imports
+  - Created pyproject.toml + .flake8 config files
+  - Removed `continue-on-error: true` and `--exit-zero` from CI workflow
+  - All 3 linters now pass cleanly and CI will fail on violations
+- 295 tests passing (3 skipped)
+- Branch: `claude/session-management-entropy-DgYug`
 
 ### 2026-02-07
 - Synced meshforge robustness patterns into core modules (3 files, +395/-54 lines)
