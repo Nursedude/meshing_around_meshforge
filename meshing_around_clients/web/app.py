@@ -300,6 +300,16 @@ class WebApplication:
                 return templates.TemplateResponse("topology.html", {"request": request, "version": VERSION})
             return HTMLResponse(self._get_topology_html())
 
+        @app.get("/map", response_class=HTMLResponse)
+        async def map_page(request: Request):
+            """Map visualization page with Leaflet.js."""
+            if templates:
+                return templates.TemplateResponse(
+                    "map.html",
+                    {"request": request, "version": VERSION, "demo_mode": self.demo_mode},
+                )
+            return HTMLResponse(self._get_map_html())
+
         # ==================== API Routes ====================
 
         @app.get("/api/status")
@@ -519,6 +529,37 @@ class WebApplication:
                     )
             congested.sort(key=lambda x: x["channel_utilization"], reverse=True)
             return {"nodes": congested, "total": len(congested)}
+
+        @app.get("/api/traceroute")
+        async def api_traceroute():
+            """Get discovered traceroute data with position info for map visualization.
+
+            Returns routes enriched with node positions so the frontend can
+            draw route lines on the map.
+            """
+            network = self.api.network
+            routes_data = []
+            for route in network.routes.values():
+                route_info = route.to_dict()
+                # Enrich hops with position data for map drawing
+                enriched_hops = []
+                for hop in route.hops:
+                    hop_info = hop.to_dict() if hasattr(hop, "to_dict") else {"node_id": hop.node_id, "snr": hop.snr}
+                    node = network.get_node(hop.node_id)
+                    if node and node.position and node.position.is_valid():
+                        hop_info["latitude"] = node.position.latitude
+                        hop_info["longitude"] = node.position.longitude
+                    enriched_hops.append(hop_info)
+                route_info["enriched_hops"] = enriched_hops
+                # Add destination position
+                dest_node = network.get_node(route.destination_id)
+                if dest_node and dest_node.position and dest_node.position.is_valid():
+                    route_info["destination_position"] = {
+                        "latitude": dest_node.position.latitude,
+                        "longitude": dest_node.position.longitude,
+                    }
+                routes_data.append(route_info)
+            return {"routes": routes_data, "total": len(routes_data)}
 
         # ==================== WebSocket ====================
 
@@ -1157,6 +1198,83 @@ class WebApplication:
             loadRoutes();
             loadChannels();
         }, 5000);
+    </script>
+</body>
+</html>
+        """
+
+    def _get_map_html(self) -> str:
+        """Return embedded HTML for map visualization when templates are unavailable."""
+        return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Map - Meshing-Around</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin="" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+        .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+        header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #0a0a1a 100%);
+            padding: 20px; border-radius: 8px; margin-bottom: 20px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        h1 { color: #00d4ff; font-size: 24px; }
+        nav a { color: #00d4ff; text-decoration: none; margin-left: 20px; }
+        nav a:hover { text-decoration: underline; }
+        #map { width: 100%; height: calc(100vh - 150px); border-radius: 8px; border: 1px solid #2a2a4e; }
+        .leaflet-popup-content-wrapper { background: #1a1a2e; color: #e0e0e0; border: 1px solid #2a2a4e; }
+        .leaflet-popup-tip { background: #1a1a2e; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Node Map</h1>
+            <nav>
+                <a href="/">Dashboard</a>
+                <a href="/nodes">Nodes</a>
+                <a href="/topology">Topology</a>
+                <a href="/map">Map</a>
+            </nav>
+        </header>
+        <div id="map"></div>
+    </div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <script>
+        function escapeHtml(t){if(!t)return'';const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
+        const map = L.map('map').setView([39.8283, -98.5795], 4);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OSM &copy; CARTO', subdomains: 'abcd', maxZoom: 19
+        }).addTo(map);
+        const mg = L.featureGroup().addTo(map);
+        async function load() {
+            try {
+                const r = await fetch('/api/geojson');
+                const gj = await r.json();
+                mg.clearLayers();
+                (gj.features || []).forEach(f => {
+                    const p = f.properties, c = f.geometry.coordinates;
+                    L.circleMarker([c[1], c[0]], {
+                        radius: p.is_online ? 8 : 5,
+                        fillColor: p.is_online ? '#00ff88' : '#ff4444',
+                        color: p.is_online ? '#00cc66' : '#cc3333',
+                        weight: 2, opacity: 0.9, fillOpacity: p.is_online ? 0.8 : 0.5
+                    }).bindPopup('<b>' + escapeHtml(p.name) + '</b><br>' + escapeHtml(p.node_id))
+                      .addTo(mg);
+                });
+                if (gj.features.length > 0 && mg.getBounds().isValid()) map.fitBounds(mg.getBounds().pad(0.15));
+            } catch(e) { console.error('Map load failed:', e); }
+        }
+        load();
+        setInterval(load, 30000);
     </script>
 </body>
 </html>

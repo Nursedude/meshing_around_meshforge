@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+
+{% block title %}Map{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin="" />
+<style>
+    #map-container {
+        position: relative;
+        width: 100%;
+        height: calc(100vh - 200px);
+        min-height: 500px;
+        border-radius: var(--radius-lg);
+        overflow: hidden;
+        border: 1px solid var(--border-color);
+    }
+
+    #map {
+        width: 100%;
+        height: 100%;
+        background: var(--bg-secondary);
+    }
+
+    .map-controls {
+        display: flex;
+        gap: var(--spacing-md);
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .map-stats {
+        display: flex;
+        gap: var(--spacing-lg);
+        font-size: 13px;
+        color: var(--text-secondary);
+    }
+
+    .map-stat-value {
+        color: var(--accent-primary);
+        font-weight: 600;
+        font-family: var(--font-mono);
+    }
+
+    /* Leaflet popup styling to match dark theme */
+    .leaflet-popup-content-wrapper {
+        background: var(--bg-card);
+        color: var(--text-primary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-lg);
+    }
+
+    .leaflet-popup-tip {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+    }
+
+    .leaflet-popup-content {
+        margin: 12px 16px;
+        font-family: var(--font-family);
+        font-size: 13px;
+        line-height: 1.5;
+    }
+
+    .leaflet-popup-close-button {
+        color: var(--text-muted) !important;
+    }
+
+    .leaflet-popup-close-button:hover {
+        color: var(--accent-primary) !important;
+    }
+
+    .popup-node-name {
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--accent-primary);
+        margin-bottom: 6px;
+    }
+
+    .popup-detail {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 2px 0;
+    }
+
+    .popup-label {
+        color: var(--text-muted);
+    }
+
+    .popup-value {
+        font-family: var(--font-mono);
+        color: var(--text-primary);
+    }
+
+    .popup-status {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: var(--radius-sm);
+        font-size: 11px;
+        font-weight: 600;
+    }
+
+    .popup-status.online {
+        background: rgba(0, 255, 136, 0.2);
+        color: var(--accent-success);
+    }
+
+    .popup-status.offline {
+        background: rgba(255, 68, 68, 0.2);
+        color: var(--accent-danger);
+    }
+
+    /* Route legend */
+    .map-legend {
+        display: flex;
+        gap: var(--spacing-lg);
+        align-items: center;
+        font-size: 12px;
+        color: var(--text-secondary);
+    }
+
+    .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .legend-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+    }
+
+    .legend-dot.online { background: var(--accent-success); }
+    .legend-dot.offline { background: var(--accent-danger); }
+
+    .legend-line {
+        width: 20px;
+        height: 3px;
+        border-radius: 2px;
+    }
+
+    .legend-line.route { background: var(--accent-info); }
+
+    /* Routes panel */
+    .routes-panel {
+        margin-top: var(--spacing-lg);
+    }
+
+    .routes-panel .panel-content {
+        max-height: 250px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Node Map</h1>
+    <div class="map-controls">
+        <div class="map-stats">
+            <span>Nodes with position: <span class="map-stat-value" id="map-node-count">0</span></span>
+            <span>Routes: <span class="map-stat-value" id="map-route-count">0</span></span>
+        </div>
+        <div class="map-legend">
+            <div class="legend-item"><div class="legend-dot online"></div> Online</div>
+            <div class="legend-item"><div class="legend-dot offline"></div> Offline</div>
+            <div class="legend-item"><div class="legend-line route"></div> Route</div>
+        </div>
+        <button class="btn btn-secondary" onclick="refreshMap()">Refresh</button>
+        <button class="btn btn-secondary" onclick="fitAllNodes()">Fit All</button>
+    </div>
+</div>
+
+<div id="map-container">
+    <div id="map"></div>
+</div>
+
+<!-- Routes Table -->
+<div class="routes-panel">
+    <div class="panel full-width">
+        <div class="panel-header">
+            <h2>Discovered Routes</h2>
+        </div>
+        <div class="panel-content">
+            <table class="data-table data-table-full">
+                <thead>
+                    <tr>
+                        <th>Destination</th>
+                        <th>Hops</th>
+                        <th>Avg SNR</th>
+                        <th>Via</th>
+                        <th>Last Updated</th>
+                    </tr>
+                </thead>
+                <tbody id="routes-body">
+                    <tr><td colspan="5" class="empty-message">Loading routes...</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""></script>
+<script>
+// Utility
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Map state
+let map = null;
+let nodeMarkers = {};
+let routeLines = [];
+let markerGroup = null;
+
+// Initialize map
+function initMap() {
+    map = L.map('map', {
+        center: [39.8283, -98.5795],  // Center of US
+        zoom: 4,
+        zoomControl: true
+    });
+
+    // Dark tile layer (CartoDB dark matter)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+        subdomains: 'abcd',
+        maxZoom: 19
+    }).addTo(map);
+
+    markerGroup = L.featureGroup().addTo(map);
+
+    // Initial load
+    refreshMap();
+
+    // Auto-refresh every 30 seconds
+    setInterval(refreshMap, 30000);
+}
+
+// Create a circular marker for a node
+function createNodeMarker(feature) {
+    const props = feature.properties;
+    const coords = feature.geometry.coordinates;
+    const isOnline = props.is_online;
+
+    const marker = L.circleMarker([coords[1], coords[0]], {
+        radius: isOnline ? 8 : 5,
+        fillColor: isOnline ? '#00ff88' : '#ff4444',
+        color: isOnline ? '#00cc66' : '#cc3333',
+        weight: 2,
+        opacity: 0.9,
+        fillOpacity: isOnline ? 0.8 : 0.5
+    });
+
+    // Build popup content
+    let popupHtml = `<div class="popup-node-name">${escapeHtml(props.name)}</div>`;
+    popupHtml += `<div class="popup-detail"><span class="popup-label">Status</span>`;
+    popupHtml += `<span class="popup-status ${isOnline ? 'online' : 'offline'}">${isOnline ? 'Online' : 'Offline'}</span></div>`;
+    popupHtml += `<div class="popup-detail"><span class="popup-label">ID</span><span class="popup-value">${escapeHtml(props.node_id)}</span></div>`;
+
+    if (props.hardware_model) {
+        popupHtml += `<div class="popup-detail"><span class="popup-label">Hardware</span><span class="popup-value">${escapeHtml(props.hardware_model)}</span></div>`;
+    }
+    if (props.altitude) {
+        popupHtml += `<div class="popup-detail"><span class="popup-label">Altitude</span><span class="popup-value">${props.altitude}m</span></div>`;
+    }
+    if (props.battery_level != null) {
+        popupHtml += `<div class="popup-detail"><span class="popup-label">Battery</span><span class="popup-value">${props.battery_level}%</span></div>`;
+    }
+    if (props.snr != null) {
+        popupHtml += `<div class="popup-detail"><span class="popup-label">SNR</span><span class="popup-value">${props.snr} dB</span></div>`;
+    }
+    if (props.channel_utilization != null) {
+        popupHtml += `<div class="popup-detail"><span class="popup-label">Ch Util</span><span class="popup-value">${props.channel_utilization.toFixed(1)}%</span></div>`;
+    }
+    if (props.last_heard) {
+        const heard = new Date(props.last_heard);
+        popupHtml += `<div class="popup-detail"><span class="popup-label">Last Heard</span><span class="popup-value">${heard.toLocaleTimeString()}</span></div>`;
+    }
+
+    marker.bindPopup(popupHtml, { maxWidth: 280 });
+
+    // Tooltip with node name
+    marker.bindTooltip(escapeHtml(props.name), {
+        permanent: false,
+        direction: 'top',
+        offset: [0, -8],
+        className: 'node-tooltip'
+    });
+
+    return marker;
+}
+
+// Draw route lines between nodes that have known routes
+function drawRoutes(routes, nodePositions) {
+    // Clear existing route lines
+    routeLines.forEach(line => map.removeLayer(line));
+    routeLines = [];
+
+    if (!routes || routes.length === 0) return;
+
+    routes.forEach(route => {
+        // Build list of node IDs in this route path
+        const pathIds = [];
+        if (route.hops) {
+            route.hops.forEach(hop => {
+                if (hop.node_id && nodePositions[hop.node_id]) {
+                    pathIds.push(hop.node_id);
+                }
+            });
+        }
+        // Add destination if it has a position
+        if (route.destination_id && nodePositions[route.destination_id]) {
+            pathIds.push(route.destination_id);
+        }
+
+        if (pathIds.length < 2) return;
+
+        // Draw polyline through the hops
+        const latlngs = pathIds.map(id => nodePositions[id]);
+        const line = L.polyline(latlngs, {
+            color: '#6699ff',
+            weight: 2,
+            opacity: 0.6,
+            dashArray: '6, 4'
+        }).addTo(map);
+
+        const hopCount = route.hop_count || pathIds.length - 1;
+        const snr = route.avg_snr != null ? route.avg_snr.toFixed(1) + ' dB' : '-';
+        line.bindPopup(
+            `<div class="popup-node-name">Route to ${escapeHtml(route.destination_id)}</div>`
+            + `<div class="popup-detail"><span class="popup-label">Hops</span><span class="popup-value">${hopCount}</span></div>`
+            + `<div class="popup-detail"><span class="popup-label">Avg SNR</span><span class="popup-value">${snr}</span></div>`
+        );
+
+        routeLines.push(line);
+    });
+}
+
+// Refresh map data
+async function refreshMap() {
+    try {
+        const [geojsonResp, routesResp] = await Promise.all([
+            fetch('/api/geojson'),
+            fetch('/api/routes')
+        ]);
+        const geojson = await geojsonResp.json();
+        const routesData = await routesResp.json();
+
+        // Clear existing markers
+        markerGroup.clearLayers();
+        nodeMarkers = {};
+
+        // Build position lookup for route drawing
+        const nodePositions = {};
+
+        // Add node markers
+        if (geojson.features) {
+            geojson.features.forEach(feature => {
+                const marker = createNodeMarker(feature);
+                marker.addTo(markerGroup);
+
+                const nodeId = feature.properties.node_id;
+                nodeMarkers[nodeId] = marker;
+
+                // Store position for route drawing [lat, lng]
+                const coords = feature.geometry.coordinates;
+                nodePositions[nodeId] = [coords[1], coords[0]];
+            });
+
+            document.getElementById('map-node-count').textContent = geojson.features.length;
+
+            // Auto-fit on first load if we have nodes
+            if (geojson.features.length > 0 && markerGroup.getBounds().isValid()) {
+                // Only auto-fit if the map is still at the default view
+                if (map.getZoom() <= 4) {
+                    map.fitBounds(markerGroup.getBounds().pad(0.15));
+                }
+            }
+        }
+
+        // Draw routes
+        const routes = routesData.routes || [];
+        drawRoutes(routes, nodePositions);
+        document.getElementById('map-route-count').textContent = routes.length;
+
+        // Update routes table
+        updateRoutesTable(routes);
+
+    } catch (e) {
+        console.error('Failed to refresh map:', e);
+    }
+}
+
+// Update routes table
+function updateRoutesTable(routes) {
+    const tbody = document.getElementById('routes-body');
+    if (!routes || routes.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-message">No routes discovered</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = routes.map(route => {
+        const via = route.hops && route.hops.length > 0
+            ? route.hops.map(h => escapeHtml(h.node_id || '')).join(' &rarr; ')
+            : 'Direct';
+        const snr = route.avg_snr != null ? route.avg_snr.toFixed(1) + ' dB' : '-';
+        const lastUsed = route.last_used
+            ? new Date(route.last_used).toLocaleTimeString()
+            : '-';
+
+        return `<tr>
+            <td><code>${escapeHtml(route.destination_id)}</code></td>
+            <td>${route.hop_count || 0}</td>
+            <td>${snr}</td>
+            <td>${via}</td>
+            <td>${lastUsed}</td>
+        </tr>`;
+    }).join('');
+}
+
+// Fit map to all nodes
+function fitAllNodes() {
+    if (markerGroup && markerGroup.getBounds().isValid()) {
+        map.fitBounds(markerGroup.getBounds().pad(0.15));
+    }
+}
+
+// Init on load
+document.addEventListener('DOMContentLoaded', initMap);
+</script>
+{% endblock %}

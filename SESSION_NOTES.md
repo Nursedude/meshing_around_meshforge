@@ -92,8 +92,8 @@ python3 -m py_compile configure_bot.py
 
 ### Low Priority (P3)
 - [ ] Email/SMS notification testing
-- [ ] Map visualization for nodes
-- [ ] Active traceroute command
+- [x] Map visualization for nodes (Leaflet.js at /map, GeoJSON markers, route lines)
+- [x] Traceroute API endpoint (/api/traceroute with enriched position data)
 
 ---
 
@@ -164,6 +164,22 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ---
 
 ## Work History (Summary)
+
+### 2026-02-08 (Map & Traceroute Session)
+- **Map Visualization** (new: map.html, web/app.py changes):
+  - Leaflet.js map page at `/map` with dark CartoDB tile layer
+  - GeoJSON markers from existing `/api/geojson` endpoint
+  - Online/offline node coloring with popups (battery, SNR, hardware, altitude)
+  - Route line visualization between nodes with known routes
+  - Auto-refresh every 30 seconds, fit-to-bounds control
+  - Embedded fallback HTML for template-less mode
+  - Nav link added to base.html
+- **Traceroute API** (`/api/traceroute` endpoint):
+  - Returns routes enriched with node positions for map drawing
+  - Hop-level lat/lon for route line visualization
+  - Destination position included when available
+- 284 tests passing (14 skipped), 0 lint errors
+- Branch: `claude/test-meshtastic-hardware-mqtt-W97ne`
 
 ### 2026-02-08 (Reliability Session)
 - **MQTT Reliability Overhaul** (mqtt_client.py, +310/-79 lines):
