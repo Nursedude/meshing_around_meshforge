@@ -6,6 +6,8 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin="" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" crossorigin="" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" crossorigin="" />
 <style>
     #map-container {
         position: relative;
@@ -113,6 +115,44 @@
         color: var(--accent-danger);
     }
 
+    /* Marker cluster dark theme overrides */
+    .marker-cluster-small {
+        background-color: rgba(0, 212, 255, 0.3);
+    }
+    .marker-cluster-small div {
+        background-color: rgba(0, 212, 255, 0.6);
+        color: #fff;
+    }
+    .marker-cluster-medium {
+        background-color: rgba(255, 204, 0, 0.3);
+    }
+    .marker-cluster-medium div {
+        background-color: rgba(255, 204, 0, 0.6);
+        color: #fff;
+    }
+    .marker-cluster-large {
+        background-color: rgba(255, 68, 68, 0.3);
+    }
+    .marker-cluster-large div {
+        background-color: rgba(255, 68, 68, 0.6);
+        color: #fff;
+    }
+    .marker-cluster div {
+        width: 30px;
+        height: 30px;
+        margin-left: 5px;
+        margin-top: 5px;
+        text-align: center;
+        border-radius: 15px;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 30px;
+    }
+    .marker-cluster {
+        background-clip: padding-box;
+        border-radius: 20px;
+    }
+
     /* Route legend */
     .map-legend {
         display: flex;
@@ -208,6 +248,8 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"
+        crossorigin=""></script>
 <script>
 // Utility
 function escapeHtml(text) {
@@ -240,7 +282,15 @@ function initMap() {
         maxZoom: 19
     }).addTo(map);
 
-    markerGroup = L.featureGroup().addTo(map);
+    // Use MarkerClusterGroup for efficient rendering of 100+ nodes
+    markerGroup = L.markerClusterGroup({
+        maxClusterRadius: 50,
+        spiderfyOnMaxZoom: true,
+        showCoverageOnHover: false,
+        zoomToBoundsOnClick: true,
+        disableClusteringAtZoom: 16,
+        chunkedLoading: true
+    }).addTo(map);
 
     // Track user interaction to avoid resetting their view
     map.on('zoomstart', () => { hasUserInteracted = true; });
