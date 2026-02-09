@@ -222,6 +222,8 @@ let map = null;
 let nodeMarkers = {};
 let routeLines = [];
 let markerGroup = null;
+let hasUserInteracted = false;
+let initialFitDone = false;
 
 // Initialize map
 function initMap() {
@@ -239,6 +241,10 @@ function initMap() {
     }).addTo(map);
 
     markerGroup = L.featureGroup().addTo(map);
+
+    // Track user interaction to avoid resetting their view
+    map.on('zoomstart', () => { hasUserInteracted = true; });
+    map.on('dragstart', () => { hasUserInteracted = true; });
 
     // Initial load
     refreshMap();
@@ -380,12 +386,10 @@ async function refreshMap() {
 
             document.getElementById('map-node-count').textContent = geojson.features.length;
 
-            // Auto-fit on first load if we have nodes
-            if (geojson.features.length > 0 && markerGroup.getBounds().isValid()) {
-                // Only auto-fit if the map is still at the default view
-                if (map.getZoom() <= 4) {
-                    map.fitBounds(markerGroup.getBounds().pad(0.15));
-                }
+            // Auto-fit only on first load, respect user interaction after that
+            if (!initialFitDone && geojson.features.length > 0 && markerGroup.getBounds().isValid()) {
+                map.fitBounds(markerGroup.getBounds().pad(0.15));
+                initialFitDone = true;
             }
         }
 

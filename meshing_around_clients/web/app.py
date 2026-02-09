@@ -335,8 +335,14 @@ class WebApplication:
         @app.get("/api/nodes")
         async def api_nodes():
             """Get all nodes."""
+            nodes = []
+            for n in self.api.get_nodes():
+                try:
+                    nodes.append(n.to_dict())
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.warning("Failed to serialize node %s: %s", getattr(n, "node_id", "?"), e)
             return {
-                "nodes": [n.to_dict() for n in self.api.get_nodes()],
+                "nodes": nodes,
                 "total": len(self.api.network.nodes),
                 "online": len(self.api.network.online_nodes),
             }
@@ -353,7 +359,13 @@ class WebApplication:
         async def api_messages(channel: Optional[int] = None, limit: int = 100):
             """Get messages."""
             messages = self.api.get_messages(channel=channel, limit=limit)
-            return {"messages": [m.to_dict() for m in messages], "total": len(messages)}
+            serialized = []
+            for m in messages:
+                try:
+                    serialized.append(m.to_dict())
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.warning("Failed to serialize message: %s", e)
+            return {"messages": serialized, "total": len(serialized)}
 
         @app.post("/api/messages/send", dependencies=[Depends(require_auth)])
         async def api_send_message(request: SendMessageRequest):
@@ -375,9 +387,15 @@ class WebApplication:
         async def api_alerts(unread_only: bool = False):
             """Get alerts."""
             alerts = self.api.get_alerts(unread_only=unread_only)
+            serialized = []
+            for a in alerts:
+                try:
+                    serialized.append(a.to_dict())
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.warning("Failed to serialize alert: %s", e)
             return {
-                "alerts": [a.to_dict() for a in alerts],
-                "total": len(alerts),
+                "alerts": serialized,
+                "total": len(serialized),
                 "unread": len(self.api.network.unread_alerts),
             }
 
@@ -426,7 +444,12 @@ class WebApplication:
                 }
                 nodes_data.append(node_info)
 
-            routes_data = [route.to_dict() for route in network.routes.values()]
+            routes_data = []
+            for route in network.routes.values():
+                try:
+                    routes_data.append(route.to_dict())
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.warning("Failed to serialize route: %s", e)
 
             # Build edges from neighbor relationships
             edges = []
@@ -465,9 +488,15 @@ class WebApplication:
         @app.get("/api/routes")
         async def api_routes():
             """Get known mesh routes."""
+            routes = []
+            for route in self.api.network.routes.values():
+                try:
+                    routes.append(route.to_dict())
+                except (AttributeError, TypeError, ValueError) as e:
+                    logger.warning("Failed to serialize route: %s", e)
             return {
-                "routes": [route.to_dict() for route in self.api.network.routes.values()],
-                "total": len(self.api.network.routes),
+                "routes": routes,
+                "total": len(routes),
             }
 
         @app.get("/api/nodes/{node_id}/neighbors")
