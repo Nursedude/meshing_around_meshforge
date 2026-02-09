@@ -8,16 +8,17 @@
     {% block head %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar">
+    <nav class="navbar" role="navigation" aria-label="Main navigation">
         <div class="nav-brand">
-            <span class="nav-logo">📡</span>
+            <span class="nav-logo" aria-hidden="true">📡</span>
             <span class="nav-title">Meshing-Around</span>
             <span class="nav-version">v{{ version }}</span>
             {% if demo_mode %}
             <span class="demo-badge">DEMO</span>
             {% endif %}
         </div>
-        <div class="nav-links">
+        <button class="nav-toggle" id="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+        <div class="nav-links" id="nav-links">
             <a href="/" class="nav-link {% if request.url.path == '/' %}active{% endif %}">Dashboard</a>
             <a href="/nodes" class="nav-link {% if request.url.path == '/nodes' %}active{% endif %}">Nodes</a>
             <a href="/messages" class="nav-link {% if request.url.path == '/messages' %}active{% endif %}">Messages</a>
@@ -26,7 +27,7 @@
             <a href="/map" class="nav-link {% if request.url.path == '/map' %}active{% endif %}">Map</a>
         </div>
         <div class="nav-status">
-            <span id="connection-indicator" class="indicator disconnected"></span>
+            <span id="connection-indicator" class="indicator disconnected" role="status" aria-label="Connection status"></span>
             <span id="connection-text">Connecting...</span>
         </div>
     </nav>

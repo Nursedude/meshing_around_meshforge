@@ -7,10 +7,43 @@
 let ws = null;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
-const RECONNECT_DELAY = 3000;
+const RECONNECT_BASE_DELAY = 1000;
+const MAX_MESSAGE_LENGTH = 228;
 
-// Initialize WebSocket connection
+// Pong tracking for dead connection detection
+let lastPongTime = 0;
+let heartbeatInterval = null;
+
+// Toast notification system
+function showToast(message, type = 'info', duration = 3000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        document.body.appendChild(container);
+    }
+
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+
+    // Trigger reflow for animation
+    toast.offsetHeight;
+    toast.classList.add('toast-visible');
+
+    setTimeout(() => {
+        toast.classList.remove('toast-visible');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// Initialize WebSocket connection with exponential backoff
 function initWebSocket() {
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return; // Already connected or connecting
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws`;
 
@@ -19,18 +52,34 @@ function initWebSocket() {
     ws.onopen = () => {
         console.log('WebSocket connected');
         reconnectAttempts = 0;
+        lastPongTime = Date.now();
         updateConnectionStatus(true);
+        showToast('Connected to mesh network', 'success');
     };
 
     ws.onclose = () => {
         console.log('WebSocket disconnected');
         updateConnectionStatus(false);
 
-        // Attempt to reconnect
+        // Exponential backoff reconnect
         if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
             reconnectAttempts++;
-            console.log(`Reconnecting... attempt ${reconnectAttempts}`);
-            setTimeout(initWebSocket, RECONNECT_DELAY);
+            const delay = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts - 1), 30000);
+            console.log(`Reconnecting in ${delay}ms... attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+            setTimeout(initWebSocket, delay);
+        } else {
+            showToast('Connection lost. Click to retry.', 'error', 10000);
+            // Allow manual reconnect by clicking the connection indicator
+            const indicator = document.getElementById('connection-indicator');
+            if (indicator) {
+                indicator.style.cursor = 'pointer';
+                indicator.onclick = () => {
+                    reconnectAttempts = 0;
+                    initWebSocket();
+                    indicator.onclick = null;
+                    indicator.style.cursor = '';
+                };
+            }
         }
     };
 
@@ -66,10 +115,22 @@ function handleWebSocketMessage(msg) {
             updateNodeData(msg.data, msg.type === 'node_new');
             break;
         case 'pong':
-            // Heartbeat response
+            lastPongTime = Date.now();
+            break;
+        case 'message_status':
+            handleMessageStatus(msg);
             break;
         default:
             console.log('Unknown message type:', msg.type);
+    }
+}
+
+// Handle send message status response
+function handleMessageStatus(msg) {
+    if (msg.success) {
+        showToast('Message sent', 'success', 2000);
+    } else {
+        showToast(msg.error || 'Failed to send message', 'error');
     }
 }
 
@@ -129,7 +190,7 @@ function updateElement(id, value) {
     }
 }
 
-// Update nodes table
+// Update nodes table (dashboard - top 10)
 function updateNodesTable(nodes) {
     const tbody = document.getElementById('nodes-body');
     if (!tbody) return;
@@ -139,8 +200,9 @@ function updateNodesTable(nodes) {
         return;
     }
 
-    // Sort by last heard
+    // Sort: online first, then by last heard
     nodes.sort((a, b) => {
+        if (a.is_online !== b.is_online) return b.is_online ? 1 : -1;
         const aTime = a.last_heard ? new Date(a.last_heard) : new Date(0);
         const bTime = b.last_heard ? new Date(b.last_heard) : new Date(0);
         return bTime - aTime;
@@ -242,7 +304,7 @@ function updateFullMessagesList(messages) {
 
 // Render a single message
 function renderMessage(msg, detailed = false) {
-    const isEmergency = msg.text && ['emergency', '911', 'sos', 'help'].some(
+    const isEmergency = msg.text && ['emergency', '911', 'sos', 'mayday'].some(
         kw => msg.text.toLowerCase().includes(kw)
     );
 
@@ -285,6 +347,13 @@ function addNewMessage(msg) {
         while (list.children.length > 15) {
             list.removeChild(list.lastChild);
         }
+    }
+
+    // Also update full messages list if on messages page
+    const fullList = document.getElementById('full-messages-list');
+    if (fullList) {
+        const newMsgHtml = renderMessage(msg, true);
+        fullList.insertAdjacentHTML('afterbegin', newMsgHtml);
     }
 
     // Update message count
@@ -368,6 +437,9 @@ function addNewAlert(alert) {
     if (countEl) {
         countEl.textContent = parseInt(countEl.textContent || 0) + 1;
     }
+
+    // Show toast for new alerts
+    showToast(`Alert: ${alert.title || 'New alert'}`, alert.severity >= 3 ? 'error' : 'warning');
 }
 
 // Update node data
@@ -378,19 +450,35 @@ function updateNodeData(node, isNew) {
         .then(data => {
             updateElement('stat-online', data.online_nodes);
             updateElement('stat-total', data.node_count);
-        });
+        })
+        .catch(e => console.error('Failed to fetch status:', e));
 
-    // Could also refresh the nodes table if we're on the nodes page
+    // Refresh the nodes table if we're on the nodes page
     const fullNodesBody = document.getElementById('full-nodes-body');
     if (fullNodesBody) {
         fetch('/api/nodes')
             .then(r => r.json())
-            .then(data => updateFullNodesTable(data.nodes));
+            .then(data => updateFullNodesTable(data.nodes))
+            .catch(e => console.error('Failed to fetch nodes:', e));
+    }
+
+    if (isNew) {
+        showToast(`New node discovered: ${node.display_name || node.node_id}`, 'info', 4000);
     }
 }
 
-// Send a message
+// Send a message with client-side validation
 function sendMessage(text, destination = '^all', channel = 0) {
+    // Client-side validation
+    if (!text || !text.trim()) {
+        showToast('Message cannot be empty', 'warning');
+        return;
+    }
+    if (text.length > MAX_MESSAGE_LENGTH) {
+        showToast(`Message too long (${text.length}/${MAX_MESSAGE_LENGTH})`, 'warning');
+        return;
+    }
+
     if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
             type: 'send_message',
@@ -409,12 +497,35 @@ function sendMessage(text, destination = '^all', channel = 0) {
                 channel: channel
             })
         }).then(r => {
-            if (!r.ok) throw new Error('Failed to send');
+            if (!r.ok) return r.json().then(data => { throw new Error(data.detail || 'Failed to send'); });
+            showToast('Message sent', 'success', 2000);
         }).catch(e => {
             console.error('Send failed:', e);
-            alert('Failed to send message');
+            showToast(e.message || 'Failed to send message', 'error');
         });
     }
+}
+
+// Setup character counter on message input fields
+function setupCharCounter(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    // Create counter element
+    const counter = document.createElement('span');
+    counter.className = 'char-counter';
+    counter.textContent = `0/${MAX_MESSAGE_LENGTH}`;
+    input.parentElement.style.position = 'relative';
+    input.insertAdjacentElement('afterend', counter);
+
+    input.addEventListener('input', () => {
+        const len = input.value.length;
+        counter.textContent = `${len}/${MAX_MESSAGE_LENGTH}`;
+        counter.className = 'char-counter' + (len > MAX_MESSAGE_LENGTH ? ' char-counter-over' : len > MAX_MESSAGE_LENGTH * 0.9 ? ' char-counter-warn' : '');
+    });
+
+    // Enforce max length
+    input.setAttribute('maxlength', MAX_MESSAGE_LENGTH);
 }
 
 // Escape HTML to prevent XSS
@@ -425,9 +536,30 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Start heartbeat with pong verification
+function startHeartbeat() {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+    lastPongTime = Date.now();
+    heartbeatInterval = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            // Check if we received a pong since last ping
+            const timeSincePong = Date.now() - lastPongTime;
+            if (timeSincePong > 60000) {
+                // No pong in 60s - connection is likely dead
+                console.warn('No pong received in 60s, closing stale connection');
+                ws.close();
+                return;
+            }
+            ws.send(JSON.stringify({type: 'ping'}));
+        }
+    }, 30000);
+}
+
 // Initialize dashboard page
 function initDashboard() {
     initWebSocket();
+    startHeartbeat();
 
     // Setup send message form
     const sendBtn = document.getElementById('send-btn');
@@ -435,12 +567,17 @@ function initDashboard() {
     const channelSelect = document.getElementById('channel-select');
 
     if (sendBtn && msgInput) {
+        setupCharCounter('message-input');
+
         sendBtn.addEventListener('click', () => {
             const text = msgInput.value.trim();
             if (text) {
                 const channel = channelSelect ? parseInt(channelSelect.value) : 0;
                 sendMessage(text, '^all', channel);
                 msgInput.value = '';
+                // Reset char counter
+                const counter = msgInput.parentElement.querySelector('.char-counter');
+                if (counter) counter.textContent = `0/${MAX_MESSAGE_LENGTH}`;
             }
         });
 
@@ -450,40 +587,50 @@ function initDashboard() {
             }
         });
     }
-
-    // Heartbeat to keep connection alive
-    setInterval(() => {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({type: 'ping'}));
-        }
-    }, 30000);
 }
 
 // Initialize nodes page
 function initNodesPage() {
     initWebSocket();
+    startHeartbeat();
 
     fetch('/api/nodes')
         .then(r => r.json())
-        .then(data => updateFullNodesTable(data.nodes));
+        .then(data => updateFullNodesTable(data.nodes))
+        .catch(e => {
+            console.error('Failed to load nodes:', e);
+            showToast('Failed to load nodes', 'error');
+        });
 }
 
 // Initialize messages page
 function initMessagesPage() {
     initWebSocket();
+    startHeartbeat();
+
+    setupCharCounter('full-message-input');
 
     fetch('/api/messages')
         .then(r => r.json())
-        .then(data => updateFullMessagesList(data.messages));
+        .then(data => updateFullMessagesList(data.messages))
+        .catch(e => {
+            console.error('Failed to load messages:', e);
+            showToast('Failed to load messages', 'error');
+        });
 }
 
 // Initialize alerts page
 function initAlertsPage() {
     initWebSocket();
+    startHeartbeat();
 
     fetch('/api/alerts')
         .then(r => r.json())
-        .then(data => updateAlertsTable(data));
+        .then(data => updateAlertsTable(data))
+        .catch(e => {
+            console.error('Failed to load alerts:', e);
+            showToast('Failed to load alerts', 'error');
+        });
 }
 
 // Auto-initialize based on page
@@ -495,4 +642,15 @@ document.addEventListener('DOMContentLoaded', function() {
         initDashboard();
     }
     // Other pages have their own init in the template
+
+    // Setup mobile nav toggle
+    const navToggle = document.getElementById('nav-toggle');
+    const navLinks = document.getElementById('nav-links');
+    if (navToggle && navLinks) {
+        navToggle.addEventListener('click', () => {
+            navLinks.classList.toggle('nav-open');
+            navToggle.setAttribute('aria-expanded',
+                navLinks.classList.contains('nav-open') ? 'true' : 'false');
+        });
+    }
 });
