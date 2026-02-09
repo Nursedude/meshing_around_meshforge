@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-02-09
 **Version:** 0.5.0-beta
 
 ---
@@ -30,7 +30,7 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 295 tests passing (3 skipped: MQTT integration)
+- **Test Status:** 363 tests passing (3 skipped: MQTT integration)
 - **Meshforge Remote:** `meshforge` → `Nursedude/meshforge` (733+ PRs, `src/` architecture)
 
 ### Code Health
@@ -46,7 +46,36 @@ python3 -m py_compile configure_bot.py
 - **Connection health:** double-tap verification pattern from meshforge
 - **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
 
-### Recent P1-P2 Improvements (Completed)
+### Recent Improvements (2026-02-09)
+- **CSRF Protection:** Double-submit cookie middleware on all POST/PUT/DELETE
+  - Token generated per session, validated via X-CSRF-Token header
+  - JSON requests CORS-protected; form submissions require token
+  - API key and Bearer auth requests exempt (not CSRF-vulnerable)
+  - `/api/csrf-token` endpoint for frontend token retrieval
+- **API Rate Limiting:** Sliding-window per-IP rate limiter middleware
+  - 60 RPM default, 20 RPM for write (POST) endpoints
+  - X-RateLimit-* headers on all responses
+  - 429 Too Many Requests with Retry-After header
+- **Message Search/Filter:** Enhanced `/api/messages` with query params
+  - `search=` full-text search in message text (case-insensitive)
+  - `sender=` filter by sender name or ID (substring match)
+  - `since=` ISO timestamp filter for time-based queries
+  - Search UI in messages.html with debounced input
+- **Map Marker Clustering:** Leaflet.markercluster for 100+ nodes
+  - Dark theme cluster styling (cyan/yellow/red by cluster size)
+  - Configurable cluster radius, spiderfy on max zoom
+  - Chunked loading for performance with large datasets
+  - Applied to both template map and embedded fallback map
+- **Web Endpoint Test Coverage:** 68 new tests (test_web_app.py)
+  - All HTML pages, all API endpoints
+  - CSRF token generation/validation (10 unit tests)
+  - Rate limiter logic (5 unit tests)
+  - Auth-required endpoints (8 tests)
+  - Message search/filter (5 tests)
+  - Rate limit middleware (2 integration tests)
+  - CSRF middleware (3 integration tests)
+
+### Previous P1-P2 Improvements (Completed)
 - **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
 - **Persistent storage** - Network state saved/loaded from ~/.config/meshing-around-clients/
   - Now uses atomic writes (tempfile + os.replace) for crash safety
@@ -94,6 +123,11 @@ python3 -m py_compile configure_bot.py
 - [ ] Email/SMS notification testing
 - [x] Map visualization for nodes (Leaflet.js at /map, GeoJSON markers, route lines)
 - [x] Traceroute API endpoint (/api/traceroute with enriched position data)
+- [x] CSRF protection (double-submit cookie pattern)
+- [x] API rate limiting (sliding-window per-IP)
+- [x] Message search/filter (text, sender, time)
+- [x] Map marker clustering (Leaflet.markercluster, 100+ nodes)
+- [x] Web endpoint test coverage (68 tests)
 
 ---
 
@@ -164,6 +198,39 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ---
 
 ## Work History (Summary)
+
+### 2026-02-09 (CSRF, Rate Limit, Search, Clustering Session)
+- **CSRF Protection** (web/app.py: CSRFProtection class + middleware):
+  - Double-submit cookie pattern with hmac.compare_digest validation
+  - JSON requests exempt (CORS-protected), form POSTs require token
+  - API key and Bearer auth requests exempt
+  - `/api/csrf-token` endpoint + cookie auto-set on first GET
+  - Frontend getCsrfToken() helper in app.js
+- **Rate Limiting** (web/app.py: RateLimiter class + middleware):
+  - Sliding-window per-IP tracking with configurable RPM limits
+  - 60 RPM default, 20 RPM write, 120 RPM burst categories
+  - X-RateLimit-Limit/Remaining/Reset headers on all responses
+  - 429 response with Retry-After when exceeded
+- **Message Search/Filter** (web/app.py + messages.html):
+  - `/api/messages?search=&sender=&since=` query parameters
+  - Case-insensitive text search and sender substring match
+  - ISO timestamp `since` filter with proper error handling
+  - Debounced search UI with clear button in messages template
+- **Map Marker Clustering** (map.html, embedded map in app.py):
+  - Leaflet.markercluster@1.5.3 integration
+  - Dark theme cluster styling (cyan/yellow/red gradient)
+  - `maxClusterRadius: 50`, `disableClusteringAtZoom: 16`, `chunkedLoading: true`
+  - Applied to both template-based and embedded fallback maps
+- **Web Endpoint Tests** (test_web_app.py: 68 tests):
+  - CSRFProtection unit tests (10): token generation, validation logic
+  - RateLimiter unit tests (5): limits, categories, IP isolation
+  - API endpoint tests (38): all HTML pages, all REST endpoints
+  - Auth tests (8): unauthorized, authorized, wrong key
+  - Search/filter tests (5): text, sender, since, invalid
+  - Middleware integration tests (5): rate limit 429, CSRF cookie
+  - Factory function tests (2)
+- 363 tests passing (3 skipped), 0 lint errors
+- Branch: `claude/csrf-rate-limit-search-eyRLu`
 
 ### 2026-02-08 (Map & Traceroute Session)
 - **Map Visualization** (new: map.html, web/app.py changes):

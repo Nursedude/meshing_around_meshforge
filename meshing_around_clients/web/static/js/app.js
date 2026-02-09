@@ -14,6 +14,12 @@ const MAX_MESSAGE_LENGTH = 228;
 let lastPongTime = 0;
 let heartbeatInterval = null;
 
+// CSRF token helper - reads from csrf_token cookie
+function getCsrfToken() {
+    const match = document.cookie.match(/(^|;\s*)csrf_token=([^;]*)/);
+    return match ? decodeURIComponent(match[2]) : '';
+}
+
 // Toast notification system
 function showToast(message, type = 'info', duration = 3000) {
     let container = document.getElementById('toast-container');
@@ -490,7 +496,10 @@ function sendMessage(text, destination = '^all', channel = 0) {
         // Fallback to REST API
         fetch('/api/messages/send', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
             body: JSON.stringify({
                 text: text,
                 destination: destination,

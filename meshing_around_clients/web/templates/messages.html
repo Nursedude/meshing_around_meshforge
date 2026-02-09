@@ -6,6 +6,10 @@
 <div class="page-header">
     <h1>Message History</h1>
     <div class="page-actions">
+        <input type="text" id="search-input" placeholder="Search messages..." class="message-input"
+               style="width: 200px;" oninput="debounceSearch()">
+        <input type="text" id="sender-filter" placeholder="Filter by sender..." class="message-input"
+               style="width: 160px;" oninput="debounceSearch()">
         <select id="channel-filter" class="channel-select" onchange="filterMessages()">
             <option value="">All Channels</option>
             <option value="0">Channel 0</option>
@@ -17,6 +21,7 @@
             <option value="6">Channel 6</option>
             <option value="7">Channel 7</option>
         </select>
+        <button class="btn btn-secondary" onclick="clearFilters()">Clear</button>
         <button class="btn btn-secondary" onclick="refreshMessages()">Refresh</button>
     </div>
 </div>
@@ -47,16 +52,40 @@
 
 {% block scripts %}
 <script>
+let searchTimeout = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     initMessagesPage();
 });
 
+function debounceSearch() {
+    if (searchTimeout) clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(filterMessages, 300);
+}
+
 function filterMessages() {
     const channel = document.getElementById('channel-filter').value;
-    const url = channel ? `/api/messages?channel=${channel}` : '/api/messages';
+    const search = document.getElementById('search-input').value.trim();
+    const sender = document.getElementById('sender-filter').value.trim();
+
+    const params = new URLSearchParams();
+    if (channel) params.set('channel', channel);
+    if (search) params.set('search', search);
+    if (sender) params.set('sender', sender);
+
+    const qs = params.toString();
+    const url = '/api/messages' + (qs ? '?' + qs : '');
+
     fetch(url)
         .then(r => r.json())
         .then(data => updateFullMessagesList(data.messages));
+}
+
+function clearFilters() {
+    document.getElementById('search-input').value = '';
+    document.getElementById('sender-filter').value = '';
+    document.getElementById('channel-filter').value = '';
+    filterMessages();
 }
 
 function refreshMessages() {
