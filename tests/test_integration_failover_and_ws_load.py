@@ -257,15 +257,18 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
             self.assertEqual(stats["messages_received"], 0)
             self.assertEqual(stats["reconnections"], 0)
 
-            # Inject a message to bump stats
+            # Inject a message through _on_message (the MQTT callback) so that
+            # the full stats pipeline runs — _handle_json_message alone does
+            # not increment messages_received.
             json_data = {
                 "from": 0xBEEF0001,
                 "type": "text",
                 "payload": {"text": "stats test"},
             }
-            client._handle_json_message(
-                "msh/US/json", json.dumps(json_data).encode()
-            )
+            mock_msg = MagicMock()
+            mock_msg.topic = "msh/US/json"
+            mock_msg.payload = json.dumps(json_data).encode()
+            client._on_message(None, None, mock_msg)
 
             stats = client.stats
             self.assertEqual(stats["messages_received"], 1)
