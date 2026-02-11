@@ -373,8 +373,7 @@ class WebApplication:
             # route handler hasn't already set one (e.g. /api/csrf-token).
             if not request.cookies.get(CSRFProtection.COOKIE_NAME):
                 already_set = any(
-                    name == b"set-cookie"
-                    and value.startswith(CSRFProtection.COOKIE_NAME.encode() + b"=")
+                    name == b"set-cookie" and value.startswith(CSRFProtection.COOKIE_NAME.encode() + b"=")
                     for name, value in response.raw_headers
                 )
                 if not already_set:
