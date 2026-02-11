@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-09
+**Last Updated:** 2026-02-11
 **Version:** 0.5.0-beta
 
 ---
@@ -30,7 +30,7 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 363 tests passing (3 skipped: MQTT integration)
+- **Test Status:** 410 tests passing (14 skipped: MQTT integration)
 - **Meshforge Remote:** `meshforge` → `Nursedude/meshforge` (733+ PRs, `src/` architecture)
 
 ### Code Health
@@ -38,7 +38,7 @@ python3 -m py_compile configure_bot.py
 - configure_bot.py decomposed (2307 → ~2000 lines)
 - New modular architecture with fallback support
 - Meshforge robustness patterns synced (input validation, stale cleanup, congestion thresholds)
-- **CI/CD linting passes:** black, isort, flake8 all clean
+- **CI/CD pipeline green:** black, isort, flake8 all clean; httpx in test deps
 - **configure_bot.py integration bugs fixed** (SerialPortInfo, run_command signatures)
 - **Web templates verified** (topology field names, nav link added)
 - **MQTT reliability overhaul:** paho v2 compat, thread-safe stats, reconnection, relay nodes
@@ -46,7 +46,22 @@ python3 -m py_compile configure_bot.py
 - **Connection health:** double-tap verification pattern from meshforge
 - **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
 
-### Recent Improvements (2026-02-09)
+### Recent Improvements (2026-02-11)
+- **CI Fix: httpx dependency** — Starlette TestClient requires httpx at import time; added to CI pip install
+- **CSRF double-cookie bug fix** (web/app.py):
+  - `/api/csrf-token` endpoint and CSRF middleware both generated independent tokens
+  - Middleware now checks `response.raw_headers` before setting cookie, avoids overwrite
+- **Integration test fixes** (test_integration_failover_and_ws_load.py):
+  - `test_stats_accumulate_across_session`: was calling `_handle_json_message()` directly
+    which skips the stats pipeline; fixed to call `_on_message()` with mock msg object
+  - `_on_disconnect` race condition fix: consolidated lock acquisition
+  - `_save_in_progress` race condition fix in persistence layer
+- **New integration tests**: failover behavior, WebSocket load, MQTT broker reconnection
+- **black formatting fix**: line wrapping in CSRF middleware generator expression
+- 410 tests passing (14 skipped), 0 lint errors
+- Branch: `claude/integration-tests-failover-EBrRD` (PR #51)
+
+### Previous Improvements (2026-02-09)
 - **CSRF Protection:** Double-submit cookie middleware on all POST/PUT/DELETE
   - Token generated per session, validated via X-CSRF-Token header
   - JSON requests CORS-protected; form submissions require token
@@ -198,6 +213,25 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ---
 
 ## Work History (Summary)
+
+### 2026-02-11 (CI Fix & Integration Test Session)
+- **CI failures diagnosed and fixed** across 3 commits:
+  1. `httpx` missing from CI pip install — TestClient import fails without it
+  2. `test_stats_accumulate_across_session` — called `_handle_json_message()` directly,
+     but `messages_received` counter only incremented in `_on_message()` (the MQTT callback);
+     fixed to route through `_on_message()` with a mock mqtt message
+  3. `test_json_post_with_valid_csrf` — double-cookie conflict: both the `/api/csrf-token`
+     route handler and the CSRF middleware generated independent tokens and both called
+     `response.set_cookie()`; middleware token (last Set-Cookie header) overwrote route's,
+     causing cookie/header mismatch on subsequent POST; fixed middleware to check
+     `response.raw_headers` before adding its own cookie
+  4. `black` formatting: generator expression line-wrapping preference
+- **Root cause pattern**: stats tracking (`_on_message` → `_handle_json_message` dispatch)
+  means tests must go through the full callback chain to see counter increments
+- **CSRF architecture note**: middleware auto-sets cookie on first visit, but must yield
+  to route-level cookie setting when `/api/csrf-token` is explicitly called
+- 410 tests passing (14 skipped), all linters clean
+- Branch: `claude/integration-tests-failover-EBrRD` (PR #51)
 
 ### 2026-02-09 (CSRF, Rate Limit, Search, Clustering Session)
 - **CSRF Protection** (web/app.py: CSRFProtection class + middleware):
@@ -352,11 +386,12 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ## Commits Reference (Recent)
 
 ```
-7d1df2a Sync meshforge robustness patterns into core modules
-da49678 Merge pull request #36 from Nursedude/claude/review-nursedude-repo-vZ3qB
-2e0e5c1 Fix remaining exception handling in configure_bot.py
-707c695 Decompose configure_bot.py, fix remaining exception handling
-ce5c976 Add mesh networking improvements: protobuf, encryption, topology
+2a7420e Fix black formatting in CSRF middleware
+6641951 Fix stats test and CSRF token double-cookie conflict
+97004e2 Add httpx to CI test dependencies
+9d3fbf6 Fix black formatting for CI lint check
+bad72b6 Consolidate _on_disconnect lock and fix _save_in_progress race condition
+c95fabe Add integration tests for failover/WebSocket load and fix _intentional_disconnect race
 ```
 
 ---
