@@ -369,16 +369,22 @@ class WebApplication:
 
             response = await call_next(request)
 
-            # Set CSRF cookie if not present
+            # Set CSRF cookie if not present on the inbound request AND the
+            # route handler hasn't already set one (e.g. /api/csrf-token).
             if not request.cookies.get(CSRFProtection.COOKIE_NAME):
-                token = self.csrf.generate_token()
-                response.set_cookie(
-                    key=CSRFProtection.COOKIE_NAME,
-                    value=token,
-                    httponly=False,
-                    samesite="strict",
-                    max_age=3600,
+                already_set = any(
+                    name == b"set-cookie" and value.startswith(CSRFProtection.COOKIE_NAME.encode() + b"=")
+                    for name, value in response.raw_headers
                 )
+                if not already_set:
+                    token = self.csrf.generate_token()
+                    response.set_cookie(
+                        key=CSRFProtection.COOKIE_NAME,
+                        value=token,
+                        httponly=False,
+                        samesite="strict",
+                        max_age=3600,
+                    )
 
             return response
 

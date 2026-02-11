@@ -261,9 +261,7 @@ class MQTTMeshtasticClient:
             # Prune stale cooldown entries (older than 2x cooldown) to prevent unbounded growth
             if len(self._alert_cooldowns) > 1000:
                 cutoff = now - (self._alert_cooldown_seconds * 2)
-                self._alert_cooldowns = {
-                    k: v for k, v in self._alert_cooldowns.items() if v > cutoff
-                }
+                self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
             return False  # Cooldown expired — allow alert
 
     def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
@@ -294,7 +292,8 @@ class MQTTMeshtasticClient:
     def connect(self) -> bool:
         """Connect to MQTT broker."""
         try:
-            self._intentional_disconnect = False
+            with self._stats_lock:
+                self._intentional_disconnect = False
             self._stop_event.clear()
 
             # Create MQTT client (v1/v2 compatible)
@@ -391,8 +390,8 @@ class MQTTMeshtasticClient:
 
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
-        self._intentional_disconnect = True
         with self._stats_lock:
+            self._intentional_disconnect = True
             self._connected = False  # Signal threads to stop first
         self._stop_event.set()
 
@@ -448,9 +447,10 @@ class MQTTMeshtasticClient:
         """Handle MQTT disconnection."""
         with self._stats_lock:
             self._connected = False
+            intentional = self._intentional_disconnect
         self.network.connection_status = "disconnected"
 
-        if rc == 0 or self._intentional_disconnect:
+        if rc == 0 or intentional:
             logger.info("Disconnected from MQTT broker (clean)")
         else:
             logger.warning("Unexpected MQTT disconnect (rc=%d), paho will auto-reconnect", rc)
