@@ -449,10 +449,8 @@ class MQTTMeshtasticClient:
         """Handle MQTT disconnection."""
         with self._stats_lock:
             self._connected = False
-        self.network.connection_status = "disconnected"
-
-        with self._stats_lock:
             intentional = self._intentional_disconnect
+        self.network.connection_status = "disconnected"
 
         if rc == 0 or intentional:
             logger.info("Disconnected from MQTT broker (clean)")

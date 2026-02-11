@@ -80,7 +80,7 @@ class MeshtasticAPI:
         self._worker_thread: Optional[threading.Thread] = None
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
-        self._save_in_progress = False  # Guard against overlapping saves
+        self._save_lock = threading.Lock()  # Guard against overlapping saves
 
         # Load persisted state if enabled
         self._load_persisted_state()
@@ -132,11 +132,10 @@ class MeshtasticAPI:
         """
         if not hasattr(self.config, "storage") or not self.config.storage.enabled:
             return False
-        if self._save_in_progress:
+        if not self._save_lock.acquire(blocking=False):
             logger.debug("Skipping save — previous save still in progress")
             return False
 
-        self._save_in_progress = True
         try:
             state_path = self.config.get_state_file_path()
             self.network.last_update = datetime.now(timezone.utc)
@@ -145,7 +144,7 @@ class MeshtasticAPI:
                 self._last_save_time = datetime.now(timezone.utc)
             return success
         finally:
-            self._save_in_progress = False
+            self._save_lock.release()
 
     def _start_auto_save(self) -> None:
         """Start background auto-save thread."""
