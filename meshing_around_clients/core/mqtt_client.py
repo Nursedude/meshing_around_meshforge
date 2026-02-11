@@ -294,7 +294,8 @@ class MQTTMeshtasticClient:
     def connect(self) -> bool:
         """Connect to MQTT broker."""
         try:
-            self._intentional_disconnect = False
+            with self._stats_lock:
+                self._intentional_disconnect = False
             self._stop_event.clear()
 
             # Create MQTT client (v1/v2 compatible)
@@ -391,8 +392,8 @@ class MQTTMeshtasticClient:
 
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
-        self._intentional_disconnect = True
         with self._stats_lock:
+            self._intentional_disconnect = True
             self._connected = False  # Signal threads to stop first
         self._stop_event.set()
 
@@ -450,7 +451,10 @@ class MQTTMeshtasticClient:
             self._connected = False
         self.network.connection_status = "disconnected"
 
-        if rc == 0 or self._intentional_disconnect:
+        with self._stats_lock:
+            intentional = self._intentional_disconnect
+
+        if rc == 0 or intentional:
             logger.info("Disconnected from MQTT broker (clean)")
         else:
             logger.warning("Unexpected MQTT disconnect (rc=%d), paho will auto-reconnect", rc)
