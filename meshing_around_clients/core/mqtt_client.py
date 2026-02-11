@@ -302,10 +302,10 @@ class MQTTMeshtasticClient:
             # Register atexit cleanup (from meshforge)
             atexit.register(self._atexit_cleanup)
 
-            # Wait for connection
+            # Wait for connection (monotonic clock avoids wall-clock jumps)
             timeout = 10
-            start = time.time()
-            while not self._connected and (time.time() - start) < timeout:
+            start = time.monotonic()
+            while not self._connected and (time.monotonic() - start) < timeout:
                 time.sleep(0.1)
 
             if self._connected:

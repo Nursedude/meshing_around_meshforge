@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 # Cooldown between connections (devices/brokers need time to cleanup)
 CONNECTION_COOLDOWN = 1.0  # seconds
+# Circuit breaker: after max reconnect attempts, wait this long before retrying
+CIRCUIT_BREAKER_COOLDOWN = 600  # 10 minutes
 
 
 class ConnectionType(Enum):
@@ -101,6 +103,7 @@ class ConnectionManager:
         self._reconnect_thread: Optional[threading.Thread] = None
         self._running = False
         self._last_close_time: float = 0.0  # For connection cooldown
+        self._circuit_breaker_until: float = 0.0  # Circuit breaker timestamp
 
     @property
     def current_interface_index(self) -> int:
@@ -473,6 +476,10 @@ class ConnectionManager:
             if not self._running:
                 break
 
+            # Respect circuit breaker — skip health checks during cooldown
+            if time.monotonic() < self._circuit_breaker_until:
+                continue
+
             # Double-tap health check
             if not self._check_connection_health():
                 self._handle_disconnect()
@@ -517,13 +524,21 @@ class ConnectionManager:
                 self._status.connected = True
                 self._status.last_connected = datetime.now(timezone.utc)
                 self._status.reconnect_attempts = 0
+                self._circuit_breaker_until = 0.0  # Reset circuit breaker
                 self._trigger_callbacks("on_connect", self._status)
                 self._trigger_callbacks("on_status_change", self._status)
                 logger.info("Reconnected successfully")
             else:
                 logger.warning("Reconnection failed")
         else:
-            logger.error("Max reconnection attempts (%d) reached", self._max_reconnect_attempts)
+            # Circuit breaker: stop hammering and wait before trying again
+            self._circuit_breaker_until = time.monotonic() + CIRCUIT_BREAKER_COOLDOWN
+            self._status.reconnect_attempts = 0  # Reset counter for next cycle
+            logger.error(
+                "Max reconnection attempts (%d) reached — circuit breaker active for %ds",
+                self._max_reconnect_attempts,
+                CIRCUIT_BREAKER_COOLDOWN,
+            )
 
     # Forwarded API methods
 

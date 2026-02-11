@@ -6,7 +6,7 @@ Defines the core data structures used across TUI and Web clients.
 import json
 import os
 import threading
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -23,6 +23,9 @@ AIRUTILTX_CRITICAL_THRESHOLD = 10.0  # TX airtime critical at 10%
 # --- Robustness limits ---
 STALE_NODE_HOURS = 72  # Nodes not seen in 72h considered stale
 MAX_NODES = 10000  # Maximum tracked nodes before pruning
+MAX_ROUTES = 5000  # Maximum tracked routes before pruning
+MAX_CHANNEL_UTIL_HISTORY = 1000  # Maximum channel utilization history entries
+MAX_NEIGHBORS_PER_NODE = 200  # Maximum neighbor/heard_by entries per node
 VALID_LAT_RANGE = (-90.0, 90.0)
 VALID_LON_RANGE = (-180.0, 180.0)
 VALID_SNR_RANGE = (-50.0, 50.0)  # dB
@@ -542,12 +545,12 @@ class MeshNetwork:
     channel_count: int = 8
     # Channel configurations
     channels: Dict[int, Channel] = field(default_factory=dict)
-    # Message deduplication: maps message_id -> timestamp
-    _seen_messages: Dict[str, datetime] = field(default_factory=dict)
+    # Message deduplication: maps message_id -> timestamp (ordered for O(1) pruning)
+    _seen_messages: OrderedDict = field(default_factory=OrderedDict)
     # Known routes in the mesh
     routes: Dict[str, MeshRoute] = field(default_factory=dict)
-    # Channel utilization history (for mesh health)
-    channel_utilization_history: List[float] = field(default_factory=list)
+    # Channel utilization history (for mesh health) — bounded to prevent unbounded growth
+    channel_utilization_history: Deque[float] = field(default_factory=lambda: deque(maxlen=MAX_CHANNEL_UTIL_HISTORY))
     # Timestamp when network state was last updated
     last_update: Optional[datetime] = None
 
@@ -631,16 +634,24 @@ class MeshNetwork:
     _MAX_SEEN_MESSAGES = 10000
 
     def is_duplicate_message(self, message_id: str, window_seconds: int = 60) -> bool:
-        """Check if message is a duplicate within the time window."""
+        """Check if message is a duplicate within the time window.
+
+        Uses OrderedDict for O(1) oldest-entry removal instead of
+        sorting the entire dict when the size limit is exceeded.
+        """
         with self._lock:
             now = datetime.now(timezone.utc)
             cutoff = now - timedelta(seconds=window_seconds)
-            # Clean old entries (and enforce size bound)
-            self._seen_messages = {mid: ts for mid, ts in self._seen_messages.items() if ts > cutoff}
-            # If still over size limit, prune oldest entries
-            if len(self._seen_messages) > self._MAX_SEEN_MESSAGES:
-                sorted_msgs = sorted(self._seen_messages.items(), key=lambda x: x[1])
-                self._seen_messages = dict(sorted_msgs[-self._MAX_SEEN_MESSAGES :])
+            # Evict expired entries from the front (oldest first)
+            while self._seen_messages:
+                oldest_key = next(iter(self._seen_messages))
+                if self._seen_messages[oldest_key] <= cutoff:
+                    del self._seen_messages[oldest_key]
+                else:
+                    break
+            # Enforce hard size limit by popping oldest entries — O(1) per pop
+            while len(self._seen_messages) > self._MAX_SEEN_MESSAGES:
+                self._seen_messages.popitem(last=False)
             # Check and add
             if message_id in self._seen_messages:
                 return True
@@ -654,15 +665,27 @@ class MeshNetwork:
             if reporter_id in self.nodes:
                 if heard_id not in self.nodes[reporter_id].neighbors:
                     self.nodes[reporter_id].neighbors.append(heard_id)
+                    # Bound neighbors list
+                    if len(self.nodes[reporter_id].neighbors) > MAX_NEIGHBORS_PER_NODE:
+                        self.nodes[reporter_id].neighbors = self.nodes[reporter_id].neighbors[-MAX_NEIGHBORS_PER_NODE:]
             # heard_id was heard by reporter
             if heard_id in self.nodes:
                 if reporter_id not in self.nodes[heard_id].heard_by:
                     self.nodes[heard_id].heard_by.append(reporter_id)
+                    if len(self.nodes[heard_id].heard_by) > MAX_NEIGHBORS_PER_NODE:
+                        self.nodes[heard_id].heard_by = self.nodes[heard_id].heard_by[-MAX_NEIGHBORS_PER_NODE:]
 
     def update_route(self, destination_id: str, route: MeshRoute) -> None:
         """Update or add a route to a destination."""
         with self._lock:
             self.routes[destination_id] = route
+            # Prune routes if over limit — evict oldest discovered routes
+            if len(self.routes) > MAX_ROUTES:
+                oldest_key = min(
+                    self.routes,
+                    key=lambda k: self.routes[k].discovered or DATETIME_MIN_UTC,
+                )
+                del self.routes[oldest_key]
             if destination_id in self.nodes:
                 # Update node's routes list
                 existing = [r for r in self.nodes[destination_id].routes if r.destination_id != destination_id]

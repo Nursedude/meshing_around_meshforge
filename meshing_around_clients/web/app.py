@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 WS_HEARTBEAT_INTERVAL = 30
 # WebSocket receive timeout (seconds) - should be > heartbeat interval
 WS_RECEIVE_TIMEOUT = 90
+# Maximum concurrent WebSocket connections
+MAX_WS_CONNECTIONS = 100
+# Maximum request body size (bytes) — 1 MB
+MAX_REQUEST_BODY_SIZE = 1_048_576
 
 from meshing_around_clients.core import Alert, Config, MeshtasticAPI, Message, MessageHandler  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
@@ -218,9 +222,17 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket) -> bool:
+        """Accept and track a WebSocket connection.
+
+        Returns False if the connection limit has been reached.
+        """
+        if len(self.active_connections) >= MAX_WS_CONNECTIONS:
+            await websocket.close(code=1013, reason="Too many connections")
+            return False
         await websocket.accept()
         self.active_connections.append(websocket)
+        return True
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
@@ -232,8 +244,13 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except (WebSocketDisconnect, RuntimeError, ConnectionError):
+            except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError):
                 dead_connections.append(connection)
+            except Exception:
+                # Catch-all for unexpected transport errors to prevent
+                # zombie connections from accumulating
+                dead_connections.append(connection)
+                logger.debug("Unexpected error broadcasting to WebSocket client")
         for dead in dead_connections:
             self.disconnect(dead)
 
@@ -303,6 +320,17 @@ class WebApplication:
             version=VERSION,
             lifespan=lifespan,
         )
+
+        # ---- Middleware: Request Body Size Limit ----
+        @app.middleware("http")
+        async def body_size_limit_middleware(request: Request, call_next):
+            content_length = request.headers.get("content-length")
+            if content_length and int(content_length) > MAX_REQUEST_BODY_SIZE:
+                return JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body too large"},
+                )
+            return await call_next(request)
 
         # ---- Middleware: Rate Limiting ----
         @app.middleware("http")
@@ -878,7 +906,9 @@ class WebApplication:
                     await websocket.close(code=1008, reason="Unauthorized")
                     return
 
-            await self.ws_manager.connect(websocket)
+            accepted = await self.ws_manager.connect(websocket)
+            if not accepted:
+                return  # Connection limit reached
             try:
                 # Send initial state
                 await websocket.send_json({"type": "init", "data": self.api.network.to_dict()})
