@@ -80,6 +80,7 @@ class MeshtasticAPI:
         self._worker_thread: Optional[threading.Thread] = None
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
+        self._save_in_progress = False  # Guard against overlapping saves
 
         # Load persisted state if enabled
         self._load_persisted_state()
@@ -124,16 +125,27 @@ class MeshtasticAPI:
                 logger.info("Loaded %d nodes from %s", len(self.network.nodes), state_path)
 
     def _save_state(self) -> bool:
-        """Save network state to persistent storage."""
+        """Save network state to persistent storage.
+
+        Uses a guard flag to skip if a previous save is still in progress,
+        preventing overlapping writes under slow I/O conditions.
+        """
         if not hasattr(self.config, "storage") or not self.config.storage.enabled:
             return False
+        if self._save_in_progress:
+            logger.debug("Skipping save — previous save still in progress")
+            return False
 
-        state_path = self.config.get_state_file_path()
-        self.network.last_update = datetime.now(timezone.utc)
-        success = self.network.save_to_file(state_path)
-        if success:
-            self._last_save_time = datetime.now(timezone.utc)
-        return success
+        self._save_in_progress = True
+        try:
+            state_path = self.config.get_state_file_path()
+            self.network.last_update = datetime.now(timezone.utc)
+            success = self.network.save_to_file(state_path)
+            if success:
+                self._last_save_time = datetime.now(timezone.utc)
+            return success
+        finally:
+            self._save_in_progress = False
 
     def _start_auto_save(self) -> None:
         """Start background auto-save thread."""
@@ -387,7 +399,7 @@ class MeshtasticAPI:
     def _handle_text_message(self, packet: dict) -> None:
         """Handle incoming text message."""
         decoded = packet.get("decoded", {})
-        text = decoded.get("text", decoded.get("payload", b"").decode("utf-8", errors="ignore"))
+        text = decoded.get("text", decoded.get("payload", b"").decode("utf-8", errors="replace"))
 
         sender_id = packet.get("fromId", "")
         sender_name = ""
