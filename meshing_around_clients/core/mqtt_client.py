@@ -261,9 +261,7 @@ class MQTTMeshtasticClient:
             # Prune stale cooldown entries (older than 2x cooldown) to prevent unbounded growth
             if len(self._alert_cooldowns) > 1000:
                 cutoff = now - (self._alert_cooldown_seconds * 2)
-                self._alert_cooldowns = {
-                    k: v for k, v in self._alert_cooldowns.items() if v > cutoff
-                }
+                self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
             return False  # Cooldown expired — allow alert
 
     def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
