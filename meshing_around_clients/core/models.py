@@ -806,9 +806,9 @@ class MeshNetwork:
     def from_dict(cls, data: Dict[str, Any]) -> "MeshNetwork":
         """Create MeshNetwork from dictionary (restore state).
 
-        Note: This restores essential state (nodes, channels) but not
-        transient data (messages, alerts, seen_messages) which will be
-        empty on restore.
+        Restores nodes, channels, messages, and alerts from persisted data.
+        Messages and alerts are restored for crash recovery so outgoing
+        messages and alert history survive restarts.
         """
         network = cls()
 
@@ -896,6 +896,80 @@ class MeshNetwork:
                 network.channels[idx] = channel
             except (KeyError, ValueError, TypeError):
                 continue  # Skip invalid channel data
+
+        # Restore messages (crash recovery for outgoing messages)
+        messages_data = data.get("messages", [])
+        for msg_dict in messages_data:
+            try:
+                # Parse message type
+                msg_type_str = msg_dict.get("message_type", "text")
+                try:
+                    msg_type = MessageType(msg_type_str)
+                except ValueError:
+                    msg_type = MessageType.TEXT
+
+                msg = Message(
+                    id=msg_dict.get("id", ""),
+                    sender_id=msg_dict.get("sender_id", ""),
+                    sender_name=msg_dict.get("sender_name", ""),
+                    recipient_id=msg_dict.get("recipient_id", ""),
+                    channel=msg_dict.get("channel", 0),
+                    text=msg_dict.get("text", ""),
+                    message_type=msg_type,
+                    hop_count=msg_dict.get("hop_count", 0),
+                    snr=msg_dict.get("snr", 0.0),
+                    rssi=msg_dict.get("rssi", 0),
+                    is_encrypted=msg_dict.get("is_encrypted", False),
+                    is_incoming=msg_dict.get("is_incoming", True),
+                    ack_received=msg_dict.get("ack_received", False),
+                )
+                # Restore timestamp
+                ts = msg_dict.get("timestamp")
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        msg.timestamp = dt
+                    except (ValueError, TypeError):
+                        pass
+                network.messages.append(msg)
+            except (KeyError, ValueError, TypeError):
+                continue  # Skip invalid message data
+
+        # Restore alerts (crash recovery for alert history)
+        alerts_data = data.get("alerts", [])
+        for alert_dict in alerts_data:
+            try:
+                alert_type_str = alert_dict.get("alert_type", "custom")
+                try:
+                    alert_type = AlertType(alert_type_str)
+                except ValueError:
+                    alert_type = AlertType.CUSTOM
+
+                alert = Alert(
+                    id=alert_dict.get("id", ""),
+                    alert_type=alert_type,
+                    title=alert_dict.get("title", ""),
+                    message=alert_dict.get("message", ""),
+                    severity=alert_dict.get("severity", 1),
+                    source_node=alert_dict.get("source_node"),
+                    acknowledged=alert_dict.get("acknowledged", False),
+                    metadata=alert_dict.get("metadata", {}),
+                )
+                # Restore timestamp
+                ts = alert_dict.get("timestamp")
+                if ts:
+                    try:
+                        dt = datetime.fromisoformat(ts)
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        alert.timestamp = dt
+                    except (ValueError, TypeError):
+                        pass
+                network.alerts.append(alert)
+            except (KeyError, ValueError, TypeError):
+                continue  # Skip invalid alert data
 
         return network
 

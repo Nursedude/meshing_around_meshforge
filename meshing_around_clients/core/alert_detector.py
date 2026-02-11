@@ -72,6 +72,8 @@ class AlertDetector:
         self._message_counts: Dict[str, List[datetime]] = defaultdict(list)  # node_id -> [timestamps]
         self._alerted_disconnects: set = set()  # Nodes we've already alerted for disconnect
         self._alerted_noisy: Dict[str, datetime] = {}  # node_id -> last alert time
+        self._alerted_snr: Dict[str, datetime] = {}  # node_id -> last SNR alert time
+        self._snr_cooldown_seconds: int = 300  # 5 minute cooldown per node for SNR alerts
 
         # Callbacks
         self._alert_callbacks: List[Callable[[Alert], None]] = []
@@ -292,17 +294,28 @@ class AlertDetector:
         """
         Check if SNR is below threshold.
 
+        Uses per-node cooldown to prevent alert fatigue from repeated
+        low-SNR readings from the same node.
+
         Args:
             node_id: The node identifier
             snr: Signal-to-noise ratio in dB
 
         Returns:
-            Alert if SNR is below threshold, None otherwise
+            Alert if SNR is below threshold and not in cooldown, None otherwise
         """
         if not self.detector_config.snr_enabled:
             return None
 
         if snr < self.detector_config.snr_threshold:
+            with self._lock:
+                now = datetime.now(timezone.utc)
+                last_alert = self._alerted_snr.get(node_id)
+                if last_alert and (now - last_alert).total_seconds() < self._snr_cooldown_seconds:
+                    return None  # Still in cooldown — suppress
+
+                self._alerted_snr[node_id] = now
+
             alert = Alert(
                 id=str(uuid.uuid4()),
                 alert_type=AlertType.SNR,
@@ -381,3 +394,4 @@ class AlertDetector:
             self._message_counts.clear()
             self._alerted_disconnects.clear()
             self._alerted_noisy.clear()
+            self._alerted_snr.clear()
