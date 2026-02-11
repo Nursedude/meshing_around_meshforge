@@ -177,6 +177,12 @@ class MQTTMeshtasticClient:
             "position_updates": 0,
         }
 
+        # Alert deduplication: (node_id, alert_type) -> last alert timestamp
+        # Prevents alert fatigue from repeated threshold crossings
+        self._alert_cooldowns: Dict[tuple, float] = {}
+        _ALERT_COOLDOWN_SECONDS = 300  # 5 minute cooldown per node per alert type
+        self._alert_cooldown_seconds = _ALERT_COOLDOWN_SECONDS
+
         # Stale node cleanup
         self._last_cleanup: float = 0
         self._cleanup_interval = STALE_CLEANUP_INTERVAL
@@ -197,7 +203,8 @@ class MQTTMeshtasticClient:
 
     @property
     def is_connected(self) -> bool:
-        return self._connected
+        with self._stats_lock:
+            return self._connected
 
     @property
     def stats(self) -> Dict[str, Any]:
@@ -237,6 +244,27 @@ class MQTTMeshtasticClient:
         """Register a callback for an event."""
         if event in self._callbacks:
             self._callbacks[event].append(callback)
+
+    def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
+        """Check if enough time has passed since the last alert of this type for this node.
+
+        Returns True if the alert should be suppressed (still in cooldown),
+        False if the alert should fire.
+        """
+        key = (node_id, alert_type)
+        now = time.monotonic()
+        with self._stats_lock:
+            last_time = self._alert_cooldowns.get(key)
+            if last_time is not None and (now - last_time) < self._alert_cooldown_seconds:
+                return True  # Still in cooldown — suppress
+            self._alert_cooldowns[key] = now
+            # Prune stale cooldown entries (older than 2x cooldown) to prevent unbounded growth
+            if len(self._alert_cooldowns) > 1000:
+                cutoff = now - (self._alert_cooldown_seconds * 2)
+                self._alert_cooldowns = {
+                    k: v for k, v in self._alert_cooldowns.items() if v > cutoff
+                }
+            return False  # Cooldown expired — allow alert
 
     def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
         """Trigger all callbacks for an event."""
@@ -305,10 +333,10 @@ class MQTTMeshtasticClient:
             # Wait for connection (monotonic clock avoids wall-clock jumps)
             timeout = 10
             start = time.monotonic()
-            while not self._connected and (time.monotonic() - start) < timeout:
+            while not self.is_connected and (time.monotonic() - start) < timeout:
                 time.sleep(0.1)
 
-            if self._connected:
+            if self.is_connected:
                 self.network.connection_status = "connected (MQTT)"
                 self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
                 self._connection_start = datetime.now(timezone.utc)
@@ -350,7 +378,7 @@ class MQTTMeshtasticClient:
                 # Use event wait instead of sleep for responsive shutdown
                 if self._stop_event.wait(timeout=self._cleanup_interval):
                     break  # Stop event was set
-                if not self._connected:
+                if not self.is_connected:
                     break
                 pruned = self.network.cleanup_stale_nodes()
                 if pruned:
@@ -364,7 +392,8 @@ class MQTTMeshtasticClient:
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
         self._intentional_disconnect = True
-        self._connected = False  # Signal threads to stop first
+        with self._stats_lock:
+            self._connected = False  # Signal threads to stop first
         self._stop_event.set()
 
         # Wait for cleanup thread to finish
@@ -387,9 +416,10 @@ class MQTTMeshtasticClient:
     def _on_connect(self, client, userdata, flags, rc):
         """Handle MQTT connection."""
         if rc == 0:
-            was_reconnect = self._connected is False and self._reconnect_count > 0
-            self._connected = True
-            self._reconnect_count = 0
+            with self._stats_lock:
+                was_reconnect = self._connected is False and self._reconnect_count > 0
+                self._connected = True
+                self._reconnect_count = 0
             if was_reconnect:
                 logger.info("Reconnected to MQTT broker: %s", self.mqtt_config.broker)
                 with self._stats_lock:
@@ -416,7 +446,8 @@ class MQTTMeshtasticClient:
 
     def _on_disconnect(self, client, userdata, rc):
         """Handle MQTT disconnection."""
-        self._connected = False
+        with self._stats_lock:
+            self._connected = False
         self.network.connection_status = "disconnected"
 
         if rc == 0 or self._intentional_disconnect:
@@ -425,7 +456,8 @@ class MQTTMeshtasticClient:
             logger.warning("Unexpected MQTT disconnect (rc=%d), paho will auto-reconnect", rc)
             # paho's built-in reconnect (enabled via reconnect_delay_set) handles this
             # We track the count for health reporting
-            self._reconnect_count += 1
+            with self._stats_lock:
+                self._reconnect_count += 1
 
         self._trigger_callbacks("on_disconnect")
 
@@ -756,44 +788,47 @@ class MQTTMeshtasticClient:
             )
             node.last_heard = datetime.now(timezone.utc)
 
-            # Battery alert
+            # Battery alert (with per-node cooldown to prevent alert fatigue)
             if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
-                alert = Alert(
-                    id=str(uuid.uuid4()),
-                    alert_type=AlertType.BATTERY,
-                    title="Low Battery (MQTT)",
-                    message=f"{node.display_name} at {node.telemetry.battery_level}%",
-                    severity=2,
-                    source_node=sender_id,
-                )
-                self.network.add_alert(alert)
-                self._trigger_callbacks("on_alert", alert)
+                if not self._is_alert_cooled_down(sender_id, "battery"):
+                    alert = Alert(
+                        id=str(uuid.uuid4()),
+                        alert_type=AlertType.BATTERY,
+                        title="Low Battery (MQTT)",
+                        message=f"{node.display_name} at {node.telemetry.battery_level}%",
+                        severity=2,
+                        source_node=sender_id,
+                    )
+                    self.network.add_alert(alert)
+                    self._trigger_callbacks("on_alert", alert)
 
-            # Channel congestion alert (from meshforge thresholds)
+            # Channel congestion alert (with per-node cooldown)
             if ch_util >= CHUTIL_CRITICAL_THRESHOLD:
-                alert = Alert(
-                    id=str(uuid.uuid4()),
-                    alert_type=AlertType.CUSTOM,
-                    title="Channel Congestion (MQTT)",
-                    message=f"{node.display_name} channel utilization {ch_util:.1f}%",
-                    severity=3,
-                    source_node=sender_id,
-                    metadata={"channel_utilization": ch_util},
-                )
-                self.network.add_alert(alert)
-                self._trigger_callbacks("on_alert", alert)
+                if not self._is_alert_cooled_down(sender_id, "congestion_critical"):
+                    alert = Alert(
+                        id=str(uuid.uuid4()),
+                        alert_type=AlertType.CUSTOM,
+                        title="Channel Congestion (MQTT)",
+                        message=f"{node.display_name} channel utilization {ch_util:.1f}%",
+                        severity=3,
+                        source_node=sender_id,
+                        metadata={"channel_utilization": ch_util},
+                    )
+                    self.network.add_alert(alert)
+                    self._trigger_callbacks("on_alert", alert)
             elif ch_util >= CHUTIL_WARNING_THRESHOLD:
-                alert = Alert(
-                    id=str(uuid.uuid4()),
-                    alert_type=AlertType.CUSTOM,
-                    title="Channel Utilization Warning",
-                    message=f"{node.display_name} channel utilization {ch_util:.1f}%",
-                    severity=2,
-                    source_node=sender_id,
-                    metadata={"channel_utilization": ch_util},
-                )
-                self.network.add_alert(alert)
-                self._trigger_callbacks("on_alert", alert)
+                if not self._is_alert_cooled_down(sender_id, "congestion_warning"):
+                    alert = Alert(
+                        id=str(uuid.uuid4()),
+                        alert_type=AlertType.CUSTOM,
+                        title="Channel Utilization Warning",
+                        message=f"{node.display_name} channel utilization {ch_util:.1f}%",
+                        severity=2,
+                        source_node=sender_id,
+                        metadata={"channel_utilization": ch_util},
+                    )
+                    self.network.add_alert(alert)
+                    self._trigger_callbacks("on_alert", alert)
 
     def _handle_nodeinfo_from_json(self, data: dict, sender_id: str):
         """Handle node info from JSON."""
@@ -996,18 +1031,19 @@ class MQTTMeshtasticClient:
                     self._stats["telemetry_updates"] += 1
                 self._trigger_callbacks("on_telemetry", sender_id)
 
-                # Battery alert
+                # Battery alert (with per-node cooldown to prevent alert fatigue)
                 if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
-                    alert = Alert(
-                        id=str(uuid.uuid4()),
-                        alert_type=AlertType.BATTERY,
-                        title="Low Battery",
-                        message=f"{node.display_name} at {node.telemetry.battery_level}%",
-                        severity=2,
-                        source_node=sender_id,
-                    )
-                    self.network.add_alert(alert)
-                    self._trigger_callbacks("on_alert", alert)
+                    if not self._is_alert_cooled_down(sender_id, "battery"):
+                        alert = Alert(
+                            id=str(uuid.uuid4()),
+                            alert_type=AlertType.BATTERY,
+                            title="Low Battery",
+                            message=f"{node.display_name} at {node.telemetry.battery_level}%",
+                            severity=2,
+                            source_node=sender_id,
+                        )
+                        self.network.add_alert(alert)
+                        self._trigger_callbacks("on_alert", alert)
 
         elif msg_type == "nodeinfo" or portnum == 4:
             user_data = decoded.get("user", {})
@@ -1141,7 +1177,7 @@ class MQTTMeshtasticClient:
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
         """Send a message via MQTT."""
-        if not self._connected or not self._client:
+        if not self.is_connected or not self._client:
             return False
 
         if not self.mqtt_config.node_id:
@@ -1206,7 +1242,8 @@ class MQTTMeshtasticClient:
 
         # Calculate uptime
         uptime_seconds = 0
-        if self._connection_start and self._connected:
+        connected = self.is_connected
+        if self._connection_start and connected:
             uptime_seconds = (now - self._connection_start).total_seconds()
 
         # Calculate message rate (messages per minute)
@@ -1220,7 +1257,7 @@ class MQTTMeshtasticClient:
             last_msg_ago = (now - self._last_message_time).total_seconds()
 
         # Determine health status
-        if not self._connected:
+        if not connected:
             status = "disconnected"
         elif last_msg_ago is None:
             status = "connected_no_traffic"
@@ -1233,16 +1270,17 @@ class MQTTMeshtasticClient:
 
         with self._stats_lock:
             stats_copy = dict(self._stats)
+            reconnect_count = self._reconnect_count
 
         return {
             "status": status,
-            "connected": self._connected,
+            "connected": connected,
             "broker": self.mqtt_config.broker,
             "uptime_seconds": int(uptime_seconds),
             "message_count": self._message_count,
             "messages_per_minute": round(msg_rate, 2),
             "last_message_ago_seconds": int(last_msg_ago) if last_msg_ago else None,
-            "reconnect_count": self._reconnect_count,
+            "reconnect_count": reconnect_count,
             "stats": stats_copy,
         }
 

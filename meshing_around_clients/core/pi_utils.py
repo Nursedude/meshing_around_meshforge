@@ -289,11 +289,11 @@ def create_venv(venv_path: Optional[Path] = None) -> Tuple[bool, str]:
 
     # Check if python3-venv is installed
     try:
-        result = subprocess.run(["dpkg", "-l", "python3-venv"], capture_output=True, text=True, timeout=10)
+        result = subprocess.run(["dpkg", "-l", "python3-venv"], capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
-            # Try to install python3-venv
+            # Try to install python3-venv (generous timeout for Pi Zero with slow SD)
             install_result = subprocess.run(
-                ["sudo", "apt", "install", "-y", "python3-venv"], capture_output=True, text=True, timeout=120
+                ["sudo", "apt", "install", "-y", "python3-venv"], capture_output=True, text=True, timeout=300
             )
             if install_result.returncode != 0:
                 return False, f"Failed to install python3-venv: {install_result.stderr}"
@@ -302,7 +302,7 @@ def create_venv(venv_path: Optional[Path] = None) -> Tuple[bool, str]:
 
     # Create the virtual environment
     try:
-        result = subprocess.run(["python3", "-m", "venv", str(venv_path)], capture_output=True, text=True, timeout=60)
+        result = subprocess.run(["python3", "-m", "venv", str(venv_path)], capture_output=True, text=True, timeout=120)
         if result.returncode == 0:
             return True, f"Virtual environment created at {venv_path}"
         else:
@@ -437,7 +437,7 @@ def configure_serial_via_raspi_config(enable_uart: bool = True, disable_console:
         # do_serial_hw 0 = enable, 1 = disable (yes, it's backwards)
         try:
             result = subprocess.run(
-                ["sudo", "raspi-config", "nonint", "do_serial_hw", "0"], capture_output=True, text=True, timeout=30
+                ["sudo", "raspi-config", "nonint", "do_serial_hw", "0"], capture_output=True, text=True, timeout=60
             )
             if result.returncode == 0:
                 messages.append("UART enabled")
@@ -449,7 +449,7 @@ def configure_serial_via_raspi_config(enable_uart: bool = True, disable_console:
     if disable_console:
         try:
             result = subprocess.run(
-                ["sudo", "raspi-config", "nonint", "do_serial_cons", "1"], capture_output=True, text=True, timeout=30
+                ["sudo", "raspi-config", "nonint", "do_serial_cons", "1"], capture_output=True, text=True, timeout=60
             )
             if result.returncode == 0:
                 messages.append("Serial console disabled")
@@ -471,15 +471,15 @@ def check_i2c_spi_enabled() -> Tuple[bool, bool]:
         return False, False
 
     try:
-        # Check I2C
+        # Check I2C (generous timeout for slow Pis)
         i2c_result = subprocess.run(
-            ["sudo", "raspi-config", "nonint", "get_i2c"], capture_output=True, text=True, timeout=10
+            ["sudo", "raspi-config", "nonint", "get_i2c"], capture_output=True, text=True, timeout=30
         )
         i2c_enabled = i2c_result.returncode == 0 and i2c_result.stdout.strip() == "0"
 
-        # Check SPI
+        # Check SPI (generous timeout for slow Pis)
         spi_result = subprocess.run(
-            ["sudo", "raspi-config", "nonint", "get_spi"], capture_output=True, text=True, timeout=10
+            ["sudo", "raspi-config", "nonint", "get_spi"], capture_output=True, text=True, timeout=30
         )
         spi_enabled = spi_result.returncode == 0 and spi_result.stdout.strip() == "0"
 
