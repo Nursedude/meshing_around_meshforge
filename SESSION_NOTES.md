@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-11
+**Last Updated:** 2026-02-12
 **Version:** 0.5.0-beta
 
 ---
@@ -46,7 +46,29 @@ python3 -m py_compile configure_bot.py
 - **Connection health:** double-tap verification pattern from meshforge
 - **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
 
-### Recent Improvements (2026-02-11)
+### Recent Improvements (2026-02-12 — Code Review & Accessibility Health Check)
+- **Target environment:** Pi Zero 2W behind Arden router
+- **CRITICAL FIX: `--import-config` was broken** (mesh_client.py:552,593):
+  - `CONFIG_PATH` was never defined — should be `CONFIG_FILE` (NameError on use)
+  - Both occurrences fixed to `CONFIG_FILE`
+- **CRITICAL FIX: `web/app.py` sys.exit at import time** (line 43):
+  - Missing FastAPI caused `sys.exit(1)` even when module was only imported for availability check
+  - Now only exits when run directly (`__name__ == "__main__"`)
+- **Web UI network accessibility** (mesh_client.py):
+  - Added `--host` and `--port` CLI args for web server bind address
+  - Default 127.0.0.1 is safe, but Pi users can now do `--host 0.0.0.0`
+  - Example: `python3 mesh_client.py --web --host 0.0.0.0 --port 8080`
+- **Internet check resilience** (mesh_client.py:121):
+  - `check_internet()` tried only Google DNS 8.8.8.8 — fails behind restrictive routers
+  - Now tries 8.8.8.8, 1.1.1.1, 9.9.9.9 in sequence
+- **Thread safety fix** (mqtt_client.py:510):
+  - `_message_count` increment moved inside `_stats_lock` block
+- **Full codebase reviewed** — 12 files, all features verified accessible
+- **Pi Zero 2W notes:** MQTT mode recommended, MAX_NODES=10000 could be lowered for 512MB RAM
+- **Config system note:** `[connection]` sections in INI vs `[mqtt]`/`[web]` in Config dataclass — works via defaults but naming could be unified in future refactor
+- Branch: `claude/code-review-accessibility-kSLI6`
+
+### Previous Improvements (2026-02-11)
 - **CI Fix: httpx dependency** — Starlette TestClient requires httpx at import time; added to CI pip install
 - **CSRF double-cookie bug fix** (web/app.py):
   - `/api/csrf-token` endpoint and CSRF middleware both generated independent tokens
@@ -124,8 +146,10 @@ python3 -m py_compile configure_bot.py
 
 ### High Priority (P1) - Ready for Physical Testing
 - [ ] Hardware testing - Serial mode with real Meshtastic device
-- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity with private channel
+- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity from Pi2W behind Arden router
+- [ ] Web UI remote access testing - `--host 0.0.0.0` from another device on network
 - [x] Integration testing - configure_bot.py modules vs fallback (fixed 2 crash bugs)
+- [x] Code review & accessibility health check (2026-02-12, 5 bugs fixed)
 
 ### Medium Priority (P2) - Code Complete
 - [x] Multi-interface support (up to 9 interfaces)
@@ -213,6 +237,18 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ---
 
 ## Work History (Summary)
+
+### 2026-02-12 (Code Review & Accessibility Health Check)
+- **Full codebase review** targeting Pi Zero 2W deployment behind Arden router
+- **5 bugs fixed** (2 critical, 3 moderate):
+  1. `CONFIG_PATH` undefined in `import_upstream_config` → NameError (CRITICAL)
+  2. `web/app.py` `sys.exit(1)` at import time (CRITICAL)
+  3. Web host inaccessible from network — added `--host`/`--port` CLI args (MODERATE)
+  4. `check_internet()` only tried 8.8.8.8 — added multi-host fallback (MODERATE)
+  5. `_message_count` thread safety — moved inside `_stats_lock` (MODERATE)
+- **Feature accessibility verified:** All 15 features accessible (2 were broken, now fixed)
+- **Architecture note:** Config system has dual path (bootstrap INI vs Config dataclass) with different section names — works but could be cleaner
+- Branch: `claude/code-review-accessibility-kSLI6`
 
 ### 2026-02-11 (CI Fix & Integration Test Session)
 - **CI failures diagnosed and fixed** across 3 commits:
