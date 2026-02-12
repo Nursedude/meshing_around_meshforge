@@ -27,13 +27,13 @@ Configuration:
 """
 
 import os
-import sys
-import subprocess
 import socket
+import subprocess
+import sys
 import time
-from pathlib import Path
 from configparser import ConfigParser
-from typing import Optional, Dict, List, Tuple, Any
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Version
 VERSION = "0.5.0-beta"
@@ -48,8 +48,10 @@ LOG_FILE = SCRIPT_DIR / "mesh_client.log"
 # ZERO-DEPENDENCY UTILITIES (stdlib only)
 # =============================================================================
 
+
 class Colors:
     """ANSI color codes for terminal output."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
     RED = "\033[91m"
@@ -61,8 +63,8 @@ class Colors:
     @classmethod
     def disable(cls):
         """Disable colors for non-TTY output."""
-        for attr in ['RESET', 'BOLD', 'RED', 'GREEN', 'YELLOW', 'BLUE', 'CYAN']:
-            setattr(cls, attr, '')
+        for attr in ["RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "CYAN"]:
+            setattr(cls, attr, "")
 
 
 def log(msg: str, level: str = "INFO"):
@@ -72,18 +74,15 @@ def log(msg: str, level: str = "INFO"):
 
     # Write to log file
     try:
-        with open(LOG_FILE, 'a') as f:
+        with open(LOG_FILE, "a") as f:
             f.write(log_msg + "\n")
     except OSError:
         pass
 
     # Print to stdout with colors
-    color = {
-        "INFO": Colors.CYAN,
-        "OK": Colors.GREEN,
-        "WARN": Colors.YELLOW,
-        "ERROR": Colors.RED
-    }.get(level, Colors.RESET)
+    color = {"INFO": Colors.CYAN, "OK": Colors.GREEN, "WARN": Colors.YELLOW, "ERROR": Colors.RED}.get(
+        level, Colors.RESET
+    )
 
     print(f"{color}[{level}]{Colors.RESET} {msg}")
 
@@ -103,12 +102,7 @@ def print_banner():
 def run_cmd(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=capture,
-            text=True,
-            timeout=timeout
-        )
+        result = subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout)
         return result.returncode, result.stdout or "", result.stderr or ""
     except subprocess.TimeoutExpired:
         return -1, "", "Command timed out"
@@ -164,7 +158,6 @@ _IMPORT_NAME_MAP = {
 }
 
 
-
 def check_dependency(package: str) -> bool:
     """Check if a Python package is installed."""
     try:
@@ -190,18 +183,17 @@ def get_missing_deps(config: ConfigParser) -> List[str]:
             if not check_dependency(dep):
                 missing.append(dep)
 
-    conn_type = config.get("connection", "type", fallback="auto")
+    conn_type = config.get("interface", "type", fallback="auto")
 
-    if conn_type == "mqtt" or config.getboolean("connection", "mqtt_enabled", fallback=False):
+    if conn_type == "mqtt" or config.getboolean("mqtt", "enabled", fallback=False):
         for dep in OPTIONAL_DEPS["mqtt"]:
             if not check_dependency(dep):
                 missing.append(dep)
 
     if conn_type in ["serial", "tcp", "auto"]:
-        if config.getboolean("connection", "meshtastic_enabled", fallback=True):
-            for dep in OPTIONAL_DEPS["meshtastic"]:
-                if not check_dependency(dep):
-                    missing.append(dep)
+        for dep in OPTIONAL_DEPS["meshtastic"]:
+            if not check_dependency(dep):
+                missing.append(dep)
 
     if conn_type == "ble":
         for dep in OPTIONAL_DEPS["ble"]:
@@ -278,7 +270,7 @@ DEFAULT_CONFIG = """
 # Edit this file to customize your setup.
 # ============================================================================
 
-[connection]
+[interface]
 # Connection type: auto, serial, tcp, mqtt, ble
 # - auto: Try serial first, then tcp, then mqtt
 # - serial: Direct USB/serial connection to radio
@@ -287,38 +279,50 @@ DEFAULT_CONFIG = """
 # - ble: Bluetooth LE connection
 type = auto
 
-# Serial settings (for type=serial or auto)
-serial_port = auto
-# Set to specific port like /dev/ttyUSB0, /dev/ttyACM0, or "auto" for detection
-serial_baud = 115200
+# Serial port (for type=serial or auto)
+# Set to specific port like /dev/ttyUSB0, /dev/ttyACM0, or leave empty for auto-detect
+port =
 
-# TCP settings (for type=tcp)
-tcp_host =
-tcp_port = 4403
+# Serial baudrate
+baudrate = 115200
 
-# MQTT settings (for type=mqtt or mqtt_enabled=true)
-mqtt_enabled = false
-mqtt_broker = mqtt.meshtastic.org
-mqtt_port = 1883
-mqtt_use_tls = false
-mqtt_username = meshdev
-mqtt_password = large4cats
-mqtt_topic_root = msh/US
-mqtt_channel = LongFast
-# Your node ID for MQTT (leave empty to receive only)
-mqtt_node_id =
+# TCP hostname (for type=tcp)
+hostname =
 
-# BLE settings (for type=ble)
-ble_address =
+# BLE MAC address (for type=ble)
 # MAC address like AA:BB:CC:DD:EE:FF or "scan" for discovery
+mac =
 
 # Connection behavior
 auto_reconnect = true
 reconnect_delay = 5
 connection_timeout = 30
 
-# Enable meshtastic library (disable for MQTT-only mode)
-meshtastic_enabled = true
+[mqtt]
+# MQTT broker connection (no radio needed)
+# Enable MQTT mode
+enabled = false
+
+# Broker settings
+broker = mqtt.meshtastic.org
+port = 1883
+use_tls = false
+
+# Authentication (default public broker credentials)
+username = meshdev
+password = large4cats
+
+# Topic configuration
+topic_root = msh/US
+channel = LongFast
+
+# Your node ID for MQTT (leave empty to receive only)
+node_id =
+
+# Connection settings
+qos = 1
+reconnect_delay = 5
+max_reconnect_attempts = 10
 
 [features]
 # Main interface mode: tui, web, both, headless
@@ -439,6 +443,73 @@ verbose = false
 """
 
 
+def _migrate_connection_section(config: ConfigParser) -> bool:
+    """Migrate legacy [connection] section to [interface] + [mqtt].
+
+    Early versions of mesh_client.ini used a single [connection] section
+    for all connection settings including MQTT. The canonical format uses
+    [interface] for device settings and [mqtt] for broker settings.
+
+    Returns True if migration was performed.
+    """
+    if not config.has_section("connection"):
+        return False
+
+    log("Migrating legacy [connection] config to [interface] + [mqtt]...", "INFO")
+
+    # Map [connection] keys to [interface] section
+    if not config.has_section("interface"):
+        config.add_section("interface")
+
+    key_map_interface = {
+        "type": "type",
+        "serial_port": "port",
+        "serial_baud": "baudrate",
+        "tcp_host": "hostname",
+        "ble_address": "mac",
+        "auto_reconnect": "auto_reconnect",
+        "reconnect_delay": "reconnect_delay",
+        "connection_timeout": "connection_timeout",
+    }
+
+    for old_key, new_key in key_map_interface.items():
+        if config.has_option("connection", old_key):
+            value = config.get("connection", old_key)
+            # Skip "auto" for serial_port — canonical format uses empty string
+            if old_key == "serial_port" and value.lower() == "auto":
+                value = ""
+            if not config.has_option("interface", new_key):
+                config.set("interface", new_key, value)
+
+    # Map [connection] MQTT keys to [mqtt] section
+    if not config.has_section("mqtt"):
+        config.add_section("mqtt")
+
+    key_map_mqtt = {
+        "mqtt_enabled": "enabled",
+        "mqtt_broker": "broker",
+        "mqtt_port": "port",
+        "mqtt_use_tls": "use_tls",
+        "mqtt_username": "username",
+        "mqtt_password": "password",
+        "mqtt_topic_root": "topic_root",
+        "mqtt_channel": "channel",
+        "mqtt_node_id": "node_id",
+    }
+
+    for old_key, new_key in key_map_mqtt.items():
+        if config.has_option("connection", old_key):
+            value = config.get("connection", old_key)
+            if not config.has_option("mqtt", new_key):
+                config.set("mqtt", new_key, value)
+
+    # Remove the legacy section
+    config.remove_section("connection")
+
+    log("Config migrated to [interface] + [mqtt] format", "OK")
+    return True
+
+
 def load_config() -> ConfigParser:
     """Load or create configuration file."""
     config = ConfigParser()
@@ -446,6 +517,10 @@ def load_config() -> ConfigParser:
     if CONFIG_FILE.exists():
         config.read(CONFIG_FILE)
         log(f"Loaded config from {CONFIG_FILE}", "OK")
+
+        # Migrate legacy [connection] section if present
+        if _migrate_connection_section(config):
+            save_config(config)
     else:
         # Create default config
         config.read_string(DEFAULT_CONFIG)
@@ -457,7 +532,7 @@ def load_config() -> ConfigParser:
 
 def save_config(config: ConfigParser):
     """Save configuration to file with restricted permissions."""
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, "w") as f:
         config.write(f)
     os.chmod(CONFIG_FILE, 0o600)
     log(f"Saved config to {CONFIG_FILE}", "OK")
@@ -466,6 +541,7 @@ def save_config(config: ConfigParser):
 # =============================================================================
 # CONNECTION DETECTION
 # =============================================================================
+
 
 def detect_serial_ports() -> List[str]:
     """Detect available serial ports."""
@@ -480,6 +556,7 @@ def detect_serial_ports() -> List[str]:
     ]
 
     import glob
+
     for pattern in patterns:
         ports.extend(glob.glob(pattern))
 
@@ -488,7 +565,7 @@ def detect_serial_ports() -> List[str]:
 
 def detect_connection_type(config: ConfigParser) -> str:
     """Auto-detect the best connection type."""
-    conn_type = config.get("connection", "type", fallback="auto")
+    conn_type = config.get("interface", "type", fallback="auto")
 
     if conn_type != "auto":
         return conn_type
@@ -502,13 +579,13 @@ def detect_connection_type(config: ConfigParser) -> str:
         return "serial"
 
     # Check for TCP host configured
-    tcp_host = config.get("connection", "tcp_host", fallback="")
+    tcp_host = config.get("interface", "hostname", fallback="")
     if tcp_host:
         log(f"TCP host configured: {tcp_host}", "INFO")
         return "tcp"
 
     # Fall back to MQTT if enabled
-    if config.getboolean("connection", "mqtt_enabled", fallback=False):
+    if config.getboolean("mqtt", "enabled", fallback=False):
         log("Falling back to MQTT connection", "INFO")
         return "mqtt"
 
@@ -520,6 +597,7 @@ def detect_connection_type(config: ConfigParser) -> str:
 # =============================================================================
 # CONFIG IMPORT
 # =============================================================================
+
 
 def import_upstream_config(source_path: str):
     """Import configuration from upstream meshing-around config.ini.
@@ -541,6 +619,7 @@ def import_upstream_config(source_path: str):
     try:
         # Try to use the config_schema module for proper conversion
         from meshing_around_clients.core.config_schema import ConfigLoader, UnifiedConfig
+
         SCHEMA_AVAILABLE = True
     except ImportError:
         SCHEMA_AVAILABLE = False
@@ -577,19 +656,19 @@ def import_upstream_config(source_path: str):
         new_parser = configparser.ConfigParser()
 
         # Copy interface section
-        if parser.has_section('interface'):
-            new_parser.add_section('interface.1')
-            for key, value in parser.items('interface'):
-                new_parser.set('interface.1', key, value)
+        if parser.has_section("interface"):
+            new_parser.add_section("interface.1")
+            for key, value in parser.items("interface"):
+                new_parser.set("interface.1", key, value)
 
         # Copy general section
-        if parser.has_section('general'):
-            new_parser.add_section('general')
-            for key, value in parser.items('general'):
-                new_parser.set('general', key, value)
+        if parser.has_section("general"):
+            new_parser.add_section("general")
+            for key, value in parser.items("general"):
+                new_parser.set("general", key, value)
 
         # Copy MQTT if present
-        for section in ['mqtt', 'emergencyHandler']:
+        for section in ["mqtt", "emergencyHandler"]:
             if parser.has_section(section):
                 new_parser.add_section(section)
                 for key, value in parser.items(section):
@@ -598,7 +677,7 @@ def import_upstream_config(source_path: str):
         # Save
         dest = Path(CONFIG_FILE)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, 'w') as f:
+        with open(dest, "w") as f:
             new_parser.write(f)
 
         log(f"Config imported (basic) to: {dest}", "OK")
@@ -608,6 +687,7 @@ def import_upstream_config(source_path: str):
 # =============================================================================
 # INTERACTIVE SETUP
 # =============================================================================
+
 
 def interactive_setup():
     """Run interactive setup wizard."""
@@ -627,28 +707,28 @@ def interactive_setup():
 
     conn_map = {"1": "serial", "2": "tcp", "3": "mqtt", "4": "auto"}
     conn_type = conn_map.get(choice, "auto")
-    config.set("connection", "type", conn_type)
+    config.set("interface", "type", conn_type)
 
     if conn_type == "serial":
         ports = detect_serial_ports()
         if ports:
             print(f"\nDetected ports: {', '.join(ports)}")
-        port = input("Serial port [auto]: ").strip() or "auto"
-        config.set("connection", "serial_port", port)
+        port = input("Serial port [auto-detect]: ").strip()
+        if port:
+            config.set("interface", "port", port)
 
     elif conn_type == "tcp":
         host = input("TCP host [192.168.1.1]: ").strip() or "192.168.1.1"
-        config.set("connection", "tcp_host", host)
+        config.set("interface", "hostname", host)
 
     elif conn_type == "mqtt":
-        config.set("connection", "mqtt_enabled", "true")
-        config.set("connection", "meshtastic_enabled", "false")
+        config.set("mqtt", "enabled", "true")
 
         broker = input("MQTT broker [mqtt.meshtastic.org]: ").strip() or "mqtt.meshtastic.org"
-        config.set("connection", "mqtt_broker", broker)
+        config.set("mqtt", "broker", broker)
 
         topic = input("MQTT topic root [msh/US]: ").strip() or "msh/US"
-        config.set("connection", "mqtt_topic_root", topic)
+        config.set("mqtt", "topic_root", topic)
 
     # Interface mode
     print("\nInterface Mode:")
@@ -678,6 +758,7 @@ def interactive_setup():
 # MAIN APPLICATION
 # =============================================================================
 
+
 def check_system():
     """Check system requirements."""
     log("Checking system requirements...", "INFO")
@@ -690,6 +771,7 @@ def check_system():
 
     # Platform
     import platform
+
     log(f"Platform: {platform.system()} {platform.release()}", "OK")
 
     # Check for Pi
@@ -726,10 +808,10 @@ def run_application(config: ConfigParser):
         # Update config from ini
         app_config.interface.type = conn_type
         if conn_type == "serial":
-            port = config.get("connection", "serial_port", fallback="auto")
-            app_config.interface.port = "" if port == "auto" else port
+            port = config.get("interface", "port", fallback="")
+            app_config.interface.port = port
         elif conn_type == "tcp":
-            app_config.interface.hostname = config.get("connection", "tcp_host", fallback="")
+            app_config.interface.hostname = config.get("interface", "hostname", fallback="")
 
         # Determine if demo mode
         if demo_mode or conn_type == "demo":
@@ -737,11 +819,13 @@ def run_application(config: ConfigParser):
 
         if mode == "tui":
             from meshing_around_clients.tui.app import MeshingAroundTUI
+
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
             tui.run_interactive()
 
         elif mode == "web":
             from meshing_around_clients.web.app import WebApplication
+
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
             host = config.get("features", "web_host", fallback="127.0.0.1")
             port = config.getint("features", "web_port", fallback=8080)
@@ -752,8 +836,9 @@ def run_application(config: ConfigParser):
             # NOTE: WebApplication and MeshingAroundTUI each create their own
             # API instances internally. A shared API is not yet supported.
             import threading
-            from meshing_around_clients.web.app import WebApplication
+
             from meshing_around_clients.tui.app import MeshingAroundTUI
+            from meshing_around_clients.web.app import WebApplication
 
             # Start web server in thread
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
@@ -762,6 +847,7 @@ def run_application(config: ConfigParser):
 
             def run_web():
                 import uvicorn
+
                 uvicorn.run(web_app.app, host=host, port=port, log_level="warning")
 
             web_thread = threading.Thread(target=run_web, daemon=True)
@@ -798,6 +884,7 @@ def run_application(config: ConfigParser):
     except (OSError, ConnectionError, RuntimeError, ValueError, TypeError) as e:
         log(f"Application error: {e}", "ERROR")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -820,22 +907,21 @@ Examples:
   python3 mesh_client.py --demo       # Demo mode (no hardware)
   python3 mesh_client.py --check      # Check dependencies only
   python3 mesh_client.py --import-config /path/to/config.ini  # Import upstream config
-        """
+        """,
     )
 
     parser.add_argument("--setup", action="store_true", help="Run interactive setup")
     parser.add_argument("--check", action="store_true", help="Check dependencies only")
     parser.add_argument("--tui", action="store_true", help="Force TUI mode")
     parser.add_argument("--web", action="store_true", help="Force Web mode")
-    parser.add_argument("--host", type=str, default=None,
-                        help="Web server bind address (e.g. 0.0.0.0 for network access)")
-    parser.add_argument("--port", type=int, default=None,
-                        help="Web server port (default: 8080)")
+    parser.add_argument(
+        "--host", type=str, default=None, help="Web server bind address (e.g. 0.0.0.0 for network access)"
+    )
+    parser.add_argument("--port", type=int, default=None, help="Web server port (default: 8080)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
-    parser.add_argument("--import-config", metavar="PATH",
-                        help="Import config from upstream meshing-around config.ini")
+    parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     args = parser.parse_args()
