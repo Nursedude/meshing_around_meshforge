@@ -14,12 +14,13 @@ from typing import Any, Dict, List, Optional
 class InterfaceConfig:
     """Interface connection configuration."""
 
-    type: str = "serial"  # serial, tcp, ble, mqtt
+    type: str = "serial"  # serial, tcp, http, ble, mqtt
     port: str = ""  # Auto-detect if empty
     hostname: str = ""
     mac: str = ""
     baudrate: int = 115200
     enabled: bool = True  # For multi-interface support
+    http_url: str = ""  # Base URL for meshtasticd HTTP API (e.g. http://meshtastic.local)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "InterfaceConfig":
@@ -31,6 +32,7 @@ class InterfaceConfig:
             mac=str(data.get("mac", "")),
             baudrate=int(data.get("baudrate", 115200)),
             enabled=_str_to_bool(data.get("enabled", True)),
+            http_url=str(data.get("http_url", "")),
         )
 
 
@@ -372,6 +374,7 @@ class Config:
                 self._parser.set(section, "hostname", iface.hostname)
                 self._parser.set(section, "mac", iface.mac)
                 self._parser.set(section, "baudrate", str(iface.baudrate))
+                self._parser.set(section, "http_url", iface.http_url)
 
             # General
             if not self._parser.has_section("general"):
@@ -458,6 +461,7 @@ class Config:
                     "hostname": iface.hostname,
                     "mac": iface.mac,
                     "baudrate": iface.baudrate,
+                    "http_url": iface.http_url,
                 }
                 for iface in self._interfaces
             ],
@@ -468,6 +472,7 @@ class Config:
                 "hostname": self.interface.hostname,
                 "mac": self.interface.mac,
                 "baudrate": self.interface.baudrate,
+                "http_url": self.interface.http_url,
             },
             "general": {
                 "bot_name": self.bot_name,

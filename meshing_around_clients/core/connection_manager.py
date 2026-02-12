@@ -3,7 +3,8 @@ Unified Connection Manager for Meshing-Around Clients.
 
 Supports multiple connection types with automatic fallback:
 - Serial (direct USB connection)
-- TCP (remote device)
+- TCP (remote device via protobuf stream)
+- HTTP (meshtasticd HTTP API)
 - MQTT (broker-based, no radio)
 - BLE (Bluetooth)
 - Demo (simulated)
@@ -37,6 +38,7 @@ class ConnectionType(Enum):
 
     SERIAL = "serial"
     TCP = "tcp"
+    HTTP = "http"
     MQTT = "mqtt"
     BLE = "ble"
     DEMO = "demo"
@@ -229,6 +231,10 @@ class ConnectionManager:
         if serial_ports:
             return ConnectionType.SERIAL
 
+        # Check for HTTP URL configured (meshtasticd HTTP API)
+        if getattr(iface, "http_url", ""):
+            return ConnectionType.HTTP
+
         # Check for TCP host configured
         if iface.hostname:
             return ConnectionType.TCP
@@ -252,7 +258,13 @@ class ConnectionManager:
         self._status.connection_type = connection_type
 
         # Define fallback order
-        fallback_order = [ConnectionType.SERIAL, ConnectionType.TCP, ConnectionType.MQTT, ConnectionType.DEMO]
+        fallback_order = [
+            ConnectionType.SERIAL,
+            ConnectionType.TCP,
+            ConnectionType.HTTP,
+            ConnectionType.MQTT,
+            ConnectionType.DEMO,
+        ]
 
         # Start from requested type
         if connection_type in fallback_order:
@@ -292,6 +304,8 @@ class ConnectionManager:
                 return self._connect_serial()
             elif conn_type == ConnectionType.TCP:
                 return self._connect_tcp()
+            elif conn_type == ConnectionType.HTTP:
+                return self._connect_http()
             elif conn_type == ConnectionType.MQTT:
                 return self._connect_mqtt()
             elif conn_type == ConnectionType.BLE:
@@ -345,6 +359,34 @@ class ConnectionManager:
             return False
         except ImportError:
             logger.warning("Meshtastic library not available for TCP connection")
+            return False
+
+    def _connect_http(self) -> bool:
+        """Connect via meshtasticd HTTP API."""
+        try:
+            from .meshtastic_api import MeshtasticAPI
+
+            iface = self._get_current_interface()
+            base_url = getattr(iface, "http_url", "") or ""
+            hostname = iface.hostname or ""
+            if not base_url and not hostname:
+                return False
+
+            self.config.interface.type = "http"
+            if base_url:
+                self.config.interface.http_url = base_url
+            elif hostname:
+                self.config.interface.hostname = hostname
+            self._api = MeshtasticAPI(self.config)
+
+            if self._api.connect():
+                display_url = base_url or f"http://{hostname}"
+                self._status.device_info = f"HTTP: {display_url}"
+                self._forward_callbacks()
+                return True
+            return False
+        except ImportError:
+            logger.warning("Meshtastic library not available for HTTP connection")
             return False
 
     def _connect_mqtt(self) -> bool:

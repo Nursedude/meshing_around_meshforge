@@ -6,7 +6,8 @@ Zero-dependency bootstrap launcher for mesh network monitoring.
 
 Supports:
 - Direct radio connection (serial/USB)
-- TCP connection to remote Meshtastic device
+- TCP connection to remote Meshtastic device (protobuf port)
+- HTTP connection to meshtasticd HTTP API
 - MQTT connection (no radio required)
 - BLE connection
 
@@ -190,7 +191,7 @@ def get_missing_deps(config: ConfigParser) -> List[str]:
             if not check_dependency(dep):
                 missing.append(dep)
 
-    if conn_type in ["serial", "tcp", "auto"]:
+    if conn_type in ["serial", "tcp", "http", "auto"]:
         for dep in OPTIONAL_DEPS["meshtastic"]:
             if not check_dependency(dep):
                 missing.append(dep)
@@ -271,10 +272,11 @@ DEFAULT_CONFIG = """
 # ============================================================================
 
 [interface]
-# Connection type: auto, serial, tcp, mqtt, ble
-# - auto: Try serial first, then tcp, then mqtt
+# Connection type: auto, serial, tcp, http, mqtt, ble
+# - auto: Try serial first, then tcp, then http, then mqtt
 # - serial: Direct USB/serial connection to radio
-# - tcp: TCP connection to remote Meshtastic device
+# - tcp: TCP connection to remote Meshtastic device (protobuf port 4403)
+# - http: HTTP connection to meshtasticd HTTP API
 # - mqtt: MQTT broker connection (no radio needed)
 # - ble: Bluetooth LE connection
 type = auto
@@ -288,6 +290,11 @@ baudrate = 115200
 
 # TCP hostname (for type=tcp)
 hostname =
+
+# HTTP URL for meshtasticd HTTP API (for type=http)
+# e.g. http://meshtastic.local or http://192.168.1.100
+# If empty and type=http, falls back to http://<hostname>
+http_url =
 
 # BLE MAC address (for type=ble)
 # MAC address like AA:BB:CC:DD:EE:FF or "scan" for discovery
@@ -466,6 +473,7 @@ def _migrate_connection_section(config: ConfigParser) -> bool:
         "serial_port": "port",
         "serial_baud": "baudrate",
         "tcp_host": "hostname",
+        "http_url": "http_url",
         "ble_address": "mac",
         "auto_reconnect": "auto_reconnect",
         "reconnect_delay": "reconnect_delay",
@@ -577,6 +585,12 @@ def detect_connection_type(config: ConfigParser) -> str:
     if ports:
         log(f"Found serial ports: {ports}", "OK")
         return "serial"
+
+    # Check for HTTP URL configured (meshtasticd HTTP API)
+    http_url = config.get("interface", "http_url", fallback="")
+    if http_url:
+        log(f"HTTP URL configured: {http_url}", "INFO")
+        return "http"
 
     # Check for TCP host configured
     tcp_host = config.get("interface", "hostname", fallback="")
@@ -699,13 +713,14 @@ def interactive_setup():
     # Connection type
     print("Connection Options:")
     print("  1. Serial (USB radio connected)")
-    print("  2. TCP (Remote Meshtastic device)")
-    print("  3. MQTT (No radio, connect via broker)")
-    print("  4. Auto-detect")
+    print("  2. TCP (Remote Meshtastic device, protobuf port)")
+    print("  3. HTTP (meshtasticd HTTP API)")
+    print("  4. MQTT (No radio, connect via broker)")
+    print("  5. Auto-detect")
 
-    choice = input("\nSelect connection type [4]: ").strip() or "4"
+    choice = input("\nSelect connection type [5]: ").strip() or "5"
 
-    conn_map = {"1": "serial", "2": "tcp", "3": "mqtt", "4": "auto"}
+    conn_map = {"1": "serial", "2": "tcp", "3": "http", "4": "mqtt", "5": "auto"}
     conn_type = conn_map.get(choice, "auto")
     config.set("interface", "type", conn_type)
 
@@ -720,6 +735,10 @@ def interactive_setup():
     elif conn_type == "tcp":
         host = input("TCP host [192.168.1.1]: ").strip() or "192.168.1.1"
         config.set("interface", "hostname", host)
+
+    elif conn_type == "http":
+        url = input("meshtasticd HTTP URL [http://meshtastic.local]: ").strip() or "http://meshtastic.local"
+        config.set("interface", "http_url", url)
 
     elif conn_type == "mqtt":
         config.set("mqtt", "enabled", "true")
@@ -811,6 +830,10 @@ def run_application(config: ConfigParser):
             port = config.get("interface", "port", fallback="")
             app_config.interface.port = port
         elif conn_type == "tcp":
+            app_config.interface.hostname = config.get("interface", "hostname", fallback="")
+        elif conn_type == "http":
+            app_config.interface.http_url = config.get("interface", "http_url", fallback="")
+            # Also set hostname as fallback
             app_config.interface.hostname = config.get("interface", "hostname", fallback="")
 
         # Determine if demo mode

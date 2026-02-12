@@ -2,17 +2,15 @@
 Unit tests for meshing_around_clients.core.config
 """
 
-import unittest
-import tempfile
 import os
+import sys
+import tempfile
+import unittest
 from pathlib import Path
 
-import sys
-sys.path.insert(0, str(__file__).rsplit('/tests/', 1)[0])
+sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
-from meshing_around_clients.core.config import (
-    InterfaceConfig, AlertConfig, WebConfig, TuiConfig, Config
-)
+from meshing_around_clients.core.config import AlertConfig, Config, InterfaceConfig, TuiConfig, WebConfig
 
 
 class TestInterfaceConfig(unittest.TestCase):
@@ -29,6 +27,24 @@ class TestInterfaceConfig(unittest.TestCase):
         cfg = InterfaceConfig(type="tcp", hostname="192.168.1.1", port="4403")
         self.assertEqual(cfg.type, "tcp")
         self.assertEqual(cfg.hostname, "192.168.1.1")
+
+    def test_http_url_field(self):
+        """Test http_url field for meshtasticd HTTP API."""
+        cfg = InterfaceConfig(type="http", http_url="http://meshtastic.local")
+        self.assertEqual(cfg.type, "http")
+        self.assertEqual(cfg.http_url, "http://meshtastic.local")
+
+    def test_http_url_default_empty(self):
+        """Test http_url defaults to empty string."""
+        cfg = InterfaceConfig()
+        self.assertEqual(cfg.http_url, "")
+
+    def test_from_dict_with_http_url(self):
+        """Test InterfaceConfig.from_dict handles http_url."""
+        data = {"type": "http", "http_url": "http://192.168.1.50"}
+        cfg = InterfaceConfig.from_dict(data)
+        self.assertEqual(cfg.type, "http")
+        self.assertEqual(cfg.http_url, "http://192.168.1.50")
 
 
 class TestAlertConfig(unittest.TestCase):
@@ -212,6 +228,28 @@ class TestConfig(unittest.TestCase):
             self.assertTrue(result)
             self.assertTrue(config_path.exists())
 
+    def test_save_and_load_http_url(self):
+        """Test saving and loading HTTP URL configuration."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "http_config.ini"
+
+            cfg1 = Config(config_path=str(config_path))
+            cfg1.interface.type = "http"
+            cfg1.interface.http_url = "http://meshtastic.local"
+            cfg1.save()
+
+            cfg2 = Config(config_path=str(config_path))
+            self.assertEqual(cfg2.interface.type, "http")
+            self.assertEqual(cfg2.interface.http_url, "http://meshtastic.local")
+
+    def test_to_dict_includes_http_url(self):
+        """Test to_dict includes http_url field."""
+        cfg = Config(config_path="/nonexistent/path/config.ini")
+        cfg.interface.http_url = "http://192.168.1.50"
+        d = cfg.to_dict()
+        self.assertEqual(d["interface"]["http_url"], "http://192.168.1.50")
+        self.assertIn("http_url", d["interfaces"][0])
+
     def test_interface_baudrate(self):
         """Test baudrate is correctly saved and loaded as integer."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -234,8 +272,7 @@ class TestConfigDefaults(unittest.TestCase):
         cfg = AlertConfig()
         expected_terms = ["emergency", "911", "help", "sos", "mayday"]
         for term in expected_terms:
-            self.assertIn(term, cfg.emergency_keywords,
-                          f"Missing critical keyword: {term}")
+            self.assertIn(term, cfg.emergency_keywords, f"Missing critical keyword: {term}")
 
     def test_default_web_binds_localhost(self):
         """Web server should default to localhost for security."""
