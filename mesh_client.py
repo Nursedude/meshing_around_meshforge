@@ -27,13 +27,13 @@ Configuration:
 """
 
 import os
-import sys
-import subprocess
 import socket
+import subprocess
+import sys
 import time
-from pathlib import Path
 from configparser import ConfigParser
-from typing import Optional, Dict, List, Tuple, Any
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 # Version
 VERSION = "0.5.0-beta"
@@ -48,8 +48,10 @@ LOG_FILE = SCRIPT_DIR / "mesh_client.log"
 # ZERO-DEPENDENCY UTILITIES (stdlib only)
 # =============================================================================
 
+
 class Colors:
     """ANSI color codes for terminal output."""
+
     RESET = "\033[0m"
     BOLD = "\033[1m"
     RED = "\033[91m"
@@ -61,8 +63,8 @@ class Colors:
     @classmethod
     def disable(cls):
         """Disable colors for non-TTY output."""
-        for attr in ['RESET', 'BOLD', 'RED', 'GREEN', 'YELLOW', 'BLUE', 'CYAN']:
-            setattr(cls, attr, '')
+        for attr in ["RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "CYAN"]:
+            setattr(cls, attr, "")
 
 
 def log(msg: str, level: str = "INFO"):
@@ -72,18 +74,15 @@ def log(msg: str, level: str = "INFO"):
 
     # Write to log file
     try:
-        with open(LOG_FILE, 'a') as f:
+        with open(LOG_FILE, "a") as f:
             f.write(log_msg + "\n")
     except OSError:
         pass
 
     # Print to stdout with colors
-    color = {
-        "INFO": Colors.CYAN,
-        "OK": Colors.GREEN,
-        "WARN": Colors.YELLOW,
-        "ERROR": Colors.RED
-    }.get(level, Colors.RESET)
+    color = {"INFO": Colors.CYAN, "OK": Colors.GREEN, "WARN": Colors.YELLOW, "ERROR": Colors.RED}.get(
+        level, Colors.RESET
+    )
 
     print(f"{color}[{level}]{Colors.RESET} {msg}")
 
@@ -103,12 +102,7 @@ def print_banner():
 def run_cmd(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
     try:
-        result = subprocess.run(
-            cmd,
-            capture_output=capture,
-            text=True,
-            timeout=timeout
-        )
+        result = subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout)
         return result.returncode, result.stdout or "", result.stderr or ""
     except subprocess.TimeoutExpired:
         return -1, "", "Command timed out"
@@ -162,7 +156,6 @@ _IMPORT_NAME_MAP = {
     "python-multipart": "multipart",
     "pypubsub": "pubsub",
 }
-
 
 
 def check_dependency(package: str) -> bool:
@@ -539,7 +532,7 @@ def load_config() -> ConfigParser:
 
 def save_config(config: ConfigParser):
     """Save configuration to file with restricted permissions."""
-    with open(CONFIG_FILE, 'w') as f:
+    with open(CONFIG_FILE, "w") as f:
         config.write(f)
     os.chmod(CONFIG_FILE, 0o600)
     log(f"Saved config to {CONFIG_FILE}", "OK")
@@ -548,6 +541,7 @@ def save_config(config: ConfigParser):
 # =============================================================================
 # CONNECTION DETECTION
 # =============================================================================
+
 
 def detect_serial_ports() -> List[str]:
     """Detect available serial ports."""
@@ -562,6 +556,7 @@ def detect_serial_ports() -> List[str]:
     ]
 
     import glob
+
     for pattern in patterns:
         ports.extend(glob.glob(pattern))
 
@@ -603,6 +598,7 @@ def detect_connection_type(config: ConfigParser) -> str:
 # CONFIG IMPORT
 # =============================================================================
 
+
 def import_upstream_config(source_path: str):
     """Import configuration from upstream meshing-around config.ini.
 
@@ -623,6 +619,7 @@ def import_upstream_config(source_path: str):
     try:
         # Try to use the config_schema module for proper conversion
         from meshing_around_clients.core.config_schema import ConfigLoader, UnifiedConfig
+
         SCHEMA_AVAILABLE = True
     except ImportError:
         SCHEMA_AVAILABLE = False
@@ -659,19 +656,19 @@ def import_upstream_config(source_path: str):
         new_parser = configparser.ConfigParser()
 
         # Copy interface section
-        if parser.has_section('interface'):
-            new_parser.add_section('interface.1')
-            for key, value in parser.items('interface'):
-                new_parser.set('interface.1', key, value)
+        if parser.has_section("interface"):
+            new_parser.add_section("interface.1")
+            for key, value in parser.items("interface"):
+                new_parser.set("interface.1", key, value)
 
         # Copy general section
-        if parser.has_section('general'):
-            new_parser.add_section('general')
-            for key, value in parser.items('general'):
-                new_parser.set('general', key, value)
+        if parser.has_section("general"):
+            new_parser.add_section("general")
+            for key, value in parser.items("general"):
+                new_parser.set("general", key, value)
 
         # Copy MQTT if present
-        for section in ['mqtt', 'emergencyHandler']:
+        for section in ["mqtt", "emergencyHandler"]:
             if parser.has_section(section):
                 new_parser.add_section(section)
                 for key, value in parser.items(section):
@@ -680,7 +677,7 @@ def import_upstream_config(source_path: str):
         # Save
         dest = Path(CONFIG_FILE)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, 'w') as f:
+        with open(dest, "w") as f:
             new_parser.write(f)
 
         log(f"Config imported (basic) to: {dest}", "OK")
@@ -690,6 +687,7 @@ def import_upstream_config(source_path: str):
 # =============================================================================
 # INTERACTIVE SETUP
 # =============================================================================
+
 
 def interactive_setup():
     """Run interactive setup wizard."""
@@ -760,6 +758,7 @@ def interactive_setup():
 # MAIN APPLICATION
 # =============================================================================
 
+
 def check_system():
     """Check system requirements."""
     log("Checking system requirements...", "INFO")
@@ -772,6 +771,7 @@ def check_system():
 
     # Platform
     import platform
+
     log(f"Platform: {platform.system()} {platform.release()}", "OK")
 
     # Check for Pi
@@ -819,11 +819,13 @@ def run_application(config: ConfigParser):
 
         if mode == "tui":
             from meshing_around_clients.tui.app import MeshingAroundTUI
+
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
             tui.run_interactive()
 
         elif mode == "web":
             from meshing_around_clients.web.app import WebApplication
+
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
             host = config.get("features", "web_host", fallback="127.0.0.1")
             port = config.getint("features", "web_port", fallback=8080)
@@ -834,8 +836,9 @@ def run_application(config: ConfigParser):
             # NOTE: WebApplication and MeshingAroundTUI each create their own
             # API instances internally. A shared API is not yet supported.
             import threading
-            from meshing_around_clients.web.app import WebApplication
+
             from meshing_around_clients.tui.app import MeshingAroundTUI
+            from meshing_around_clients.web.app import WebApplication
 
             # Start web server in thread
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
@@ -844,6 +847,7 @@ def run_application(config: ConfigParser):
 
             def run_web():
                 import uvicorn
+
                 uvicorn.run(web_app.app, host=host, port=port, log_level="warning")
 
             web_thread = threading.Thread(target=run_web, daemon=True)
@@ -880,6 +884,7 @@ def run_application(config: ConfigParser):
     except (OSError, ConnectionError, RuntimeError, ValueError, TypeError) as e:
         log(f"Application error: {e}", "ERROR")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -902,22 +907,21 @@ Examples:
   python3 mesh_client.py --demo       # Demo mode (no hardware)
   python3 mesh_client.py --check      # Check dependencies only
   python3 mesh_client.py --import-config /path/to/config.ini  # Import upstream config
-        """
+        """,
     )
 
     parser.add_argument("--setup", action="store_true", help="Run interactive setup")
     parser.add_argument("--check", action="store_true", help="Check dependencies only")
     parser.add_argument("--tui", action="store_true", help="Force TUI mode")
     parser.add_argument("--web", action="store_true", help="Force Web mode")
-    parser.add_argument("--host", type=str, default=None,
-                        help="Web server bind address (e.g. 0.0.0.0 for network access)")
-    parser.add_argument("--port", type=int, default=None,
-                        help="Web server port (default: 8080)")
+    parser.add_argument(
+        "--host", type=str, default=None, help="Web server bind address (e.g. 0.0.0.0 for network access)"
+    )
+    parser.add_argument("--port", type=int, default=None, help="Web server port (default: 8080)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
-    parser.add_argument("--import-config", metavar="PATH",
-                        help="Import config from upstream meshing-around config.ini")
+    parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     args = parser.parse_args()

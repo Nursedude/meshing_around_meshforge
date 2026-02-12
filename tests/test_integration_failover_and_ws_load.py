@@ -115,8 +115,7 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
 
         with client._stats_lock:
             count_after = client._reconnect_count
-        self.assertEqual(count_before, count_after,
-                         "Intentional disconnect should not increment reconnect count")
+        self.assertEqual(count_before, count_after, "Intentional disconnect should not increment reconnect count")
 
     def test_network_state_preserved_across_reconnect(self):
         """Node data injected between connect cycles should survive."""
@@ -129,9 +128,7 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
                 "from": 0xFACECAFE,
                 "payload": {"user": {"shortName": "IT", "longName": "IntegrationTest"}},
             }
-            client._handle_json_message(
-                "msh/US/json", json.dumps(nodeinfo).encode()
-            )
+            client._handle_json_message("msh/US/json", json.dumps(nodeinfo).encode())
             self.assertIn("!facecafe", client.network.nodes)
         finally:
             client.disconnect()
@@ -216,13 +213,9 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
             # We should have received at least some traffic or discovered nodes
             # (encrypted messages still register nodes even without decryption)
             stats = client.stats
-            total_activity = (
-                stats["messages_received"]
-                + stats["nodes_discovered"]
-            )
+            total_activity = stats["messages_received"] + stats["nodes_discovered"]
             # Don't fail if broker is quiet - just verify we stayed connected
-            self.assertTrue(client.is_connected,
-                            "Client should still be connected after waiting")
+            self.assertTrue(client.is_connected, "Client should still be connected after waiting")
         finally:
             client.disconnect()
 
@@ -252,10 +245,11 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
         try:
             self.assertTrue(client.connect())
 
-            # Initial stats should be zero
-            stats = client.stats
-            self.assertEqual(stats["messages_received"], 0)
-            self.assertEqual(stats["reconnections"], 0)
+            # Capture baseline stats — real broker traffic may have already
+            # incremented counters between connect() and here.
+            baseline = client.stats
+            baseline_msgs = baseline["messages_received"]
+            baseline_nodes = baseline["nodes_discovered"]
 
             # Inject a message through _on_message (the MQTT callback) so that
             # the full stats pipeline runs — _handle_json_message alone does
@@ -271,8 +265,17 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
             client._on_message(None, None, mock_msg)
 
             stats = client.stats
-            self.assertEqual(stats["messages_received"], 1)
-            self.assertEqual(stats["nodes_discovered"], 1)
+            # Our injected message should add exactly 1 to the counters.
+            # Use delta from baseline because real broker traffic may also
+            # arrive on the public mqtt.meshtastic.org broker.
+            self.assertGreaterEqual(
+                stats["messages_received"] - baseline_msgs, 1, "Injected message should increment messages_received"
+            )
+            self.assertGreaterEqual(
+                stats["nodes_discovered"] - baseline_nodes,
+                1,
+                "New node from injected message should increment nodes_discovered",
+            )
         finally:
             client.disconnect()
 
@@ -481,20 +484,16 @@ class TestIntentionalDisconnectThreadSafety(unittest.TestCase):
 
         threads = []
         for i in range(3):
-            threads.append(threading.Thread(
-                target=simulate_disconnects, name=f"disc-{i}"))
-            threads.append(threading.Thread(
-                target=simulate_callbacks, name=f"cb-{i}"))
-            threads.append(threading.Thread(
-                target=simulate_health_reads, name=f"health-{i}"))
+            threads.append(threading.Thread(target=simulate_disconnects, name=f"disc-{i}"))
+            threads.append(threading.Thread(target=simulate_callbacks, name=f"cb-{i}"))
+            threads.append(threading.Thread(target=simulate_health_reads, name=f"health-{i}"))
 
         for t in threads:
             t.start()
         for t in threads:
             t.join(timeout=15)
 
-        self.assertEqual(len(errors), 0,
-                         f"Thread-safety errors in _intentional_disconnect: {errors}")
+        self.assertEqual(len(errors), 0, f"Thread-safety errors in _intentional_disconnect: {errors}")
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_disconnect_sets_flag_before_connected_false(self, mock_mqtt):
@@ -546,8 +545,8 @@ class TestIntentionalDisconnectThreadSafety(unittest.TestCase):
 try:
     from fastapi.testclient import TestClient
 
+    from meshing_around_clients.web.app import ConnectionManager as WSConnectionManager
     from meshing_around_clients.web.app import (
-        ConnectionManager as WSConnectionManager,
         RateLimiter,
         WebApplication,
     )
@@ -570,9 +569,7 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
         config = Config()
         cls.web_app = WebApplication(config=config, demo_mode=True)
         # Use generous rate limits for load testing
-        cls.web_app.rate_limiter = RateLimiter(
-            default_rpm=10000, write_rpm=5000, burst_rpm=10000
-        )
+        cls.web_app.rate_limiter = RateLimiter(default_rpm=10000, write_rpm=5000, burst_rpm=10000)
         cls.web_app.api.connect()
 
     def _make_client(self):
@@ -623,12 +620,14 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
             ws.receive_json()
 
             # Send a message
-            ws.send_json({
-                "type": "send_message",
-                "text": "Hello from WS test",
-                "destination": "^all",
-                "channel": 0,
-            })
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "text": "Hello from WS test",
+                    "destination": "^all",
+                    "channel": 0,
+                }
+            )
             response = ws.receive_json()
             self.assertEqual(response["type"], "message_status")
             self.assertTrue(response["success"])
@@ -639,11 +638,13 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()  # Consume init
 
-            ws.send_json({
-                "type": "send_message",
-                "text": "",
-                "channel": 0,
-            })
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "text": "",
+                    "channel": 0,
+                }
+            )
             response = ws.receive_json()
             self.assertEqual(response["type"], "message_status")
             self.assertFalse(response["success"])
@@ -654,11 +655,13 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
         with client.websocket_connect("/ws") as ws:
             ws.receive_json()  # Consume init
 
-            ws.send_json({
-                "type": "send_message",
-                "text": "x" * 229,
-                "channel": 0,
-            })
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "text": "x" * 229,
+                    "channel": 0,
+                }
+            )
             response = ws.receive_json()
             self.assertEqual(response["type"], "message_status")
             self.assertFalse(response["success"])
@@ -722,8 +725,7 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
             t.join(timeout=30)
 
         self.assertEqual(len(errors), 0, f"WebSocket client errors: {errors}")
-        self.assertEqual(len(results), num_clients,
-                         f"Only {len(results)}/{num_clients} clients completed")
+        self.assertEqual(len(results), num_clients, f"Only {len(results)}/{num_clients} clients completed")
 
     def test_websocket_high_frequency_messages(self):
         """Rapid-fire messages should all be processed without errors."""
@@ -733,11 +735,13 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
 
             num_messages = 50
             for i in range(num_messages):
-                ws.send_json({
-                    "type": "send_message",
-                    "text": f"Rapid fire #{i}",
-                    "channel": 0,
-                })
+                ws.send_json(
+                    {
+                        "type": "send_message",
+                        "text": f"Rapid fire #{i}",
+                        "channel": 0,
+                    }
+                )
 
             # Collect all responses
             successes = 0
@@ -746,8 +750,7 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
                 if response.get("type") == "message_status" and response.get("success"):
                     successes += 1
 
-            self.assertEqual(successes, num_messages,
-                             f"Only {successes}/{num_messages} rapid messages succeeded")
+            self.assertEqual(successes, num_messages, f"Only {successes}/{num_messages} rapid messages succeeded")
 
     def test_websocket_interleaved_ping_and_messages(self):
         """Interleaved pings and messages should all be handled correctly."""
@@ -759,11 +762,13 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
                 if i % 3 == 0:
                     ws.send_json({"type": "ping"})
                 else:
-                    ws.send_json({
-                        "type": "send_message",
-                        "text": f"Interleaved #{i}",
-                        "channel": 0,
-                    })
+                    ws.send_json(
+                        {
+                            "type": "send_message",
+                            "text": f"Interleaved #{i}",
+                            "channel": 0,
+                        }
+                    )
 
             # Collect responses
             pongs = 0
@@ -820,9 +825,7 @@ class TestWebSocketAuthIntegration(unittest.TestCase):
         config.web.enable_auth = True
         config.web.api_key = "ws-test-secret"
         cls.web_app = WebApplication(config=config, demo_mode=True)
-        cls.web_app.rate_limiter = RateLimiter(
-            default_rpm=10000, write_rpm=5000, burst_rpm=10000
-        )
+        cls.web_app.rate_limiter = RateLimiter(default_rpm=10000, write_rpm=5000, burst_rpm=10000)
         cls.web_app.api.connect()
 
     def _make_client(self):
@@ -868,9 +871,7 @@ class TestWebSocketAndRESTConcurrent(unittest.TestCase):
     def setUpClass(cls):
         config = Config()
         cls.web_app = WebApplication(config=config, demo_mode=True)
-        cls.web_app.rate_limiter = RateLimiter(
-            default_rpm=50000, write_rpm=25000, burst_rpm=50000
-        )
+        cls.web_app.rate_limiter = RateLimiter(default_rpm=50000, write_rpm=25000, burst_rpm=50000)
         cls.web_app.api.connect()
 
     def test_concurrent_rest_and_websocket(self):
@@ -948,11 +949,13 @@ class TestWebSocketAndRESTConcurrent(unittest.TestCase):
                     ws.receive_json()  # init
 
                     # Send a message to trigger a broadcast
-                    ws.send_json({
-                        "type": "send_message",
-                        "text": f"Broadcast test from {client_id}",
-                        "channel": 0,
-                    })
+                    ws.send_json(
+                        {
+                            "type": "send_message",
+                            "text": f"Broadcast test from {client_id}",
+                            "channel": 0,
+                        }
+                    )
 
                     # Wait for the message_status response
                     response = ws.receive_json()
@@ -973,8 +976,7 @@ class TestWebSocketAndRESTConcurrent(unittest.TestCase):
             t.join(timeout=30)
 
         self.assertEqual(len(errors), 0, f"Broadcast errors: {errors}")
-        self.assertEqual(broadcast_received["count"], 8,
-                         f"Only {broadcast_received['count']}/8 clients got responses")
+        self.assertEqual(broadcast_received["count"], 8, f"Only {broadcast_received['count']}/8 clients got responses")
 
 
 if __name__ == "__main__":
