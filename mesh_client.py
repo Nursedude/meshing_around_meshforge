@@ -190,18 +190,17 @@ def get_missing_deps(config: ConfigParser) -> List[str]:
             if not check_dependency(dep):
                 missing.append(dep)
 
-    conn_type = config.get("connection", "type", fallback="auto")
+    conn_type = config.get("interface", "type", fallback="auto")
 
-    if conn_type == "mqtt" or config.getboolean("connection", "mqtt_enabled", fallback=False):
+    if conn_type == "mqtt" or config.getboolean("mqtt", "enabled", fallback=False):
         for dep in OPTIONAL_DEPS["mqtt"]:
             if not check_dependency(dep):
                 missing.append(dep)
 
     if conn_type in ["serial", "tcp", "auto"]:
-        if config.getboolean("connection", "meshtastic_enabled", fallback=True):
-            for dep in OPTIONAL_DEPS["meshtastic"]:
-                if not check_dependency(dep):
-                    missing.append(dep)
+        for dep in OPTIONAL_DEPS["meshtastic"]:
+            if not check_dependency(dep):
+                missing.append(dep)
 
     if conn_type == "ble":
         for dep in OPTIONAL_DEPS["ble"]:
@@ -278,7 +277,7 @@ DEFAULT_CONFIG = """
 # Edit this file to customize your setup.
 # ============================================================================
 
-[connection]
+[interface]
 # Connection type: auto, serial, tcp, mqtt, ble
 # - auto: Try serial first, then tcp, then mqtt
 # - serial: Direct USB/serial connection to radio
@@ -287,38 +286,50 @@ DEFAULT_CONFIG = """
 # - ble: Bluetooth LE connection
 type = auto
 
-# Serial settings (for type=serial or auto)
-serial_port = auto
-# Set to specific port like /dev/ttyUSB0, /dev/ttyACM0, or "auto" for detection
-serial_baud = 115200
+# Serial port (for type=serial or auto)
+# Set to specific port like /dev/ttyUSB0, /dev/ttyACM0, or leave empty for auto-detect
+port =
 
-# TCP settings (for type=tcp)
-tcp_host =
-tcp_port = 4403
+# Serial baudrate
+baudrate = 115200
 
-# MQTT settings (for type=mqtt or mqtt_enabled=true)
-mqtt_enabled = false
-mqtt_broker = mqtt.meshtastic.org
-mqtt_port = 1883
-mqtt_use_tls = false
-mqtt_username = meshdev
-mqtt_password = large4cats
-mqtt_topic_root = msh/US
-mqtt_channel = LongFast
-# Your node ID for MQTT (leave empty to receive only)
-mqtt_node_id =
+# TCP hostname (for type=tcp)
+hostname =
 
-# BLE settings (for type=ble)
-ble_address =
+# BLE MAC address (for type=ble)
 # MAC address like AA:BB:CC:DD:EE:FF or "scan" for discovery
+mac =
 
 # Connection behavior
 auto_reconnect = true
 reconnect_delay = 5
 connection_timeout = 30
 
-# Enable meshtastic library (disable for MQTT-only mode)
-meshtastic_enabled = true
+[mqtt]
+# MQTT broker connection (no radio needed)
+# Enable MQTT mode
+enabled = false
+
+# Broker settings
+broker = mqtt.meshtastic.org
+port = 1883
+use_tls = false
+
+# Authentication (default public broker credentials)
+username = meshdev
+password = large4cats
+
+# Topic configuration
+topic_root = msh/US
+channel = LongFast
+
+# Your node ID for MQTT (leave empty to receive only)
+node_id =
+
+# Connection settings
+qos = 1
+reconnect_delay = 5
+max_reconnect_attempts = 10
 
 [features]
 # Main interface mode: tui, web, both, headless
@@ -439,6 +450,73 @@ verbose = false
 """
 
 
+def _migrate_connection_section(config: ConfigParser) -> bool:
+    """Migrate legacy [connection] section to [interface] + [mqtt].
+
+    Early versions of mesh_client.ini used a single [connection] section
+    for all connection settings including MQTT. The canonical format uses
+    [interface] for device settings and [mqtt] for broker settings.
+
+    Returns True if migration was performed.
+    """
+    if not config.has_section("connection"):
+        return False
+
+    log("Migrating legacy [connection] config to [interface] + [mqtt]...", "INFO")
+
+    # Map [connection] keys to [interface] section
+    if not config.has_section("interface"):
+        config.add_section("interface")
+
+    key_map_interface = {
+        "type": "type",
+        "serial_port": "port",
+        "serial_baud": "baudrate",
+        "tcp_host": "hostname",
+        "ble_address": "mac",
+        "auto_reconnect": "auto_reconnect",
+        "reconnect_delay": "reconnect_delay",
+        "connection_timeout": "connection_timeout",
+    }
+
+    for old_key, new_key in key_map_interface.items():
+        if config.has_option("connection", old_key):
+            value = config.get("connection", old_key)
+            # Skip "auto" for serial_port — canonical format uses empty string
+            if old_key == "serial_port" and value.lower() == "auto":
+                value = ""
+            if not config.has_option("interface", new_key):
+                config.set("interface", new_key, value)
+
+    # Map [connection] MQTT keys to [mqtt] section
+    if not config.has_section("mqtt"):
+        config.add_section("mqtt")
+
+    key_map_mqtt = {
+        "mqtt_enabled": "enabled",
+        "mqtt_broker": "broker",
+        "mqtt_port": "port",
+        "mqtt_use_tls": "use_tls",
+        "mqtt_username": "username",
+        "mqtt_password": "password",
+        "mqtt_topic_root": "topic_root",
+        "mqtt_channel": "channel",
+        "mqtt_node_id": "node_id",
+    }
+
+    for old_key, new_key in key_map_mqtt.items():
+        if config.has_option("connection", old_key):
+            value = config.get("connection", old_key)
+            if not config.has_option("mqtt", new_key):
+                config.set("mqtt", new_key, value)
+
+    # Remove the legacy section
+    config.remove_section("connection")
+
+    log("Config migrated to [interface] + [mqtt] format", "OK")
+    return True
+
+
 def load_config() -> ConfigParser:
     """Load or create configuration file."""
     config = ConfigParser()
@@ -446,6 +524,10 @@ def load_config() -> ConfigParser:
     if CONFIG_FILE.exists():
         config.read(CONFIG_FILE)
         log(f"Loaded config from {CONFIG_FILE}", "OK")
+
+        # Migrate legacy [connection] section if present
+        if _migrate_connection_section(config):
+            save_config(config)
     else:
         # Create default config
         config.read_string(DEFAULT_CONFIG)
@@ -488,7 +570,7 @@ def detect_serial_ports() -> List[str]:
 
 def detect_connection_type(config: ConfigParser) -> str:
     """Auto-detect the best connection type."""
-    conn_type = config.get("connection", "type", fallback="auto")
+    conn_type = config.get("interface", "type", fallback="auto")
 
     if conn_type != "auto":
         return conn_type
@@ -502,13 +584,13 @@ def detect_connection_type(config: ConfigParser) -> str:
         return "serial"
 
     # Check for TCP host configured
-    tcp_host = config.get("connection", "tcp_host", fallback="")
+    tcp_host = config.get("interface", "hostname", fallback="")
     if tcp_host:
         log(f"TCP host configured: {tcp_host}", "INFO")
         return "tcp"
 
     # Fall back to MQTT if enabled
-    if config.getboolean("connection", "mqtt_enabled", fallback=False):
+    if config.getboolean("mqtt", "enabled", fallback=False):
         log("Falling back to MQTT connection", "INFO")
         return "mqtt"
 
@@ -627,28 +709,28 @@ def interactive_setup():
 
     conn_map = {"1": "serial", "2": "tcp", "3": "mqtt", "4": "auto"}
     conn_type = conn_map.get(choice, "auto")
-    config.set("connection", "type", conn_type)
+    config.set("interface", "type", conn_type)
 
     if conn_type == "serial":
         ports = detect_serial_ports()
         if ports:
             print(f"\nDetected ports: {', '.join(ports)}")
-        port = input("Serial port [auto]: ").strip() or "auto"
-        config.set("connection", "serial_port", port)
+        port = input("Serial port [auto-detect]: ").strip()
+        if port:
+            config.set("interface", "port", port)
 
     elif conn_type == "tcp":
         host = input("TCP host [192.168.1.1]: ").strip() or "192.168.1.1"
-        config.set("connection", "tcp_host", host)
+        config.set("interface", "hostname", host)
 
     elif conn_type == "mqtt":
-        config.set("connection", "mqtt_enabled", "true")
-        config.set("connection", "meshtastic_enabled", "false")
+        config.set("mqtt", "enabled", "true")
 
         broker = input("MQTT broker [mqtt.meshtastic.org]: ").strip() or "mqtt.meshtastic.org"
-        config.set("connection", "mqtt_broker", broker)
+        config.set("mqtt", "broker", broker)
 
         topic = input("MQTT topic root [msh/US]: ").strip() or "msh/US"
-        config.set("connection", "mqtt_topic_root", topic)
+        config.set("mqtt", "topic_root", topic)
 
     # Interface mode
     print("\nInterface Mode:")
@@ -726,10 +808,10 @@ def run_application(config: ConfigParser):
         # Update config from ini
         app_config.interface.type = conn_type
         if conn_type == "serial":
-            port = config.get("connection", "serial_port", fallback="auto")
-            app_config.interface.port = "" if port == "auto" else port
+            port = config.get("interface", "port", fallback="")
+            app_config.interface.port = port
         elif conn_type == "tcp":
-            app_config.interface.hostname = config.get("connection", "tcp_host", fallback="")
+            app_config.interface.hostname = config.get("interface", "hostname", fallback="")
 
         # Determine if demo mode
         if demo_mode or conn_type == "demo":
