@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-12
+**Last Updated:** 2026-02-12 (TUI Improvements Session)
 **Version:** 0.5.0-beta
 
 ---
@@ -46,7 +46,19 @@ python3 -m py_compile configure_bot.py
 - **Connection health:** double-tap verification pattern from meshforge
 - **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
 
-### Recent Improvements (2026-02-12 — Config Unification)
+### Recent Improvements (2026-02-12 — TUI Improvements)
+- **Dashboard stats panel redesign:** 2-column layout surfacing mesh health score, channel utilization with Meshtastic congestion thresholds (25% warning/40% critical per ROUTER_LATE docs), and avg SNR — data that existed in models.py but was never displayed
+- **Active screen indicator:** Footer nav bar highlights current screen with inverted cyan style for visual orientation
+- **Nodes screen pagination:** j/k keys for page down/up (20 nodes per page), supports large meshes without scroll overflow
+- **Environment telemetry columns:** Nodes screen dynamically shows Temp and Humidity columns when any node on the current page has sensor data (BME280/BME680/BMP280)
+- **Alerts severity filtering:** l/m/H/C keys to filter by Low/Medium/High/Critical severity (toggles on repeat press), 'a' to clear filter
+- **Alert acknowledgment:** 'x' key acknowledges all unread alerts at once
+- **Help screen updated:** Documents all new keybindings for nodes, alerts, topology views
+- **297 tests passing**, black formatting clean, all screens render verified in demo mode
+- Branch: `claude/improve-meshforge-tui-jwCHI`
+- **Session entropy status:** Clean — no degradation observed
+
+### Previous Improvements (2026-02-12 — Config Unification)
 - **Config section unification:** Replaced monolithic `[connection]` section in `mesh_client.py` with canonical `[interface]` + `[mqtt]` sections
   - Root cause: `mesh_client.py` (bootstrap) used `[connection]` with prefixed keys (`mqtt_broker`, `serial_port`, `tcp_host`) while `core/config.py` expected separate `[interface]` and `[mqtt]` sections with clean key names (`broker`, `port`, `hostname`)
   - DEFAULT_CONFIG template now generates configs that `Config` class can actually read
@@ -257,6 +269,15 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 ---
 
 ## Work History (Summary)
+
+### 2026-02-12 (TUI Improvements Session)
+- **Dashboard stats panel:** Added mesh health score, channel utilization with congestion thresholds, avg SNR in 2-column layout
+- **Footer nav bar:** Active screen highlighted with inverted cyan style
+- **Nodes screen:** Pagination (j/k), environment telemetry columns (temp/humidity) when sensor data exists
+- **Alerts screen:** Severity filtering (l/m/H/C keys), acknowledge all (x key)
+- **Help screen:** All new keybindings documented
+- 297 tests passing, black formatting clean
+- Branch: `claude/improve-meshforge-tui-jwCHI`
 
 ### 2026-02-12 (Code Review & Accessibility Health Check)
 - **Full codebase review** targeting Pi Zero 2W deployment behind Arden router
