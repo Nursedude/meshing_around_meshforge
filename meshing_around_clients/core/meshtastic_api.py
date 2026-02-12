@@ -34,6 +34,7 @@ from .models import (  # noqa: E402
 try:
     import meshtastic
     import meshtastic.ble_interface
+    import meshtastic.http_interface
     import meshtastic.serial_interface
     import meshtastic.tcp_interface
     from pubsub import pub
@@ -192,6 +193,19 @@ class MeshtasticAPI:
                     hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
                 )
                 self.connection_info.device_path = hostname
+            elif interface_type == "http":
+                base_url = self.config.interface.http_url
+                if not base_url:
+                    # Fall back to hostname with http:// prefix
+                    hostname = self.config.interface.hostname
+                    if not hostname:
+                        self.connection_info.error_message = "HTTP URL not configured (set http_url or hostname)"
+                        return False
+                    base_url = f"http://{hostname}"
+                self.interface = meshtastic.http_interface.HTTPInterface(
+                    base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
+                )
+                self.connection_info.device_path = base_url
             elif interface_type == "ble":
                 mac = self.config.interface.mac
                 if not mac:

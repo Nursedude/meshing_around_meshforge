@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-12 (TUI Improvements Session)
+**Last Updated:** 2026-02-12 (meshtasticd HTTP API Session)
 **Version:** 0.5.0-beta
 
 ---
@@ -30,7 +30,7 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 297 tests passing (59 skipped: MQTT integration, web/fastapi)
+- **Test Status:** 320 tests passing (59 skipped: MQTT integration, web/fastapi)
 - **Meshforge Remote:** `meshforge` → `Nursedude/meshforge` (733+ PRs, `src/` architecture)
 
 ### Code Health
@@ -45,8 +45,30 @@ python3 -m py_compile configure_bot.py
 - **Atomic writes:** save_to_file() crash-safe with tempfile + os.replace()
 - **Connection health:** double-tap verification pattern from meshforge
 - **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
+- **meshtasticd HTTP API:** Full HTTP connection type support via meshtastic.http_interface.HTTPInterface
 
-### Recent Improvements (2026-02-12 — TUI Improvements)
+### Recent Improvements (2026-02-12 — meshtasticd HTTP API Support)
+- **Root cause:** Codebase only supported serial, TCP, BLE, MQTT, and demo connections — no HTTP connection for meshtasticd's HTTP API
+- **config.py:** Added `http_url` field to `InterfaceConfig` (e.g. `http://meshtastic.local`), updated `from_dict()`, `save()`, `to_dict()`
+- **meshtastic_api.py:** Added `import meshtastic.http_interface` and `http` branch in `connect()` using `HTTPInterface(base_url, connectTimeoutSeconds=...)`, with fallback from hostname when http_url is empty
+- **connection_manager.py:** Added `HTTP = "http"` to `ConnectionType` enum, placed HTTP between TCP and MQTT in fallback order, added `_connect_http()` method, updated `_detect_connection_type()` for auto-detect when http_url is set
+- **mesh_client.py:** Added HTTP to DEFAULT_CONFIG comments/fields, setup wizard (option 3), `get_missing_deps()` dependency check, `detect_connection_type()` auto-detection, `run_application()` config forwarding, and legacy config migration key map
+- **18 new tests** in `tests/test_http_connection.py` covering: enum, auto-detection (http_url vs hostname), connect success/failure/timeout/ConnectionError, fallback order, no-library graceful failure, config roundtrip, and display info
+- **320 tests passing** (up from 297), 59 skipped, all linters clean
+- Branch: `claude/fix-meshtasticd-api-iuLpP`
+- **Session entropy status:** Clean — no degradation observed
+
+### Connection Mode Table (Updated)
+| Mode | Radio Required | Use Case |
+|------|----------------|----------|
+| Serial | Yes (USB) | Direct connection to Meshtastic device |
+| TCP | Remote | Connect to device on network (protobuf port 4403) |
+| HTTP | Remote | Connect to meshtasticd HTTP API |
+| MQTT | No | Connect via broker (mqtt.meshtastic.org) |
+| BLE | Yes | Bluetooth LE connection |
+| Demo | No | Simulated data for testing |
+
+### Previous Improvements (2026-02-12 — TUI Improvements)
 - **Dashboard stats panel redesign:** 2-column layout surfacing mesh health score, channel utilization with Meshtastic congestion thresholds (25% warning/40% critical per ROUTER_LATE docs), and avg SNR — data that existed in models.py but was never displayed
 - **Active screen indicator:** Footer nav bar highlights current screen with inverted cyan style for visual orientation
 - **Nodes screen pagination:** j/k keys for page down/up (20 nodes per page), supports large meshes without scroll overflow
@@ -171,6 +193,10 @@ python3 -m py_compile configure_bot.py
 ## Pending Tasks
 
 ### High Priority (P1) - Ready for Physical Testing
+- [ ] HTTP API testing - Verify meshtasticd HTTP connection with real device
+  - Config: set `type = http` and `http_url = http://meshtastic.local` in `[interface]`
+  - Or: set `type = http` and `hostname = <device-ip>` (will auto-prefix `http://`)
+  - Test: `python3 mesh_client.py` with HTTP config → should connect via HTTPInterface
 - [ ] Hardware testing - Serial mode with real Meshtastic device
 - [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity from Pi2W behind Arden router
   - Config format now unified — mesh_client.py generates correct `[mqtt]` section
