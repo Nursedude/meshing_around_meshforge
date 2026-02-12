@@ -38,10 +38,13 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
-    print("Error: Web dependencies not found.")
-    print("Please install them with: pip install fastapi uvicorn jinja2 python-multipart")
-    print("  or run: python3 mesh_client.py --install-deps")
-    sys.exit(1)
+    # Only exit when run directly — allow imports to succeed so callers
+    # (e.g. mesh_client.py) can check FASTAPI_AVAILABLE gracefully
+    if __name__ == "__main__":
+        print("Error: Web dependencies not found.")
+        print("Please install them with: pip install fastapi uvicorn jinja2 python-multipart")
+        print("  or run: python3 mesh_client.py --install-deps")
+        sys.exit(1)
 
 import hashlib  # noqa: E402
 import hmac  # noqa: E402

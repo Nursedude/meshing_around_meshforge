@@ -507,8 +507,8 @@ class MQTTMeshtasticClient:
 
             # Update message stats
             self._last_message_time = datetime.now(timezone.utc)
-            self._message_count += 1
             with self._stats_lock:
+                self._message_count += 1
                 self._stats["messages_received"] += 1
             self.network.last_update = datetime.now(timezone.utc)
 

@@ -119,12 +119,18 @@ def run_cmd(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tuple[i
 
 
 def check_internet() -> bool:
-    """Check if we have internet connectivity."""
-    try:
-        socket.create_connection(("8.8.8.8", 53), timeout=3)
-        return True
-    except OSError:
-        return False
+    """Check if we have internet connectivity.
+
+    Tries multiple DNS resolvers to avoid false negatives behind
+    restrictive routers/firewalls that block specific providers.
+    """
+    for host in ("8.8.8.8", "1.1.1.1", "9.9.9.9"):
+        try:
+            socket.create_connection((host, 53), timeout=3)
+            return True
+        except OSError:
+            continue
+    return False
 
 
 def check_python_version() -> bool:
@@ -549,7 +555,7 @@ def import_upstream_config(source_path: str):
             log("Config appears to be MeshForge format already", "WARN")
 
         # Save to MeshForge format
-        dest = Path(CONFIG_PATH)
+        dest = Path(CONFIG_FILE)
         config.config_format = "meshforge"
 
         if ConfigLoader.save(config, dest):
@@ -590,7 +596,7 @@ def import_upstream_config(source_path: str):
                     new_parser.set(section, key, value)
 
         # Save
-        dest = Path(CONFIG_PATH)
+        dest = Path(CONFIG_FILE)
         dest.parent.mkdir(parents=True, exist_ok=True)
         with open(dest, 'w') as f:
             new_parser.write(f)
@@ -821,6 +827,10 @@ Examples:
     parser.add_argument("--check", action="store_true", help="Check dependencies only")
     parser.add_argument("--tui", action="store_true", help="Force TUI mode")
     parser.add_argument("--web", action="store_true", help="Force Web mode")
+    parser.add_argument("--host", type=str, default=None,
+                        help="Web server bind address (e.g. 0.0.0.0 for network access)")
+    parser.add_argument("--port", type=int, default=None,
+                        help="Web server port (default: 8080)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
@@ -903,6 +913,11 @@ Examples:
     elif args.web:
         config.set("features", "mode", "web")
         config.set("features", "web_server", "true")
+
+    if args.host is not None:
+        config.set("features", "web_host", args.host)
+    if args.port is not None:
+        config.set("features", "web_port", str(args.port))
 
     # Run system checks
     if not check_system():
