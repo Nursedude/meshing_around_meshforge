@@ -114,7 +114,7 @@ class DashboardScreen(Screen):
         )
 
     def _create_stats_panel(self) -> Panel:
-        """Create the statistics overview panel."""
+        """Create the statistics overview panel with mesh health and congestion."""
         network = self.app.api.network
         conn = self.app.api.connection_info
 
@@ -124,16 +124,61 @@ class DashboardScreen(Screen):
         else:
             status = Text("DISCONNECTED", style="bold red")
 
+        # Mesh health
+        health = network.mesh_health
+        health_status = health.get("status", "unknown")
+        health_score = health.get("score", 0)
+        health_colors = {
+            "excellent": "green bold",
+            "good": "green",
+            "fair": "yellow",
+            "poor": "orange1",
+            "critical": "red bold",
+            "unknown": "dim",
+        }
+        health_style = health_colors.get(health_status, "white")
+
+        # Congestion indicator from avg channel utilization
+        avg_util = health.get("avg_channel_utilization", 0)
+        if avg_util >= 40.0:
+            util_str = f"[red bold]{avg_util:.1f}% CRITICAL[/red bold]"
+        elif avg_util >= 25.0:
+            util_str = f"[yellow]{avg_util:.1f}% WARNING[/yellow]"
+        elif avg_util > 0:
+            util_str = f"[green]{avg_util:.1f}%[/green]"
+        else:
+            util_str = "[dim]-[/dim]"
+
         stats_table = Table(show_header=False, box=None, padding=(0, 2))
         stats_table.add_column("Label", style="cyan")
         stats_table.add_column("Value", style="white bold")
+        stats_table.add_column("Label2", style="cyan")
+        stats_table.add_column("Value2", style="white bold")
 
-        stats_table.add_row("Status", status)
-        stats_table.add_row("Interface", f"{conn.interface_type} ({conn.device_path})")
-        stats_table.add_row("My Node", network.my_node_id or "N/A")
-        stats_table.add_row("Nodes", f"{len(network.online_nodes)}/{len(network.nodes)}")
-        stats_table.add_row("Messages", str(network.total_messages))
-        stats_table.add_row("Alerts", f"{len(network.unread_alerts)} unread")
+        stats_table.add_row(
+            "Status",
+            status,
+            "Health",
+            Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
+        )
+        stats_table.add_row(
+            "Interface",
+            f"{conn.interface_type} ({conn.device_path})",
+            "Ch Util",
+            Text.from_markup(util_str),
+        )
+        stats_table.add_row(
+            "Nodes",
+            f"{len(network.online_nodes)}/{len(network.nodes)}",
+            "Avg SNR",
+            f"{health.get('avg_snr', 0):.1f} dB",
+        )
+        stats_table.add_row(
+            "Messages",
+            str(network.total_messages),
+            "Alerts",
+            f"{len(network.unread_alerts)} unread",
+        )
 
         return Panel(stats_table, title="[bold]Network Status[/bold]", border_style="blue")
 
@@ -243,9 +288,27 @@ class DashboardScreen(Screen):
 
 
 class NodesScreen(Screen):
-    """Detailed nodes view screen."""
+    """Detailed nodes view screen with pagination and environment telemetry."""
+
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
+        self.page = 0
+        self.page_size = 20
 
     def render(self) -> Panel:
+        nodes = sorted(
+            self.app.api.network.nodes.values(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
+        )
+
+        # Pagination
+        total_pages = max(1, (len(nodes) + self.page_size - 1) // self.page_size)
+        self.page = min(self.page, total_pages - 1)
+        start = self.page * self.page_size
+        page_nodes = nodes[start : start + self.page_size]
+
+        # Check if any node on this page has environment data
+        has_env = any(n.telemetry and n.telemetry.has_environment_data for n in page_nodes)
+
         table = Table(
             show_header=True, header_style="bold cyan", box=box.ROUNDED, expand=True, title="Mesh Network Nodes"
         )
@@ -259,12 +322,11 @@ class NodesScreen(Screen):
         table.add_column("Battery", justify="right")
         table.add_column("SNR", justify="right")
         table.add_column("Hops", justify="center")
+        if has_env:
+            table.add_column("Temp", justify="right")
+            table.add_column("Hum", justify="right")
 
-        nodes = sorted(
-            self.app.api.network.nodes.values(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
-        )
-
-        for idx, node in enumerate(nodes, 1):
+        for idx, node in enumerate(page_nodes, start + 1):
             # Status indicator
             if node.is_favorite:
                 status_style = "yellow"
@@ -289,7 +351,7 @@ class NodesScreen(Screen):
             snr = node.telemetry.snr if node.telemetry else 0
             snr_str = f"{snr:.1f}dB" if snr else "-"
 
-            table.add_row(
+            row = [
                 f"[{status_style}]{idx}[/{status_style}]",
                 node.node_id[-8:],
                 node.display_name,
@@ -299,14 +361,38 @@ class NodesScreen(Screen):
                 batt_str,
                 snr_str,
                 str(node.hop_count) if node.hop_count else "0",
-            )
+            ]
+
+            # Environment telemetry columns
+            if has_env:
+                if node.telemetry and node.telemetry.temperature is not None:
+                    row.append(f"{node.telemetry.temperature:.1f}C")
+                else:
+                    row.append("-")
+                if node.telemetry and node.telemetry.humidity is not None:
+                    row.append(f"{node.telemetry.humidity:.0f}%")
+                else:
+                    row.append("-")
+
+            table.add_row(*row)
+
+        page_info = f"Page {self.page + 1}/{total_pages} ({len(nodes)} nodes)"
 
         return Panel(
             table,
             title="[bold cyan]Nodes[/bold cyan]",
-            subtitle="[dim]Press 'q' to return to dashboard[/dim]",
+            subtitle=f"[dim]{page_info} | j/k: page down/up | q: return[/dim]",
             border_style="cyan",
         )
+
+    def handle_input(self, key: str) -> bool:
+        if key == "j":
+            self.page += 1
+            return True
+        elif key == "k":
+            self.page = max(0, self.page - 1)
+            return True
+        return False
 
 
 class MessagesScreen(Screen):
@@ -368,10 +454,18 @@ class MessagesScreen(Screen):
 
 
 class AlertsScreen(Screen):
-    """Detailed alerts view screen."""
+    """Detailed alerts view screen with severity filtering and acknowledgment."""
+
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
+        self.severity_filter: Optional[int] = None
 
     def render(self) -> Panel:
-        alerts = list(self.app.api.network.alerts)[-20:]
+        all_alerts = list(self.app.api.network.alerts)
+        if self.severity_filter is not None:
+            all_alerts = [a for a in all_alerts if a.severity == self.severity_filter]
+
+        alerts = all_alerts[-20:]
 
         table = Table(show_header=True, header_style="bold cyan", box=box.ROUNDED, expand=True)
 
@@ -399,12 +493,46 @@ class AlertsScreen(Screen):
                 ack,
             )
 
+        sev_labels = {1: "Low", 2: "Medium", 3: "High", 4: "Critical"}
+        filter_text = sev_labels.get(self.severity_filter, "All severities")
+        unread = len(self.app.api.network.unread_alerts)
+
         return Panel(
             table,
-            title=f"[bold cyan]Alerts[/bold cyan] - {len(self.app.api.network.unread_alerts)} unread",
-            subtitle="[dim]Press 'q' to return to dashboard[/dim]",
+            title=f"[bold cyan]Alerts[/bold cyan] - {filter_text} ({unread} unread)",
+            subtitle="[dim]l/m/H/C: low/med/high/crit | a: all | x: ack all | q: return[/dim]",
             border_style="red",
         )
+
+    def handle_input(self, key: str) -> bool:
+        if key == "l":
+            self._cycle_severity_filter(1)
+            return True
+        elif key == "m":
+            self._cycle_severity_filter(2)
+            return True
+        elif key == "H":
+            self._cycle_severity_filter(3)
+            return True
+        elif key == "C":
+            self._cycle_severity_filter(4)
+            return True
+        elif key == "a":
+            self.severity_filter = None
+            return True
+        elif key == "x":
+            # Acknowledge all unread alerts
+            for alert in self.app.api.network.alerts:
+                alert.acknowledged = True
+            return True
+        return False
+
+    def _cycle_severity_filter(self, severity: int) -> None:
+        """Toggle severity filter: set if different, clear if same."""
+        if self.severity_filter == severity:
+            self.severity_filter = None
+        else:
+            self.severity_filter = severity
 
 
 class TopologyScreen(Screen):
@@ -691,20 +819,29 @@ class HelpScreen(Screen):
 - **s** - Send message
 - **r** - Refresh data
 - **c** - Connect/Disconnect
-- **?** - This help
+- **?** / **h** - This help
+
+## Nodes View
+- **j** - Next page
+- **k** - Previous page
+- Environment telemetry (temp/humidity) shown when available
 
 ## Message View
 - **0-7** - Filter by channel
 - **a** - Show all channels
 
-## Topology View
-- Shows mesh health, node relationships, routes, and channels
-- Displays link quality percentages and hop counts
-- Visualizes neighbor relationships
+## Alerts View
+- **l** - Filter: Low severity
+- **m** - Filter: Medium severity
+- **H** - Filter: High severity
+- **C** - Filter: Critical severity
+- **a** - Show all severities
+- **x** - Acknowledge all alerts
 
-## Dashboard
-- **Enter** - Select highlighted item
-- **Arrow keys** - Navigate
+## Topology View
+- Mesh health score, node relationships, routes, and channels
+- Link quality percentages and hop counts
+- Neighbor relationships
 """
         return Panel(
             Markdown(help_text),
@@ -762,18 +899,27 @@ class MeshingAroundTUI:
         return Panel(Align.center(title), box=box.DOUBLE, border_style="cyan", padding=(0, 2))
 
     def _get_footer(self) -> Panel:
-        """Create the application footer."""
+        """Create the application footer with active screen highlighted."""
         shortcuts = Text()
-        shortcuts.append("[1]", style="cyan bold")
-        shortcuts.append("Dashboard ", style="dim")
-        shortcuts.append("[2]", style="cyan bold")
-        shortcuts.append("Nodes ", style="dim")
-        shortcuts.append("[3]", style="cyan bold")
-        shortcuts.append("Messages ", style="dim")
-        shortcuts.append("[4]", style="cyan bold")
-        shortcuts.append("Alerts ", style="dim")
-        shortcuts.append("[5]", style="cyan bold")
-        shortcuts.append("Topology ", style="dim")
+
+        # Map screen keys to names and their screen identifiers
+        nav_items = [
+            ("1", "Dashboard", "dashboard"),
+            ("2", "Nodes", "nodes"),
+            ("3", "Messages", "messages"),
+            ("4", "Alerts", "alerts"),
+            ("5", "Topology", "topology"),
+        ]
+
+        for key, label, screen_id in nav_items:
+            is_active = self.current_screen == screen_id
+            if is_active:
+                shortcuts.append(f"[{key}]", style="white bold on cyan")
+                shortcuts.append(f"{label} ", style="white bold")
+            else:
+                shortcuts.append(f"[{key}]", style="cyan bold")
+                shortcuts.append(f"{label} ", style="dim")
+
         shortcuts.append("[s]", style="green bold")
         shortcuts.append("Send ", style="dim")
         shortcuts.append("[?]", style="yellow bold")
