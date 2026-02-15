@@ -594,6 +594,11 @@ class MeshNetwork:
         with self._lock:
             self.messages.append(message)
             # deque(maxlen=MESSAGE_HISTORY_MAX) handles bounding automatically
+            # Update channel activity tracking
+            ch = self.channels.get(message.channel)
+            if ch is not None:
+                ch.message_count += 1
+                ch.last_activity = datetime.now(timezone.utc)
 
     def add_alert(self, alert: Alert) -> None:
         with self._lock:

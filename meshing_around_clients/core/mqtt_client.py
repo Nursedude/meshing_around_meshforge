@@ -1015,8 +1015,9 @@ class MQTTMeshtasticClient:
         elif msg_type == "telemetry" or portnum == 67:
             telemetry_data = decoded.get("telemetry", {})
             device_metrics = telemetry_data.get("device_metrics", {})
+            env_metrics = telemetry_data.get("environment_metrics", {})
             node = self.network.get_node(sender_id)
-            if device_metrics and node:
+            if node and (device_metrics or env_metrics):
                 node.telemetry = NodeTelemetry(
                     battery_level=device_metrics.get("battery_level", 0),
                     voltage=device_metrics.get("voltage", 0),
@@ -1024,6 +1025,10 @@ class MQTTMeshtasticClient:
                     air_util_tx=device_metrics.get("air_util_tx", 0),
                     uptime_seconds=device_metrics.get("uptime_seconds", 0),
                     last_updated=datetime.now(timezone.utc),
+                    temperature=env_metrics.get("temperature") or None,
+                    humidity=env_metrics.get("relative_humidity") or None,
+                    pressure=env_metrics.get("barometric_pressure") or None,
+                    gas_resistance=env_metrics.get("gas_resistance") or None,
                 )
                 with self._stats_lock:
                     self._stats["telemetry_updates"] += 1

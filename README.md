@@ -108,12 +108,16 @@ graph TB
     subgraph "meshing_around_clients"
         subgraph "core/"
             CFG[config.py]
-            CONN[connection_manager.py]
-            API[meshtastic_api.py]
-            MSG[message_handler.py]
-            ALERT[alert_detector.py]
-            NOTIF[notifications.py]
+            API[meshtastic_api.py<br/>+ MockAPI]
+            MQTT[mqtt_client.py]
+            CRYPTO[mesh_crypto.py]
             MDL[models.py]
+        end
+
+        subgraph "setup/"
+            CLI[cli_utils.py]
+            PI[pi_utils.py]
+            SCHEMA[config_schema.py]
         end
 
         subgraph "tui/"
@@ -136,27 +140,28 @@ graph TB
 
     MC --> TUIAPP
     MC --> WEBAPP
-    CB --> CFG
+    CB --> CLI
+    CB --> PI
     SH --> MC
 
     TUIAPP --> API
+    TUIAPP --> MQTT
     WEBAPP --> API
-    API --> CONN
-    API --> MSG
-    API --> ALERT
-    ALERT --> NOTIF
-    CONN --> CFG
+    WEBAPP --> MQTT
+    API --> CFG
+    MQTT --> CRYPTO
+    MQTT --> MDL
 
-    CONN --> SER
-    CONN --> TCPCON
-    CONN --> MQTTCON
-    CONN --> BLECON
+    API --> SER
+    API --> TCPCON
+    API --> BLECON
+    MQTT --> MQTTCON
 
     style MC fill:#4a9eff,color:#fff
     style TUIAPP fill:#9b59b6,color:#fff
     style WEBAPP fill:#27ae60,color:#fff
-    style ALERT fill:#e67e22,color:#fff
-    style NOTIF fill:#e74c3c,color:#fff
+    style MQTT fill:#3498db,color:#fff
+    style CRYPTO fill:#e67e22,color:#fff
 ```
 
 ## Quick Start
@@ -404,14 +409,18 @@ meshing_around_meshforge/
 ├── configure_bot.py        # Bot setup wizard
 ├── setup_headless.sh       # Pi/headless installer
 └── meshing_around_clients/
-    ├── core/               # Shared modules
+    ├── core/               # Runtime modules
     │   ├── config.py       # Config management
-    │   ├── connection_manager.py
-    │   ├── meshtastic_api.py
-    │   ├── message_handler.py
-    │   ├── alert_detector.py
-    │   ├── notifications.py
-    │   └── models.py       # Node, Message, Alert
+    │   ├── meshtastic_api.py  # Device API + MockAPI
+    │   ├── mqtt_client.py  # MQTT broker connection
+    │   ├── mesh_crypto.py  # AES-256-CTR (optional deps)
+    │   └── models.py       # Node, Message, Alert, MeshNetwork
+    ├── setup/              # Setup-only (configure_bot.py)
+    │   ├── cli_utils.py    # Terminal colors, input helpers
+    │   ├── pi_utils.py     # Pi detection, serial ports
+    │   ├── system_maintenance.py
+    │   ├── alert_configurators.py
+    │   └── config_schema.py
     ├── tui/
     │   └── app.py          # Rich terminal UI
     └── web/

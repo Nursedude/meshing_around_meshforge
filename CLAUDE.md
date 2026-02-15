@@ -62,13 +62,18 @@ meshing_around_meshforge/
 ├── setup_headless.sh           # Pi/headless installer
 │
 └── meshing_around_clients/     # Main package
-    ├── core/                   # Shared components
+    ├── core/                   # Runtime modules
     │   ├── config.py           # Config management
-    │   ├── connection_manager.py # Unified connection handling
-    │   ├── meshtastic_api.py   # Direct device API
-    │   ├── mqtt_client.py      # MQTT broker connection
-    │   ├── message_handler.py  # Message processing
-    │   └── models.py           # Data models (Node, Message, Alert)
+    │   ├── meshtastic_api.py   # Device API + MockAPI (Serial/TCP/HTTP/BLE)
+    │   ├── mqtt_client.py      # MQTT broker connection (no radio needed)
+    │   ├── mesh_crypto.py      # AES-256-CTR decryption (optional deps)
+    │   └── models.py           # Data models (Node, Message, Alert, MeshNetwork)
+    ├── setup/                  # Setup-only modules (used by configure_bot.py)
+    │   ├── cli_utils.py        # Terminal colors, input helpers
+    │   ├── pi_utils.py         # Pi detection, serial ports
+    │   ├── system_maintenance.py # Updates, systemd
+    │   ├── alert_configurators.py # Alert wizards
+    │   └── config_schema.py    # Upstream format conversion
     ├── tui/
     │   └── app.py              # Rich-based terminal UI
     └── web/
@@ -134,9 +139,12 @@ meshing_around_meshforge/
 | `mesh_client.py` | Main launcher | Zero-dep bootstrap, handles venv/deps |
 | `mesh_client.ini` | User config | All settings live here |
 | `configure_bot.py` | Bot wizard | 12 alert types, email/SMS support |
-| `core/connection_manager.py` | Connection logic | Handles all connection types |
-| `core/models.py` | Data models | Node, Message, Alert, NetworkState |
-| `tui/app.py` | Terminal UI | Rich-based, 4 screens |
+| `core/config.py` | Config management | INI loading, search paths |
+| `core/models.py` | Data models | Node, Message, Alert, MeshNetwork |
+| `core/mqtt_client.py` | MQTT connection | Broker connection, packet decode |
+| `core/meshtastic_api.py` | Device API | Serial/TCP/HTTP/BLE + MockAPI |
+| `core/mesh_crypto.py` | Encryption | AES-256-CTR, optional deps |
+| `tui/app.py` | Terminal UI | Rich-based, 6 screens |
 | `web/app.py` | Web UI | FastAPI + WebSocket |
 
 ## Testing
@@ -161,7 +169,7 @@ python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883
 
 ### Adding a New Connection Type
 1. Create handler in `core/` (like `mqtt_client.py`)
-2. Register in `connection_manager.py`
+2. Wire into `meshtastic_api.py` or `mesh_client.py` startup logic
 3. Add config options to `mesh_client.ini` template
 4. Update connection mode table in docs
 
