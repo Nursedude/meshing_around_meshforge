@@ -95,11 +95,6 @@ class MeshtasticAPI:
         if event in self._callbacks:
             self._callbacks[event].append(callback)
 
-    def unregister_callback(self, event: str, callback: Callable) -> None:
-        """Unregister a callback."""
-        if event in self._callbacks and callback in self._callbacks[event]:
-            self._callbacks[event].remove(callback)
-
     def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
         """Trigger all callbacks for an event."""
         if event in self._callbacks:
@@ -582,18 +577,6 @@ class MeshtasticAPI:
 
         except (OSError, AttributeError, ValueError) as e:
             logger.error("Error sending message (%s): %s", type(e).__name__, e)
-            return False
-
-    def request_position(self, node_id: str) -> bool:
-        """Request position from a node."""
-        if not self.interface:
-            return False
-        try:
-            node_num = int(node_id.lstrip("!"), 16) if node_id.startswith("!") else int(node_id)
-            self.interface.sendPosition(destinationId=node_num)
-            return True
-        except (OSError, ValueError, AttributeError) as e:
-            logger.error("Error requesting position (%s): %s", type(e).__name__, e)
             return False
 
     def get_nodes(self) -> List[Node]:

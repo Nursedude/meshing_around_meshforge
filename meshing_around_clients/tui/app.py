@@ -57,7 +57,7 @@ except ImportError:
     Syntax = Any  # type: ignore
     Tree = Any  # type: ignore
 
-from meshing_around_clients.core import Config, MeshtasticAPI, MessageHandler  # noqa: E402
+from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.models import DATETIME_MIN_UTC  # noqa: E402
 
@@ -830,9 +830,6 @@ class MeshingAroundTUI:
             self.api = MockMeshtasticAPI(self.config)
         else:
             self.api = MeshtasticAPI(self.config)
-
-        # Message handler
-        self.message_handler = MessageHandler(self.config)
 
         # Screens
         self.screens = {

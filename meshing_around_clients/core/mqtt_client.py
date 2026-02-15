@@ -50,7 +50,6 @@ logger = logging.getLogger(__name__)
 MAX_PAYLOAD_BYTES = 65536  # 64 KB max per MQTT message
 DEFAULT_PORT_TLS = 8883  # Standard MQTT TLS port
 STALE_CLEANUP_INTERVAL = 600  # Check every 10 minutes
-MAP_CACHE_INTERVAL = 30  # Write GeoJSON cache every 30 seconds
 
 # Try to import paho-mqtt (handles both v1 and v2 API)
 try:
@@ -73,11 +72,18 @@ try:
     )
 
     MESH_CRYPTO_AVAILABLE = True
-except (ImportError, OSError, Exception):
+except (ImportError, OSError, Exception) as _crypto_exc:
     # Catch any exception including pyo3 panics from cryptography backend
     MESH_CRYPTO_AVAILABLE = False
     CRYPTO_AVAILABLE = False
     PROTOBUF_AVAILABLE = False
+    logger.info(
+        "Mesh crypto unavailable (%s: %s). "
+        "Encrypted packet decoding disabled — install 'cryptography' and "
+        "'meshtastic' packages to enable.",
+        type(_crypto_exc).__name__,
+        _crypto_exc,
+    )
 
 
 @dataclass
@@ -183,12 +189,9 @@ class MQTTMeshtasticClient:
         self._alert_cooldown_seconds = _ALERT_COOLDOWN_SECONDS
 
         # Stale node cleanup
-        self._last_cleanup: float = 0
         self._cleanup_interval = STALE_CLEANUP_INTERVAL
         self._cleanup_thread: Optional[threading.Thread] = None
 
-        # Reconnection state
-        self._reconnect_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
         # Generate client ID if not set
@@ -397,10 +400,6 @@ class MQTTMeshtasticClient:
         # Wait for cleanup thread to finish
         if self._cleanup_thread and self._cleanup_thread.is_alive():
             self._cleanup_thread.join(timeout=5)
-
-        # Wait for reconnect thread to finish
-        if self._reconnect_thread and self._reconnect_thread.is_alive():
-            self._reconnect_thread.join(timeout=5)
 
         if self._client:
             try:
@@ -1320,15 +1319,3 @@ class MQTTMeshtasticClient:
                 )
 
         return {"type": "FeatureCollection", "features": features}
-
-    def get_nodes_with_position(self) -> List[Node]:
-        """Get nodes that have valid position data."""
-        return [n for n in self.get_nodes() if n.position and n.position.is_valid()]
-
-    def get_online_nodes(self) -> List[Node]:
-        """Get only online nodes."""
-        return [n for n in self.get_nodes() if n.is_online]
-
-    def get_congested_nodes(self, threshold: float = CHUTIL_WARNING_THRESHOLD) -> List[Node]:
-        """Get nodes reporting channel utilization above threshold."""
-        return [n for n in self.get_nodes() if n.telemetry and n.telemetry.channel_utilization >= threshold]

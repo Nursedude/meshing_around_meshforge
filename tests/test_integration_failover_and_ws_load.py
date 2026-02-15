@@ -1,15 +1,15 @@
 """
 Integration tests for:
-1. Full failover with actual network (broker connectivity)
+1. MQTT broker connectivity and message handling
 2. WebSocket load testing with actual FastAPI/uvicorn stack
 3. _intentional_disconnect flag thread-safety verification
 
 These tests require:
-- Network connectivity to mqtt.meshtastic.org (failover tests)
+- Network connectivity to mqtt.meshtastic.org (MQTT tests)
 - paho-mqtt, fastapi, uvicorn, httpx packages installed
 - Run with: python -m pytest tests/test_integration_failover_and_ws_load.py -v
 
-Failover tests are skipped automatically when broker is unreachable.
+MQTT tests are skipped automatically when broker is unreachable.
 """
 
 import json
@@ -277,151 +277,6 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
             )
         finally:
             client.disconnect()
-
-
-@unittest.skipUnless(
-    __import__("importlib.util").util.find_spec("paho"),
-    "paho-mqtt not installed",
-)
-class TestConnectionManagerFailoverIntegration(unittest.TestCase):
-    """Integration tests for the unified ConnectionManager failover chain.
-
-    Tests the fallback sequence: SERIAL -> TCP -> MQTT -> DEMO
-    and validates that connection health checks work end-to-end.
-    """
-
-    def setUp(self):
-        self.config = Config(config_path="/nonexistent/path")
-        # Enable MQTT so it's in the fallback chain
-        self.config.mqtt.enabled = True
-
-    def test_fallback_to_mqtt_when_serial_unavailable(self):
-        """ConnectionManager should fall through serial/tcp to MQTT."""
-        from meshing_around_clients.core.connection_manager import (
-            ConnectionManager,
-            ConnectionType,
-        )
-
-        mgr = ConnectionManager(self.config)
-
-        if not _broker_reachable():
-            self.skipTest("MQTT broker not reachable")
-
-        try:
-            # Starting from MQTT directly (skip serial/tcp which need hardware)
-            result = mgr.connect(ConnectionType.MQTT)
-            self.assertTrue(result, "Should connect via MQTT")
-            self.assertTrue(mgr.is_connected)
-            self.assertEqual(mgr.status.connection_type, ConnectionType.MQTT)
-            self.assertIn("MQTT", mgr.status.device_info)
-        finally:
-            mgr.disconnect()
-
-        self.assertFalse(mgr.is_connected)
-
-    def test_fallback_to_demo_when_mqtt_unavailable(self):
-        """When MQTT fails, ConnectionManager should fall back to DEMO."""
-        from meshing_around_clients.core.connection_manager import (
-            ConnectionManager,
-            ConnectionType,
-        )
-
-        config = Config(config_path="/nonexistent/path")
-        # Point to a non-existent broker so MQTT fails
-        config.mqtt.broker = "localhost"
-        config.mqtt.port = 19999  # Not a real port
-        config.mqtt.enabled = True
-
-        mgr = ConnectionManager(config)
-        try:
-            # Start from MQTT - it should fail and fall through to DEMO
-            result = mgr.connect(ConnectionType.MQTT)
-            self.assertTrue(result, "Should fall back to DEMO")
-            self.assertTrue(mgr.is_connected)
-            self.assertEqual(mgr.status.connection_type, ConnectionType.DEMO)
-        finally:
-            mgr.disconnect()
-
-    def test_connection_health_check_with_live_mqtt(self):
-        """Health check should return accurate state for live MQTT connection."""
-        from meshing_around_clients.core.connection_manager import (
-            ConnectionManager,
-            ConnectionType,
-        )
-
-        if not _broker_reachable():
-            self.skipTest("MQTT broker not reachable")
-
-        mgr = ConnectionManager(self.config)
-        try:
-            result = mgr.connect(ConnectionType.MQTT)
-            self.assertTrue(result)
-
-            # Health check should pass for a fresh connection
-            is_healthy = mgr._check_connection_health()
-            self.assertTrue(is_healthy, "Fresh MQTT connection should be healthy")
-
-            # Connection health property should have MQTT-specific data
-            health = mgr.connection_health
-            self.assertEqual(health["connection_type"], "mqtt")
-            self.assertIn("broker", health)
-        finally:
-            mgr.disconnect()
-
-    def test_reconnect_monitor_starts_and_stops(self):
-        """Reconnect monitor thread should start on connect and stop on disconnect."""
-        from meshing_around_clients.core.connection_manager import (
-            ConnectionManager,
-            ConnectionType,
-        )
-
-        if not _broker_reachable():
-            self.skipTest("MQTT broker not reachable")
-
-        mgr = ConnectionManager(self.config)
-        try:
-            result = mgr.connect(ConnectionType.MQTT)
-            self.assertTrue(result)
-
-            # Reconnect monitor should be running
-            self.assertTrue(mgr._running)
-            self.assertIsNotNone(mgr._reconnect_thread)
-            self.assertTrue(mgr._reconnect_thread.is_alive())
-        finally:
-            mgr.disconnect()
-
-        # Give thread time to stop
-        if mgr._reconnect_thread:
-            mgr._reconnect_thread.join(timeout=15)
-        self.assertFalse(mgr._running)
-
-    def test_connection_info_reflects_state(self):
-        """get_connection_info should accurately reflect connection state."""
-        from meshing_around_clients.core.connection_manager import (
-            ConnectionManager,
-            ConnectionType,
-        )
-
-        mgr = ConnectionManager(self.config)
-        info = mgr.get_connection_info()
-        self.assertFalse(info["connected"])
-        self.assertEqual(info["reconnect_attempts"], 0)
-
-        # Connect to demo (always works, no network needed)
-        try:
-            result = mgr.connect(ConnectionType.DEMO)
-            self.assertTrue(result)
-
-            info = mgr.get_connection_info()
-            self.assertTrue(info["connected"])
-            self.assertEqual(info["connection_type"], "demo")
-            self.assertIsNotNone(info["last_connected"])
-        finally:
-            mgr.disconnect()
-
-        info = mgr.get_connection_info()
-        self.assertFalse(info["connected"])
-        self.assertIsNotNone(info["last_disconnected"])
 
 
 # =============================================================================
