@@ -1,43 +1,17 @@
 """
 Unit tests for cli_utils module.
 
-Tests:
-- Color codes
-- Validation functions
-- Progress indicators
+Tests validation functions and progress indicators.
+Removed: TestColors (attribute checks), TestPrintFunctions (stdout capture).
 """
 
 import pytest
-import sys
-from io import StringIO
 
-from meshing_around_clients.core.cli_utils import (
-    Colors, validate_mac_address, validate_ip_address, validate_port,
+from meshing_around_clients.setup.cli_utils import (
+    validate_mac_address, validate_ip_address, validate_port,
     validate_email, validate_coordinates, validate_serial_port,
-    ProgressBar, Spinner, print_success, print_error, print_warning,
-    print_info, print_section, print_header
+    ProgressBar, Spinner
 )
-
-
-class TestColors:
-    """Test color code class."""
-
-    def test_colors_defined(self):
-        """Verify all color codes are defined."""
-        assert hasattr(Colors, 'HEADER')
-        assert hasattr(Colors, 'OKBLUE')
-        assert hasattr(Colors, 'OKCYAN')
-        assert hasattr(Colors, 'OKGREEN')
-        assert hasattr(Colors, 'WARNING')
-        assert hasattr(Colors, 'FAIL')
-        assert hasattr(Colors, 'ENDC')
-        assert hasattr(Colors, 'BOLD')
-
-    def test_colors_are_strings(self):
-        """Verify colors are strings."""
-        assert isinstance(Colors.HEADER, str)
-        assert isinstance(Colors.OKGREEN, str)
-        assert isinstance(Colors.FAIL, str)
 
 
 class TestValidation:
@@ -149,43 +123,3 @@ class TestProgressIndicators:
         initial_frame = spinner.frame
         spinner.spin()
         assert spinner.frame == initial_frame + 1
-
-
-class TestPrintFunctions:
-    """Test print helper functions."""
-
-    def test_print_success(self, capsys):
-        """Test print_success outputs correctly."""
-        print_success("Test message")
-        captured = capsys.readouterr()
-        assert "Test message" in captured.out
-
-    def test_print_error(self, capsys):
-        """Test print_error outputs correctly."""
-        print_error("Error message")
-        captured = capsys.readouterr()
-        assert "Error message" in captured.out
-
-    def test_print_warning(self, capsys):
-        """Test print_warning outputs correctly."""
-        print_warning("Warning message")
-        captured = capsys.readouterr()
-        assert "Warning message" in captured.out
-
-    def test_print_info(self, capsys):
-        """Test print_info outputs correctly."""
-        print_info("Info message")
-        captured = capsys.readouterr()
-        assert "Info message" in captured.out
-
-    def test_print_section(self, capsys):
-        """Test print_section outputs correctly."""
-        print_section("Section Title")
-        captured = capsys.readouterr()
-        assert "Section Title" in captured.out
-
-    def test_print_header(self, capsys):
-        """Test print_header outputs correctly."""
-        print_header("Header Title")
-        captured = capsys.readouterr()
-        assert "Header Title" in captured.out

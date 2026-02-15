@@ -632,7 +632,7 @@ def import_upstream_config(source_path: str):
 
     try:
         # Try to use the config_schema module for proper conversion
-        from meshing_around_clients.core.config_schema import ConfigLoader, UnifiedConfig
+        from meshing_around_clients.setup.config_schema import ConfigLoader, UnifiedConfig
 
         SCHEMA_AVAILABLE = True
     except ImportError:

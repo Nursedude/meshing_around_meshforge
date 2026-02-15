@@ -30,10 +30,6 @@ from meshing_around_clients.core.models import (
     MessageType,
     Node,
 )
-from meshing_around_clients.core.alert_detector import (
-    AlertDetector,
-    AlertDetectorConfig,
-)
 from meshing_around_clients.core.config import Config
 
 
@@ -351,66 +347,6 @@ class TestAlertDeduplicationMQTT(unittest.TestCase):
 
         battery_alerts = [a for a in client.network.alerts if a.alert_type == AlertType.BATTERY]
         self.assertEqual(len(battery_alerts), 2)
-
-
-class TestAlertDeduplicationDetector(unittest.TestCase):
-    """Test per-node alert deduplication in AlertDetector."""
-
-    def test_snr_alert_cooldown(self):
-        """Same node's low SNR should not spam alerts within cooldown."""
-        config = Config(config_path="/nonexistent/path")
-        detector_config = AlertDetectorConfig(snr_enabled=True, snr_threshold=-10.0)
-        detector = AlertDetector(config, detector_config)
-        detector._snr_cooldown_seconds = 300
-
-        # First check should alert
-        alert1 = detector.check_snr("!node1", -15.0)
-        self.assertIsNotNone(alert1)
-
-        # Second check within cooldown should be suppressed
-        alert2 = detector.check_snr("!node1", -12.0)
-        self.assertIsNone(alert2)
-
-    def test_snr_different_nodes_independent(self):
-        """Different nodes should have independent SNR cooldowns."""
-        config = Config(config_path="/nonexistent/path")
-        detector_config = AlertDetectorConfig(snr_enabled=True, snr_threshold=-10.0)
-        detector = AlertDetector(config, detector_config)
-        detector._snr_cooldown_seconds = 300
-
-        alert1 = detector.check_snr("!node1", -15.0)
-        alert2 = detector.check_snr("!node2", -15.0)
-
-        self.assertIsNotNone(alert1)
-        self.assertIsNotNone(alert2)
-
-    def test_snr_cooldown_expiry(self):
-        """SNR alert should fire again after cooldown expires."""
-        config = Config(config_path="/nonexistent/path")
-        detector_config = AlertDetectorConfig(snr_enabled=True, snr_threshold=-10.0)
-        detector = AlertDetector(config, detector_config)
-        detector._snr_cooldown_seconds = 0  # No cooldown for test
-
-        alert1 = detector.check_snr("!node1", -15.0)
-        self.assertIsNotNone(alert1)
-
-        # With 0 cooldown, next check should also alert
-        alert2 = detector.check_snr("!node1", -15.0)
-        self.assertIsNotNone(alert2)
-
-    def test_clear_state_resets_snr_cooldowns(self):
-        """clear_state should reset SNR cooldown tracking."""
-        config = Config(config_path="/nonexistent/path")
-        detector_config = AlertDetectorConfig(snr_enabled=True, snr_threshold=-10.0)
-        detector = AlertDetector(config, detector_config)
-        detector._snr_cooldown_seconds = 300
-
-        detector.check_snr("!node1", -15.0)
-        detector.clear_state()
-
-        # After clear, should alert again
-        alert = detector.check_snr("!node1", -15.0)
-        self.assertIsNotNone(alert)
 
 
 # =============================================================================

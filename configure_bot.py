@@ -38,21 +38,21 @@ SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 # Try to import modular components - fallback to inline if not available
 try:
-    from meshing_around_clients.core.cli_utils import (
+    from meshing_around_clients.setup.cli_utils import (
         Colors, print_header, print_section, print_success, print_warning,
         print_error, print_info, print_step, get_input, get_yes_no,
         validate_mac_address, validate_coordinates
     )
-    from meshing_around_clients.core.pi_utils import (
+    from meshing_around_clients.setup.pi_utils import (
         is_raspberry_pi, get_pi_model, get_os_info, is_bookworm_or_newer,
         check_pep668_environment, get_serial_ports,
         check_user_groups, get_pip_command, get_pip_install_flags,
         get_pi_config_path, check_serial_enabled
     )
-    from meshing_around_clients.core.system_maintenance import (
+    from meshing_around_clients.setup.system_maintenance import (
         run_command, find_meshing_around
     )
-    from meshing_around_clients.core.alert_configurators import (
+    from meshing_around_clients.setup.alert_configurators import (
         configure_interface, configure_general, configure_emergency_alerts,
         configure_proximity_alerts, configure_altitude_alerts,
         configure_weather_alerts, configure_battery_alerts,
