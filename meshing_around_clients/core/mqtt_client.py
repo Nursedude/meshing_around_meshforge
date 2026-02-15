@@ -16,7 +16,6 @@ Supports:
 import atexit
 import json
 import logging
-import random
 import struct
 import threading
 import time
