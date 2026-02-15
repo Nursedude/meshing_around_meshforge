@@ -30,7 +30,6 @@ try:
     from rich.panel import Panel
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.prompt import Confirm, Prompt
-    from rich.syntax import Syntax
     from rich.table import Table
     from rich.text import Text
     from rich.tree import Tree
@@ -641,15 +640,6 @@ class TopologyScreen(Screen):
             for node in sorted(multi_hop, key=lambda n: n.display_name):
                 self._add_node_to_tree(multi_branch, node)
 
-        # Add nodes with unknown hops
-        unknown_hop = [
-            n for n in network.nodes.values() if n not in direct_nodes and n not in one_hop and n not in multi_hop
-        ]
-        if unknown_hop:
-            unknown_branch = tree.add("[dim]Unknown[/dim]")
-            for node in sorted(unknown_hop, key=lambda n: n.display_name)[:10]:
-                self._add_node_to_tree(unknown_branch, node)
-
         return Panel(tree, title="[bold]Topology[/bold]", border_style="blue")
 
     def _add_node_to_tree(self, parent, node) -> None:
@@ -773,33 +763,6 @@ class TopologyScreen(Screen):
         return Panel(table, title="[bold]Channels[/bold]", border_style="yellow")
 
 
-class SendMessageScreen(Screen):
-    """Screen for composing and sending messages."""
-
-    def __init__(self, app: "MeshingAroundTUI"):
-        super().__init__(app)
-        self.message = ""
-        self.channel = 0
-        self.destination = "^all"
-
-    def render(self) -> Panel:
-        content = []
-
-        # Destination selection
-        content.append(Text(f"Destination: {self.destination}", style="cyan"))
-        content.append(Text(f"Channel: {self.channel}", style="blue"))
-        content.append(Text(""))
-        content.append(Text("Message:", style="bold"))
-        content.append(Text(self.message or "(type your message)", style="white" if self.message else "dim"))
-
-        return Panel(
-            Group(*content),
-            title="[bold cyan]Send Message[/bold cyan]",
-            subtitle="[dim]Press Enter to send, Esc to cancel[/dim]",
-            border_style="green",
-        )
-
-
 class HelpScreen(Screen):
     """Help screen showing keyboard shortcuts."""
 
@@ -878,7 +841,6 @@ class MeshingAroundTUI:
             "messages": MessagesScreen(self),
             "alerts": AlertsScreen(self),
             "topology": TopologyScreen(self),
-            "send": SendMessageScreen(self),
             "help": HelpScreen(self),
         }
         self.current_screen = "dashboard"

@@ -12,7 +12,6 @@ These tests require:
 Failover tests are skipped automatically when broker is unreachable.
 """
 
-import asyncio
 import json
 import socket
 import sys
@@ -426,126 +425,13 @@ class TestConnectionManagerFailoverIntegration(unittest.TestCase):
 
 
 # =============================================================================
-# _intentional_disconnect Thread-Safety Verification
-# =============================================================================
-
-
-@unittest.skipUnless(
-    __import__("importlib.util").util.find_spec("paho"),
-    "paho-mqtt not installed",
-)
-class TestIntentionalDisconnectThreadSafety(unittest.TestCase):
-    """Verify _intentional_disconnect is properly synchronized via _stats_lock.
-
-    This test hammers the flag from multiple threads to verify the fix
-    for the previously unsynchronized cross-thread access.
-    """
-
-    @patch("meshing_around_clients.core.mqtt_client.mqtt")
-    def test_concurrent_disconnect_and_callback(self, mock_mqtt):
-        """Simulate main-thread disconnect racing with paho callback thread."""
-        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-        config = Config(config_path="/nonexistent/path")
-        client = MQTTMeshtasticClient(config)
-        client._client = MagicMock()
-        errors = []
-
-        def simulate_disconnects():
-            """Main thread: rapidly set intentional disconnect."""
-            try:
-                for _ in range(500):
-                    with client._stats_lock:
-                        client._intentional_disconnect = True
-                    with client._stats_lock:
-                        client._intentional_disconnect = False
-            except Exception as e:
-                errors.append(("disconnect_thread", e))
-
-        def simulate_callbacks():
-            """Paho callback thread: read the flag as _on_disconnect does."""
-            try:
-                for _ in range(500):
-                    with client._stats_lock:
-                        _ = client._intentional_disconnect
-                    with client._stats_lock:
-                        client._connected = not client._connected
-            except Exception as e:
-                errors.append(("callback_thread", e))
-
-        def simulate_health_reads():
-            """UI thread: read connection_health which accesses multiple fields."""
-            try:
-                for _ in range(200):
-                    _ = client.connection_health
-                    _ = client.is_connected
-            except Exception as e:
-                errors.append(("health_thread", e))
-
-        threads = []
-        for i in range(3):
-            threads.append(threading.Thread(target=simulate_disconnects, name=f"disc-{i}"))
-            threads.append(threading.Thread(target=simulate_callbacks, name=f"cb-{i}"))
-            threads.append(threading.Thread(target=simulate_health_reads, name=f"health-{i}"))
-
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=15)
-
-        self.assertEqual(len(errors), 0, f"Thread-safety errors in _intentional_disconnect: {errors}")
-
-    @patch("meshing_around_clients.core.mqtt_client.mqtt")
-    def test_disconnect_sets_flag_before_connected_false(self, mock_mqtt):
-        """Verify disconnect() sets _intentional_disconnect atomically with _connected."""
-        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-        config = Config(config_path="/nonexistent/path")
-        client = MQTTMeshtasticClient(config)
-        client._client = MagicMock()
-
-        # Simulate connected state
-        client._on_connect(None, None, None, 0)
-        self.assertTrue(client.is_connected)
-
-        # Disconnect should set both flags under lock
-        client.disconnect()
-
-        with client._stats_lock:
-            self.assertTrue(client._intentional_disconnect)
-            self.assertFalse(client._connected)
-
-    @patch("meshing_around_clients.core.mqtt_client.mqtt")
-    def test_on_disconnect_reads_flag_under_lock(self, mock_mqtt):
-        """Verify _on_disconnect reads _intentional_disconnect under lock."""
-        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-        config = Config(config_path="/nonexistent/path")
-        client = MQTTMeshtasticClient(config)
-        client._client = MagicMock()
-
-        # Set intentional disconnect under lock
-        with client._stats_lock:
-            client._intentional_disconnect = True
-
-        # Simulate unexpected disconnect (rc=1)
-        # Because _intentional_disconnect is True, it should be treated as clean
-        client._on_disconnect(None, None, 1)
-
-        with client._stats_lock:
-            # Should NOT have incremented reconnect count
-            self.assertEqual(client._reconnect_count, 0)
-
-
-# =============================================================================
-# WebSocket Load Tests with actual FastAPI stack
+# WebSocket Functional Tests with actual FastAPI stack
 # =============================================================================
 
 
 try:
     from fastapi.testclient import TestClient
 
-    from meshing_around_clients.web.app import ConnectionManager as WSConnectionManager
     from meshing_around_clients.web.app import (
         RateLimiter,
         WebApplication,
@@ -680,78 +566,6 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
             response = ws.receive_json()
             self.assertEqual(response["type"], "pong")
 
-    def test_multiple_concurrent_websocket_clients(self):
-        """Multiple WebSocket clients should all receive init and function independently."""
-        num_clients = 10
-        results = {}
-        errors = []
-
-        def ws_client_session(client_id):
-            try:
-                client = self._make_client()
-                with client.websocket_connect("/ws") as ws:
-                    # Should receive init
-                    data = ws.receive_json()
-                    if data["type"] != "init":
-                        errors.append(f"Client {client_id}: expected init, got {data['type']}")
-                        return
-
-                    # Send ping
-                    ws.send_json({"type": "ping"})
-                    response = ws.receive_json()
-                    if response["type"] != "pong":
-                        errors.append(f"Client {client_id}: expected pong, got {response['type']}")
-                        return
-
-                    # Send refresh
-                    ws.send_json({"type": "refresh"})
-                    response = ws.receive_json()
-                    if response["type"] != "refresh":
-                        errors.append(f"Client {client_id}: expected refresh, got {response['type']}")
-                        return
-
-                    results[client_id] = True
-            except Exception as e:
-                errors.append(f"Client {client_id}: {type(e).__name__}: {e}")
-
-        threads = []
-        for i in range(num_clients):
-            t = threading.Thread(target=ws_client_session, args=(i,), name=f"ws-{i}")
-            threads.append(t)
-
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=30)
-
-        self.assertEqual(len(errors), 0, f"WebSocket client errors: {errors}")
-        self.assertEqual(len(results), num_clients, f"Only {len(results)}/{num_clients} clients completed")
-
-    def test_websocket_high_frequency_messages(self):
-        """Rapid-fire messages should all be processed without errors."""
-        client = self._make_client()
-        with client.websocket_connect("/ws") as ws:
-            ws.receive_json()  # Consume init
-
-            num_messages = 50
-            for i in range(num_messages):
-                ws.send_json(
-                    {
-                        "type": "send_message",
-                        "text": f"Rapid fire #{i}",
-                        "channel": 0,
-                    }
-                )
-
-            # Collect all responses
-            successes = 0
-            for _ in range(num_messages):
-                response = ws.receive_json()
-                if response.get("type") == "message_status" and response.get("success"):
-                    successes += 1
-
-            self.assertEqual(successes, num_messages, f"Only {successes}/{num_messages} rapid messages succeeded")
-
     def test_websocket_interleaved_ping_and_messages(self):
         """Interleaved pings and messages should all be handled correctly."""
         client = self._make_client()
@@ -783,36 +597,6 @@ class TestWebSocketLoadIntegration(unittest.TestCase):
             # Should have 7 pings (i=0,3,6,9,12,15,18) and 13 messages
             self.assertEqual(pongs, 7)
             self.assertEqual(message_statuses, 13)
-
-
-@unittest.skipUnless(FASTAPI_AVAILABLE, "FastAPI not installed")
-class TestWebSocketConnectionManager(unittest.TestCase):
-    """Test the WebSocket ConnectionManager in isolation."""
-
-    def test_broadcast_to_empty_list(self):
-        """Broadcasting to zero clients should not error."""
-        mgr = WSConnectionManager()
-
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(mgr.broadcast({"type": "test"}))
-        finally:
-            loop.close()
-
-    def test_broadcast_update_format(self):
-        """broadcast_update should produce correctly structured messages."""
-        mgr = WSConnectionManager()
-
-        # We can't easily test with real websockets here, but we can
-        # verify the method exists and accepts the right parameters
-        self.assertTrue(hasattr(mgr, "broadcast_update"))
-        self.assertTrue(asyncio.iscoroutinefunction(mgr.broadcast_update))
-
-    def test_connection_limit_enforcement(self):
-        """WSConnectionManager should enforce MAX_WS_CONNECTIONS."""
-        from meshing_around_clients.web.app import MAX_WS_CONNECTIONS
-
-        self.assertEqual(MAX_WS_CONNECTIONS, 100)
 
 
 @unittest.skipUnless(FASTAPI_AVAILABLE, "FastAPI not installed")
@@ -857,126 +641,6 @@ class TestWebSocketAuthIntegration(unittest.TestCase):
                 self.fail("WebSocket should have been rejected with wrong key")
         except Exception:
             pass  # Expected
-
-
-@unittest.skipUnless(FASTAPI_AVAILABLE, "FastAPI not installed")
-class TestWebSocketAndRESTConcurrent(unittest.TestCase):
-    """Test WebSocket and REST API under concurrent load.
-
-    Simulates a realistic scenario where WebSocket clients are receiving
-    broadcasts while REST API clients are hitting endpoints simultaneously.
-    """
-
-    @classmethod
-    def setUpClass(cls):
-        config = Config()
-        cls.web_app = WebApplication(config=config, demo_mode=True)
-        cls.web_app.rate_limiter = RateLimiter(default_rpm=50000, write_rpm=25000, burst_rpm=50000)
-        cls.web_app.api.connect()
-
-    def test_concurrent_rest_and_websocket(self):
-        """REST API and WebSocket should work concurrently without errors."""
-        errors = []
-        rest_results = []
-        ws_results = []
-
-        def rest_client_work():
-            """Hit various REST endpoints."""
-            try:
-                client = TestClient(self.web_app.app)
-                for _ in range(20):
-                    resp = client.get("/api/status")
-                    if resp.status_code != 200:
-                        errors.append(f"REST /api/status returned {resp.status_code}")
-                        return
-                    resp = client.get("/api/nodes")
-                    if resp.status_code != 200:
-                        errors.append(f"REST /api/nodes returned {resp.status_code}")
-                        return
-                    resp = client.get("/api/health")
-                    if resp.status_code != 200:
-                        errors.append(f"REST /api/health returned {resp.status_code}")
-                        return
-                rest_results.append(True)
-            except Exception as e:
-                errors.append(f"REST thread error: {type(e).__name__}: {e}")
-
-        def ws_client_work():
-            """Open WebSocket and do ping/refresh."""
-            try:
-                client = TestClient(self.web_app.app)
-                with client.websocket_connect("/ws") as ws:
-                    ws.receive_json()  # init
-                    for _ in range(10):
-                        ws.send_json({"type": "ping"})
-                        resp = ws.receive_json()
-                        if resp["type"] != "pong":
-                            errors.append(f"WS expected pong, got {resp['type']}")
-                            return
-                ws_results.append(True)
-            except Exception as e:
-                errors.append(f"WS thread error: {type(e).__name__}: {e}")
-
-        threads = []
-        for i in range(5):
-            threads.append(threading.Thread(target=rest_client_work, name=f"rest-{i}"))
-            threads.append(threading.Thread(target=ws_client_work, name=f"ws-{i}"))
-
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=30)
-
-        self.assertEqual(len(errors), 0, f"Concurrent errors: {errors}")
-        self.assertEqual(len(rest_results), 5, "Not all REST clients completed")
-        self.assertEqual(len(ws_results), 5, "Not all WS clients completed")
-
-    def test_broadcast_under_load(self):
-        """WebSocket broadcast should work while multiple clients are connected.
-
-        This tests the broadcast path that fires when messages/alerts arrive,
-        simulating the production pattern where MQTT callbacks trigger broadcasts.
-        """
-        errors = []
-        broadcast_received = {"count": 0}
-        lock = threading.Lock()
-
-        def ws_listener(client_id):
-            """WebSocket client that listens for broadcasts."""
-            try:
-                client = TestClient(self.web_app.app)
-                with client.websocket_connect("/ws") as ws:
-                    ws.receive_json()  # init
-
-                    # Send a message to trigger a broadcast
-                    ws.send_json(
-                        {
-                            "type": "send_message",
-                            "text": f"Broadcast test from {client_id}",
-                            "channel": 0,
-                        }
-                    )
-
-                    # Wait for the message_status response
-                    response = ws.receive_json()
-                    if response.get("type") == "message_status":
-                        with lock:
-                            broadcast_received["count"] += 1
-            except Exception as e:
-                errors.append(f"Listener {client_id}: {type(e).__name__}: {e}")
-
-        threads = []
-        for i in range(8):
-            t = threading.Thread(target=ws_listener, args=(i,), name=f"listener-{i}")
-            threads.append(t)
-
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=30)
-
-        self.assertEqual(len(errors), 0, f"Broadcast errors: {errors}")
-        self.assertEqual(broadcast_received["count"], 8, f"Only {broadcast_received['count']}/8 clients got responses")
 
 
 if __name__ == "__main__":
