@@ -325,15 +325,6 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.assertEqual(len(unread_alerts), 2)
 
 
-class TestMQTTConnectionManager(unittest.TestCase):
-    """Test MQTTConnectionManager."""
-
-    def test_manager_import(self):
-        """Verify MQTTConnectionManager can be imported."""
-        from meshing_around_clients.core.mqtt_client import MQTTConnectionManager
-        self.assertTrue(callable(MQTTConnectionManager))
-
-
 class TestMQTTConnectivity(unittest.TestCase):
     """Test MQTT broker connectivity using socket (no paho-mqtt required)."""
 

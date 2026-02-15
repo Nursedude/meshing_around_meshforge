@@ -16,7 +16,6 @@ Supports:
 import atexit
 import json
 import logging
-import random
 import struct
 import threading
 import time
@@ -1333,56 +1332,3 @@ class MQTTMeshtasticClient:
     def get_congested_nodes(self, threshold: float = CHUTIL_WARNING_THRESHOLD) -> List[Node]:
         """Get nodes reporting channel utilization above threshold."""
         return [n for n in self.get_nodes() if n.telemetry and n.telemetry.channel_utilization >= threshold]
-
-
-class MQTTConnectionManager:
-    """
-    Manages MQTT connection with automatic reconnection.
-
-    Uses exponential backoff for reconnection attempts (from meshforge patterns).
-    """
-
-    def __init__(self, client: MQTTMeshtasticClient, reconnect_delay: int = 5, max_reconnect_delay: int = 300):
-        self.client = client
-        self.reconnect_delay = reconnect_delay
-        self.max_reconnect_delay = max_reconnect_delay
-        self._running = False
-        self._thread: Optional[threading.Thread] = None
-        self._consecutive_failures = 0
-
-    def start(self):
-        """Start connection manager."""
-        self._running = True
-        self._consecutive_failures = 0
-        self._thread = threading.Thread(target=self._monitor_loop, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        """Stop connection manager."""
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=5)
-
-    def _monitor_loop(self):
-        """Monitor connection and reconnect with exponential backoff."""
-        while self._running:
-            if not self.client.is_connected:
-                # Exponential backoff with jitter to prevent thundering herd
-                base_delay = min(self.reconnect_delay * (1.5**self._consecutive_failures), self.max_reconnect_delay)
-                # Add +/-25% jitter
-                delay = base_delay * (0.75 + random.random() * 0.5)
-                logger.info("MQTT disconnected, reconnecting in %.0fs...", delay)
-                time.sleep(delay)
-
-                if not self._running:
-                    break
-
-                if self.client.connect():
-                    self._consecutive_failures = 0
-                    logger.info("MQTT reconnected successfully")
-                else:
-                    self._consecutive_failures += 1
-                    logger.warning("MQTT reconnect failed (attempt %d)", self._consecutive_failures)
-            else:
-                self._consecutive_failures = 0
-                time.sleep(self.reconnect_delay)
