@@ -16,9 +16,7 @@ meshing_around_clients.setup.
 """
 
 from .config import Config
-from .connection_manager import ConnectionManager, ConnectionType
 from .meshtastic_api import MeshtasticAPI, MockMeshtasticAPI
-from .message_handler import MessageHandler
 from .models import Alert, MeshNetwork, Message, Node, NodeTelemetry, Position
 
 # MQTT is optional
@@ -42,11 +40,7 @@ __all__ = [
     # API
     "MeshtasticAPI",
     "MockMeshtasticAPI",
-    "MessageHandler",
     "Config",
-    # Connections
-    "ConnectionManager",
-    "ConnectionType",
     # MQTT
     "MQTTMeshtasticClient",
     "MQTTConfig",

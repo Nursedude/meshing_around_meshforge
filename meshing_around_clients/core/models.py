@@ -619,13 +619,6 @@ class MeshNetwork:
         with self._lock:
             return [c for c in self.channels.values() if c.role != ChannelRole.DISABLED]
 
-    def update_channel_activity(self, channel_index: int) -> None:
-        """Update channel activity timestamp and message count."""
-        with self._lock:
-            if channel_index in self.channels:
-                self.channels[channel_index].message_count += 1
-                self.channels[channel_index].last_activity = datetime.now(timezone.utc)
-
     def get_messages_for_node(self, node_id: str) -> List[Message]:
         with self._lock:
             return [m for m in self.messages if m.sender_id == node_id or m.recipient_id == node_id]

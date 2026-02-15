@@ -60,7 +60,7 @@ MAX_WS_CONNECTIONS = 100
 # Maximum request body size (bytes) — 1 MB
 MAX_REQUEST_BODY_SIZE = 1_048_576
 
-from meshing_around_clients.core import Alert, Config, MeshtasticAPI, Message, MessageHandler  # noqa: E402
+from meshing_around_clients.core import Alert, Config, MeshtasticAPI, Message  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
 
 # Version
@@ -219,7 +219,7 @@ class ConfigUpdateRequest(BaseModel):
     value: str
 
 
-class ConnectionManager:
+class WebSocketManager:
     """Manages WebSocket connections for real-time updates."""
 
     def __init__(self):
@@ -278,11 +278,8 @@ class WebApplication:
         else:
             self.api = MeshtasticAPI(self.config)
 
-        # Message handler
-        self.message_handler = MessageHandler(self.config)
-
         # WebSocket manager
-        self.ws_manager = ConnectionManager()
+        self.ws_manager = WebSocketManager()
 
         # Security: CSRF protection and rate limiting
         self.csrf = CSRFProtection()
@@ -310,8 +307,14 @@ class WebApplication:
             for coro in self._pending_coros:
                 self._event_loop.create_task(coro)
             self._pending_coros.clear()
-            if self.demo_mode:
-                self.api.connect()
+            success = self.api.connect()
+            if not success and not self.demo_mode:
+                logger.warning(
+                    "Device connection failed: %s. "
+                    "Dashboard will show no data until connection succeeds. "
+                    "Use POST /api/connect to retry or restart with --demo.",
+                    self.api.connection_info.error_message,
+                )
             yield
             # Shutdown
             self._event_loop = None
