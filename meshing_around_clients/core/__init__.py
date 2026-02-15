@@ -1,96 +1,25 @@
 """
 Core module for Meshing-Around Clients.
-Provides shared functionality for TUI and Web clients.
+Provides shared runtime functionality for TUI and Web clients.
 
 Supports multiple connection types:
 - Serial (direct USB connection to radio)
 - TCP (remote Meshtastic device)
+- HTTP (meshtasticd HTTP API)
 - MQTT (no radio required)
 - BLE (Bluetooth)
+- Demo (simulated data)
 
-New in 0.6.0:
-- Unified config schema (config_schema.py)
-- Pi utilities (pi_utils.py)
-- System maintenance/auto-update (system_maintenance.py)
-- CLI utilities (cli_utils.py)
+Setup-only modules (cli_utils, pi_utils, system_maintenance,
+alert_configurators, config_schema) have been moved to
+meshing_around_clients.setup.
 """
 
-# Alert configuration wizards
-from .alert_configurators import (
-    ALERT_CONFIGURATORS,
-    configure_altitude_alerts,
-    configure_battery_alerts,
-    configure_disconnect_alerts,
-    configure_email_sms,
-    configure_emergency_alerts,
-    configure_general,
-    configure_global_settings,
-    configure_interface,
-    configure_new_node_alerts,
-    configure_noisy_node_alerts,
-    configure_proximity_alerts,
-    configure_weather_alerts,
-    create_basic_config,
-)
-from .alert_detector import AlertDetector, AlertDetectorConfig, ProximityZone
-from .cli_utils import (
-    Colors,
-    Menu,
-    ProgressBar,
-    get_choice,
-    get_input,
-    get_yes_no,
-    print_error,
-    print_header,
-    print_info,
-    print_section,
-    print_step,
-    print_success,
-    print_warning,
-    validate_email,
-    validate_ip_address,
-    validate_mac_address,
-)
 from .config import Config
-
-# New unified configuration
-from .config_schema import AlertPriority, AltitudeAlertConfig, AutoUpdateConfig, ConfigLoader
-from .config_schema import ConnectionType as SchemaConnectionType
-from .config_schema import EmergencyAlertConfig, GeneralConfig, InterfaceConfig
-from .config_schema import MQTTConfig as SchemaMQTTConfig
-from .config_schema import SentryConfig, UnifiedConfig
 from .connection_manager import ConnectionManager, ConnectionType
 from .meshtastic_api import MeshtasticAPI, MockMeshtasticAPI
 from .message_handler import MessageHandler
 from .models import Alert, MeshNetwork, Message, Node, NodeTelemetry, Position
-from .notifications import EmailConfig, NotificationConfig, NotificationManager, SMSConfig
-
-# Pi and system utilities
-from .pi_utils import (
-    PiInfo,
-    SerialPortInfo,
-    check_pep668_environment,
-    check_user_groups,
-    get_os_info,
-    get_pi_info,
-    get_pi_model,
-    get_pip_command,
-    get_pip_install_flags,
-    get_serial_ports,
-    is_bookworm_or_newer,
-    is_raspberry_pi,
-)
-from .system_maintenance import (
-    UpdateResult,
-    check_for_updates,
-    create_systemd_service,
-    find_meshing_around,
-    install_python_dependencies,
-    manage_service,
-    system_update,
-    update_meshforge,
-    update_upstream,
-)
 
 # MQTT is optional
 try:
@@ -118,84 +47,8 @@ __all__ = [
     # Connections
     "ConnectionManager",
     "ConnectionType",
-    # Alerts
-    "AlertDetector",
-    "AlertDetectorConfig",
-    "ProximityZone",
-    # Notifications
-    "NotificationManager",
-    "NotificationConfig",
-    "EmailConfig",
-    "SMSConfig",
     # MQTT
     "MQTTMeshtasticClient",
     "MQTTConfig",
     "MQTT_AVAILABLE",
-    # New: Unified Config
-    "UnifiedConfig",
-    "ConfigLoader",
-    "SchemaConnectionType",
-    "InterfaceConfig",
-    "SchemaMQTTConfig",
-    "GeneralConfig",
-    "EmergencyAlertConfig",
-    "SentryConfig",
-    "AltitudeAlertConfig",
-    "AutoUpdateConfig",
-    "AlertPriority",
-    # New: Pi Utils
-    "is_raspberry_pi",
-    "get_pi_model",
-    "get_os_info",
-    "is_bookworm_or_newer",
-    "check_pep668_environment",
-    "get_pi_info",
-    "get_serial_ports",
-    "check_user_groups",
-    "get_pip_command",
-    "get_pip_install_flags",
-    "PiInfo",
-    "SerialPortInfo",
-    # New: System Maintenance
-    "system_update",
-    "update_upstream",
-    "update_meshforge",
-    "check_for_updates",
-    "find_meshing_around",
-    "install_python_dependencies",
-    "create_systemd_service",
-    "manage_service",
-    "UpdateResult",
-    # New: CLI Utils
-    "Colors",
-    "print_header",
-    "print_section",
-    "print_success",
-    "print_warning",
-    "print_error",
-    "print_info",
-    "print_step",
-    "get_input",
-    "get_yes_no",
-    "get_choice",
-    "validate_mac_address",
-    "validate_ip_address",
-    "validate_email",
-    "ProgressBar",
-    "Menu",
-    # New: Alert Configurators
-    "configure_interface",
-    "configure_general",
-    "configure_emergency_alerts",
-    "configure_proximity_alerts",
-    "configure_altitude_alerts",
-    "configure_weather_alerts",
-    "configure_battery_alerts",
-    "configure_noisy_node_alerts",
-    "configure_new_node_alerts",
-    "configure_disconnect_alerts",
-    "configure_email_sms",
-    "configure_global_settings",
-    "create_basic_config",
-    "ALERT_CONFIGURATORS",
 ]

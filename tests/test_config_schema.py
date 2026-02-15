@@ -18,7 +18,7 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from meshing_around_clients.core.config_schema import (
+from meshing_around_clients.setup.config_schema import (
     ConnectionType, AlertPriority, InterfaceConfig, EmergencyAlertConfig,
     SentryConfig, AltitudeAlertConfig, WeatherAlertConfig, BatteryAlertConfig,
     NewNodeAlertConfig, NoisyNodeAlertConfig, DisconnectAlertConfig,

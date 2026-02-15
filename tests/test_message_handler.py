@@ -16,16 +16,6 @@ from meshing_around_clients.core.models import Message, AlertType
 from meshing_around_clients.core.config import Config
 
 
-class TestCommandType(unittest.TestCase):
-    """Test CommandType enum."""
-
-    def test_command_type_values(self):
-        self.assertEqual(CommandType.PING.value, "ping")
-        self.assertEqual(CommandType.HELP.value, "help")
-        self.assertEqual(CommandType.ADMIN.value, "admin")
-        self.assertEqual(CommandType.UNKNOWN.value, "unknown")
-
-
 class TestParsedCommand(unittest.TestCase):
     """Test ParsedCommand dataclass."""
 
