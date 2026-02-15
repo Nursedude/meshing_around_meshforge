@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-12 (meshtasticd HTTP API Session)
+**Last Updated:** 2026-02-15 (Code Trim & Deep Review Session)
 **Version:** 0.5.0-beta
 
 ---
@@ -13,13 +13,11 @@
 python3 mesh_client.py --demo
 
 # Run tests
-python3 -m pytest tests/ -v
+python3 -m pytest tests/ -v --ignore=tests/test_web_app.py
 
-# Check for broad exceptions
-grep -rn "except Exception\|except:" meshing_around_clients/
-
-# Validate Python syntax
-python3 -m py_compile configure_bot.py
+# Check linting
+python3 -m flake8 meshing_around_clients/
+python3 -m isort --check-only --diff meshing_around_clients/
 ```
 
 ---
@@ -30,250 +28,236 @@ python3 -m py_compile configure_bot.py
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 320 tests passing (59 skipped: MQTT integration, web/fastapi)
-- **Meshforge Remote:** `meshforge` → `Nursedude/meshforge` (733+ PRs, `src/` architecture)
+- **Test Status:** 228 tests passing, 49 skipped (MQTT integration, web/fastapi)
+- **Branch:** `claude/trim-code-tests-xT3jh`
 
-### Code Health
-- All broad `except Exception` fixed in core modules
-- configure_bot.py decomposed (2307 → ~2000 lines)
-- New modular architecture with fallback support
-- Meshforge robustness patterns synced (input validation, stale cleanup, congestion thresholds)
-- **CI/CD pipeline green:** black, isort, flake8 all clean; httpx in test deps
-- **configure_bot.py integration bugs fixed** (SerialPortInfo, run_command signatures)
-- **Web templates verified** (topology field names, nav link added)
-- **MQTT reliability overhaul:** paho v2 compat, thread-safe stats, reconnection, relay nodes
-- **Atomic writes:** save_to_file() crash-safe with tempfile + os.replace()
-- **Connection health:** double-tap verification pattern from meshforge
-- **GeoJSON export:** /api/geojson endpoint + MQTTMeshtasticClient.get_geojson()
-- **meshtasticd HTTP API:** Full HTTP connection type support via meshtastic.http_interface.HTTPInterface
+### Directory Structure (Post-Restructure)
 
-### Recent Improvements (2026-02-12 — meshtasticd HTTP API Support)
-- **Root cause:** Codebase only supported serial, TCP, BLE, MQTT, and demo connections — no HTTP connection for meshtasticd's HTTP API
-- **config.py:** Added `http_url` field to `InterfaceConfig` (e.g. `http://meshtastic.local`), updated `from_dict()`, `save()`, `to_dict()`
-- **meshtastic_api.py:** Added `import meshtastic.http_interface` and `http` branch in `connect()` using `HTTPInterface(base_url, connectTimeoutSeconds=...)`, with fallback from hostname when http_url is empty
-- **connection_manager.py:** Added `HTTP = "http"` to `ConnectionType` enum, placed HTTP between TCP and MQTT in fallback order, added `_connect_http()` method, updated `_detect_connection_type()` for auto-detect when http_url is set
-- **mesh_client.py:** Added HTTP to DEFAULT_CONFIG comments/fields, setup wizard (option 3), `get_missing_deps()` dependency check, `detect_connection_type()` auto-detection, `run_application()` config forwarding, and legacy config migration key map
-- **18 new tests** in `tests/test_http_connection.py` covering: enum, auto-detection (http_url vs hostname), connect success/failure/timeout/ConnectionError, fallback order, no-library graceful failure, config roundtrip, and display info
-- **320 tests passing** (up from 297), 59 skipped, all linters clean
-- Branch: `claude/fix-meshtasticd-api-iuLpP`
-- **Session entropy status:** Clean — no degradation observed
-
-### Connection Mode Table (Updated)
-| Mode | Radio Required | Use Case |
-|------|----------------|----------|
-| Serial | Yes (USB) | Direct connection to Meshtastic device |
-| TCP | Remote | Connect to device on network (protobuf port 4403) |
-| HTTP | Remote | Connect to meshtasticd HTTP API |
-| MQTT | No | Connect via broker (mqtt.meshtastic.org) |
-| BLE | Yes | Bluetooth LE connection |
-| Demo | No | Simulated data for testing |
-
-### Previous Improvements (2026-02-12 — TUI Improvements)
-- **Dashboard stats panel redesign:** 2-column layout surfacing mesh health score, channel utilization with Meshtastic congestion thresholds (25% warning/40% critical per ROUTER_LATE docs), and avg SNR — data that existed in models.py but was never displayed
-- **Active screen indicator:** Footer nav bar highlights current screen with inverted cyan style for visual orientation
-- **Nodes screen pagination:** j/k keys for page down/up (20 nodes per page), supports large meshes without scroll overflow
-- **Environment telemetry columns:** Nodes screen dynamically shows Temp and Humidity columns when any node on the current page has sensor data (BME280/BME680/BMP280)
-- **Alerts severity filtering:** l/m/H/C keys to filter by Low/Medium/High/Critical severity (toggles on repeat press), 'a' to clear filter
-- **Alert acknowledgment:** 'x' key acknowledges all unread alerts at once
-- **Help screen updated:** Documents all new keybindings for nodes, alerts, topology views
-- **297 tests passing**, black formatting clean, all screens render verified in demo mode
-- Branch: `claude/improve-meshforge-tui-jwCHI`
-- **Session entropy status:** Clean — no degradation observed
-
-### Previous Improvements (2026-02-12 — Config Unification)
-- **Config section unification:** Replaced monolithic `[connection]` section in `mesh_client.py` with canonical `[interface]` + `[mqtt]` sections
-  - Root cause: `mesh_client.py` (bootstrap) used `[connection]` with prefixed keys (`mqtt_broker`, `serial_port`, `tcp_host`) while `core/config.py` expected separate `[interface]` and `[mqtt]` sections with clean key names (`broker`, `port`, `hostname`)
-  - DEFAULT_CONFIG template now generates configs that `Config` class can actually read
-  - Key mappings: `serial_port` → `port`, `tcp_host` → `hostname`, `serial_baud` → `baudrate`, `ble_address` → `mac`, `mqtt_enabled` → `mqtt.enabled`, `mqtt_broker` → `mqtt.broker`, etc.
-  - Removed dead `meshtastic_enabled` flag — MQTT-only mode is now implicit from `interface.type = mqtt`
-  - `interactive_setup()` wizard writes to correct sections
-  - All `config.get("connection", ...)` calls updated throughout mesh_client.py
-- **Backward-compatible migration:** `_migrate_connection_section()` auto-detects and converts legacy `[connection]` configs on load, then saves the migrated file
-- **config.enhanced.ini:** Added explicit `enabled = false` to `[mqtt]` section for clarity
-- **End-to-end verified:** Config generated by mesh_client.py DEFAULT_CONFIG is correctly parsed by core/config.py Config class (MQTT broker, channel, node_id all flow through)
-- **297 tests passing**, 0 failures
-- Branch: `claude/unify-config-mqtt-test-ie7a1`
-
-### Previous Improvements (2026-02-12 — Code Review & Accessibility Health Check)
-- **Target environment:** Pi Zero 2W behind Arden router
-- **CRITICAL FIX: `--import-config` was broken** (mesh_client.py:552,593):
-  - `CONFIG_PATH` was never defined — should be `CONFIG_FILE` (NameError on use)
-  - Both occurrences fixed to `CONFIG_FILE`
-- **CRITICAL FIX: `web/app.py` sys.exit at import time** (line 43):
-  - Missing FastAPI caused `sys.exit(1)` even when module was only imported for availability check
-  - Now only exits when run directly (`__name__ == "__main__"`)
-- **Web UI network accessibility** (mesh_client.py):
-  - Added `--host` and `--port` CLI args for web server bind address
-  - Default 127.0.0.1 is safe, but Pi users can now do `--host 0.0.0.0`
-  - Example: `python3 mesh_client.py --web --host 0.0.0.0 --port 8080`
-- **Internet check resilience** (mesh_client.py:121):
-  - `check_internet()` tried only Google DNS 8.8.8.8 — fails behind restrictive routers
-  - Now tries 8.8.8.8, 1.1.1.1, 9.9.9.9 in sequence
-- **Thread safety fix** (mqtt_client.py:510):
-  - `_message_count` increment moved inside `_stats_lock` block
-- **Full codebase reviewed** — 12 files, all features verified accessible
-- **Pi Zero 2W notes:** MQTT mode recommended, MAX_NODES=10000 could be lowered for 512MB RAM
-- **Config system note:** `[connection]` sections in INI vs `[mqtt]`/`[web]` in Config dataclass — works via defaults but naming could be unified in future refactor
-- Branch: `claude/code-review-accessibility-kSLI6`
-
-### Previous Improvements (2026-02-11)
-- **CI Fix: httpx dependency** — Starlette TestClient requires httpx at import time; added to CI pip install
-- **CSRF double-cookie bug fix** (web/app.py):
-  - `/api/csrf-token` endpoint and CSRF middleware both generated independent tokens
-  - Middleware now checks `response.raw_headers` before setting cookie, avoids overwrite
-- **Integration test fixes** (test_integration_failover_and_ws_load.py):
-  - `test_stats_accumulate_across_session`: was calling `_handle_json_message()` directly
-    which skips the stats pipeline; fixed to call `_on_message()` with mock msg object
-  - `_on_disconnect` race condition fix: consolidated lock acquisition
-  - `_save_in_progress` race condition fix in persistence layer
-- **New integration tests**: failover behavior, WebSocket load, MQTT broker reconnection
-- **black formatting fix**: line wrapping in CSRF middleware generator expression
-- 410 tests passing (14 skipped), 0 lint errors
-- Branch: `claude/integration-tests-failover-EBrRD` (PR #51)
-
-### Previous Improvements (2026-02-09)
-- **CSRF Protection:** Double-submit cookie middleware on all POST/PUT/DELETE
-  - Token generated per session, validated via X-CSRF-Token header
-  - JSON requests CORS-protected; form submissions require token
-  - API key and Bearer auth requests exempt (not CSRF-vulnerable)
-  - `/api/csrf-token` endpoint for frontend token retrieval
-- **API Rate Limiting:** Sliding-window per-IP rate limiter middleware
-  - 60 RPM default, 20 RPM for write (POST) endpoints
-  - X-RateLimit-* headers on all responses
-  - 429 Too Many Requests with Retry-After header
-- **Message Search/Filter:** Enhanced `/api/messages` with query params
-  - `search=` full-text search in message text (case-insensitive)
-  - `sender=` filter by sender name or ID (substring match)
-  - `since=` ISO timestamp filter for time-based queries
-  - Search UI in messages.html with debounced input
-- **Map Marker Clustering:** Leaflet.markercluster for 100+ nodes
-  - Dark theme cluster styling (cyan/yellow/red by cluster size)
-  - Configurable cluster radius, spiderfy on max zoom
-  - Chunked loading for performance with large datasets
-  - Applied to both template map and embedded fallback map
-- **Web Endpoint Test Coverage:** 68 new tests (test_web_app.py)
-  - All HTML pages, all API endpoints
-  - CSRF token generation/validation (10 unit tests)
-  - Rate limiter logic (5 unit tests)
-  - Auth-required endpoints (8 tests)
-  - Message search/filter (5 tests)
-  - Rate limit middleware (2 integration tests)
-  - CSRF middleware (3 integration tests)
-
-### Previous P1-P2 Improvements (Completed)
-- **Multi-interface support** - Up to 9 interfaces in config.py and connection_manager.py
-- **Persistent storage** - Network state saved/loaded from ~/.config/meshing-around-clients/
-  - Now uses atomic writes (tempfile + os.replace) for crash safety
-- **Upstream config import** - `--import-config` CLI option for migration
-- **Web topology template** - topology.html created and fixed
-- **Crypto degradation** - mesh_crypto.py and mqtt_client.py handle missing crypto gracefully
-- **MQTT Integration** - Documentation/MQTT_INTEGRATION.md from MeshForge NOC
-- **CI/CD Pipeline** - GitHub Actions workflow (.github/workflows/ci.yml)
-  - Python 3.9-3.12 test matrix
-  - pytest with coverage
-  - flake8/black/isort linting (all passing, no longer masked by continue-on-error)
-- **MQTT Reliability** - paho v2 compat, auto-reconnect, thread-safe stats, relay nodes
-- **GeoJSON/Map API** - /api/geojson endpoint for Leaflet.js visualization
-- **Connection Health** - Double-tap verification, stale traffic detection
-- **Input Validation** - Message length limits (228 chars), channel range (0-7)
-- **Relay Node Discovery** - Meshtastic 2.6+ partial node ID handling
-
-### Key Modules
-| Module | Purpose | Lines |
-|--------|---------|-------|
-| `config_schema.py` | Unified config with upstream support | ~500 |
-| `pi_utils.py` | Raspberry Pi detection, PEP 668 | ~350 |
-| `system_maintenance.py` | Auto-update, git, systemd | ~450 |
-| `cli_utils.py` | Terminal colors, menus, validation | ~400 |
-| `alert_configurators.py` | Alert setup wizards | ~300 |
-| `mesh_crypto.py` | AES-256-CTR, protobuf decoding | ~450 |
+```
+meshing_around_meshforge/
+├── mesh_client.py              # Main entry point (1045 lines)
+├── configure_bot.py            # Bot setup wizard (2003 lines)
+├── meshing_around_clients/
+│   ├── core/                   # RUNTIME modules only
+│   │   ├── __init__.py         # 55 lines, 15 exports
+│   │   ├── config.py           # Config loading (533 lines) ✅ SOLID
+│   │   ├── models.py           # Data models (1039 lines) ⚠️ 40% dead
+│   │   ├── mqtt_client.py      # MQTT connection (1334 lines) ⚠️ 30% dead
+│   │   ├── meshtastic_api.py   # Device API (695 lines) ⚠️ some dead
+│   │   ├── connection_manager.py # Connection logic (646 lines) ❌ NEVER USED
+│   │   ├── message_handler.py  # Command handling (561 lines) ❌ NEVER USED
+│   │   └── mesh_crypto.py      # Encryption (713 lines) ❌ 0% EXERCISED
+│   ├── setup/                  # SETUP-ONLY modules (configure_bot.py)
+│   │   ├── __init__.py         # Docstring only
+│   │   ├── cli_utils.py        # Terminal colors, input helpers
+│   │   ├── pi_utils.py         # Pi detection, serial ports
+│   │   ├── system_maintenance.py # Updates, systemd
+│   │   ├── alert_configurators.py # Alert wizards
+│   │   └── config_schema.py    # Upstream format conversion
+│   ├── tui/app.py              # Terminal UI (1150 lines)
+│   └── web/app.py              # Web dashboard (1034 lines)
+└── tests/                      # 4848 lines, 12 test files
+```
 
 ---
 
-## Pending Tasks
+## Code Review Findings (2026-02-15)
 
-### High Priority (P1) - Ready for Physical Testing
-- [ ] HTTP API testing - Verify meshtasticd HTTP connection with real device
-  - Config: set `type = http` and `http_url = http://meshtastic.local` in `[interface]`
-  - Or: set `type = http` and `hostname = <device-ip>` (will auto-prefix `http://`)
-  - Test: `python3 mesh_client.py` with HTTP config → should connect via HTTPInterface
-- [ ] Hardware testing - Serial mode with real Meshtastic device
-- [ ] MQTT testing - Verify mqtt.meshtastic.org connectivity from Pi2W behind Arden router
-  - Config format now unified — mesh_client.py generates correct `[mqtt]` section
-  - DNS resolution to mqtt.meshtastic.org requires real network (couldn't test in sandbox)
-  - Test: `python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883), 5); print('OK')"`
-- [ ] Web UI remote access testing - `--host 0.0.0.0` from another device on network
-  - `--host` flag flows correctly through config (verified in code)
-  - Test: `python3 mesh_client.py --web --host 0.0.0.0 --demo` then hit from another device
-- [x] Config unification (`[connection]` → `[interface]` + `[mqtt]`) — 2026-02-12
-- [x] Integration testing - configure_bot.py modules vs fallback (fixed 2 crash bugs)
-- [x] Code review & accessibility health check (2026-02-12, 5 bugs fixed)
+### Critical Architecture Problem
 
-### Medium Priority (P2) - Code Complete
-- [x] Multi-interface support (up to 9 interfaces)
-- [x] Upstream config compatibility (ConfigLoader._load_upstream())
-- [x] Web templates - verified, field names fixed, topology nav added
-- [x] Persistent storage - network state auto-saved
-- [x] CI/CD - GitHub Actions linting fixed (black/isort/flake8 all passing)
+TUI and Web **bypass ConnectionManager entirely**:
+```python
+# What TUI/Web actually do:
+self.api = MeshtasticAPI(self.config)  # or MockMeshtasticAPI for demo
 
-### Low Priority (P3)
-- [ ] Email/SMS notification testing
-- [x] Map visualization for nodes (Leaflet.js at /map, GeoJSON markers, route lines)
-- [x] Traceroute API endpoint (/api/traceroute with enriched position data)
-- [x] CSRF protection (double-submit cookie pattern)
-- [x] API rate limiting (sliding-window per-IP)
-- [x] Message search/filter (text, sender, time)
-- [x] Map marker clustering (Leaflet.markercluster, 100+ nodes)
-- [x] Web endpoint test coverage (68 tests)
+# What was designed but never used:
+manager = ConnectionManager(config)  # NEVER INSTANTIATED
+manager.connect()  # fallback chain: serial → TCP → HTTP → MQTT → demo
+```
+
+The fallback chain, circuit breaker, reconnect monitor — all theoretical.
+
+### Module-by-Module Status
+
+#### ❌ `message_handler.py` (561 LOC) — 100% DEAD CODE
+- Created by TUI (line 835) and Web (line 282) but **never called**
+- `process_message()`, `check_alerts()`, `parse_command()` — zero invocations
+- Emergency keyword checking done directly in `mqtt_client.py:1156`, not through MessageHandler
+- BBSHandler, GameHandler, CommandType, ParsedCommand — all orphaned
+- **RECOMMENDATION: Delete entire module**
+
+#### ❌ `connection_manager.py` (646 LOC) — NEVER INSTANTIATED
+- `grep -r "ConnectionManager(" meshing_around_clients/` → zero results
+- web/app.py defines its own unrelated `ConnectionManager` for WebSocket connections (name collision)
+- Fallback chain, `switch_interface()`, circuit breaker, `acknowledge_alert()` — all dead
+- **RECOMMENDATION: Delete or actually wire into TUI/Web**
+
+#### ❌ `mesh_crypto.py` (713 LOC) — 0% EXERCISED AT RUNTIME
+- `CRYPTO_AVAILABLE = False` (cryptography lib has broken pyo3 backend)
+- `PROTOBUF_AVAILABLE = False` (meshtastic package not installed)
+- All decryption/decoding paths never entered
+- mqtt_client.py always takes fallback path (header-only extraction)
+- Code is correct (real AES-256-CTR spec) but never runs
+- **RECOMMENDATION: Keep if planning to install deps, otherwise delete**
+
+#### ⚠️ `models.py` (1039 LOC) — ~40% DEAD
+Dead code within models:
+- `MessageType` enum: 8 values, only `TEXT` ever used
+- `AlertType`: 12 values, only 4 instantiated (EMERGENCY, BATTERY, NEW_NODE, CUSTOM)
+- `LinkQuality.update()`: never called (EMA calculation dead)
+- `Node.heard_by`, `Node.neighbors`, `update_neighbor_relationship()`: never populated
+- `Node.routes`: redundant with `MeshNetwork.routes`
+- `is_duplicate_message()`, `update_channel_activity()`: never called
+- `NodeTelemetry.pressure`, `.gas_resistance`: never displayed
+- `Position.precision_bits`: never used
+- `VALID_LAT/LON/SNR/RSSI_RANGE` constants: never enforced
+- Thread safety concern: `to_dict()` acquires lock, then may recurse into `mesh_health` which also acquires lock → potential deadlock
+
+#### ⚠️ `mqtt_client.py` (1334 LOC) — ~70% FUNCTIONAL
+Dead code:
+- `get_nodes_with_position()`, `get_online_nodes()`, `get_congested_nodes()`: never called
+- `_reconnect_thread`: declared but never started
+- `MAP_CACHE_INTERVAL`, `_last_cleanup`: unused
+- Encryption handling (~40 lines): always falls through to fallback
+
+Working well:
+- JSON message handling, thread safety, paho v1/v2 compat, GeoJSON export
+
+#### ⚠️ `meshtastic_api.py` (695 LOC) — LIMITED
+- `meshtastic` library not installed → `connect()` always returns `False`
+- TUI handles failure (prompts demo mode)
+- Web does NOT handle failure (silent, blank dashboard)
+- `MockMeshtasticAPI` works for demo mode
+- Dead: `request_position()`, `unregister_callback()`
+
+#### ✅ `config.py` (533 LOC) — SOLID
+Cleanest module. Well-used, well-tested, no dead code.
 
 ---
 
-## Architecture Notes
+## What Was Done This Session (2026-02-15)
 
-### Module Import Pattern
+### Phase 1: Code & Test Trimming (+180 / -3,999 lines)
+
+**Deleted dead modules:**
+- `notifications.py` (527 LOC) — NotificationManager never instantiated
+- `alert_detector.py` (397 LOC) — AlertDetector never instantiated outside tests
+
+**Deleted orphaned files:**
+- `configure_bot_improved.py` (773 LOC) — unreferenced
+- `README_IMPROVEMENTS.md`, `UI_IMPROVEMENTS.md`, `VISUAL_COMPARISON.md` — companion docs
+- `run_tui.py`, `run_web.py` — redundant launchers
+
+**Restructured: core/ → setup/**
+- Moved 5 setup-only modules to `meshing_around_clients/setup/`:
+  `alert_configurators.py`, `cli_utils.py`, `config_schema.py`, `pi_utils.py`, `system_maintenance.py`
+- `core/__init__.py` trimmed from 201 lines / 70+ exports to 55 lines / 15 exports
+- Updated imports in `configure_bot.py` and `mesh_client.py`
+
+**Test trimming:**
+- Deleted `test_module_integration.py` (211 LOC, 90% duplication)
+- Deleted `test_alert_detector.py` (507 LOC, tested deleted module)
+- Trimmed type-check filler from `test_pi_utils.py` (214→99)
+- Removed TestColors/TestPrintFunctions from `test_cli_utils.py` (192→125)
+- Removed signature inspection from `test_alert_configurators.py` (234→143)
+- Removed enum existence test from `test_message_handler.py`
+- Removed AlertDetector tests from `test_persistence_and_dedup.py`
+- **91 filler tests removed. 228 pass, 49 skip.**
+
+### Phase 2: Deep Code Review (findings above)
+
+---
+
+## Pending Tasks — Next Session
+
+### P0 — Delete Dead Core Modules (~1,900 LOC removal)
+- [ ] Delete `message_handler.py` (561 LOC, 100% dead)
+  - Remove `MessageHandler` creation from tui/app.py:835 and web/app.py:282
+  - Delete `test_message_handler.py` (644 LOC)
+- [ ] Delete or integrate `connection_manager.py` (646 LOC, never instantiated)
+  - Delete `test_http_connection.py` if removing ConnectionManager
+  - Rename web/app.py's local `ConnectionManager` to `WebSocketManager` to avoid confusion
+- [ ] Decide on `mesh_crypto.py` (713 LOC, 0% exercised)
+  - Keep only if planning to install cryptography + meshtastic deps
+
+### P1 — Trim Dead Code in Remaining Modules
+- [ ] models.py: Remove dead enums, unused fields, uncalled methods (~250 LOC)
+  - Remove: `MessageType` enum (or reduce to TEXT only)
+  - Remove: unused `AlertType` values
+  - Remove: `Node.heard_by`, `Node.neighbors`, `Node.routes`, `update_neighbor_relationship()`
+  - Remove: `is_duplicate_message()`, `update_channel_activity()`
+  - Remove: `NodeTelemetry.pressure`, `.gas_resistance`, `Position.precision_bits`
+  - Remove: unused constants (`VALID_*_RANGE`, threshold docstring-only constants)
+  - Fix: `to_dict()` lock recursion with `mesh_health`
+- [ ] mqtt_client.py: Remove dead utility methods (~15 LOC)
+  - Remove: `get_nodes_with_position()`, `get_online_nodes()`, `get_congested_nodes()`
+  - Remove: `_reconnect_thread` declaration and join
+  - Remove: `MAP_CACHE_INTERVAL`, `_last_cleanup`
+- [ ] meshtastic_api.py: Remove dead methods
+  - Remove: `request_position()`, `unregister_callback()`
+
+### P2 — Fix Reliability Issues
+- [ ] Web app: Handle `api.connect()` failure (currently silent → blank dashboard)
+- [ ] Add warning log when mesh_crypto deps fail (currently silent BaseException catch)
+
+### P3 — Future Architecture Decision
+- [ ] Should TUI/Web use ConnectionManager's fallback chain?
+  - Current: TUI/Web create MeshtasticAPI directly, manual demo fallback
+  - Alternative: Wire ConnectionManager in, get auto-fallback serial→TCP→HTTP→MQTT→demo
+  - This is a design decision for the owner, not a code fix
+
+---
+
+## Architecture Notes (Updated)
+
+### Module Import Pattern (Updated)
 ```python
 # configure_bot.py uses try/except with fallback
 try:
-    from meshing_around_clients.core.cli_utils import (...)
-    from meshing_around_clients.core.pi_utils import (...)
+    from meshing_around_clients.setup.cli_utils import (...)
+    from meshing_around_clients.setup.pi_utils import (...)
     MODULES_AVAILABLE = True
 except ImportError:
     MODULES_AVAILABLE = False
-    # Define fallback functions here
 ```
 
-### Config Schema Design
+### Actual Runtime Object Graph
 ```
-UnifiedConfig
-├── interfaces: List[InterfaceConfig]  # 1-9 supported
-├── general: GeneralConfig
-├── mqtt: MQTTConfig
-├── emergency/sentry/altitude/weather/battery alerts
-├── smtp/sms: Notification configs
-├── tui/web: UI configs
-└── auto_update: AutoUpdateConfig
+mesh_client.py
+  └── creates MeshtasticAPI or MockMeshtasticAPI directly
+        └── TUI/Web poll api.network for nodes/messages/alerts
+              └── MQTT: api is MQTTMeshtasticClient (if configured)
+              └── Demo: api is MockMeshtasticAPI (generates fake data)
+              └── Serial/TCP/HTTP: api is MeshtasticAPI (needs meshtastic lib)
 ```
 
-### Mesh Topology Tracking
-```
-MeshNetwork
-├── nodes: Dict[str, Node]
-├── channels: Dict[int, Channel]
-├── routes: Dict[str, MeshRoute]
-├── _seen_messages: Set  # Deduplication
-├── cleanup_stale_nodes()  # Prune nodes > 72h, cap at 10k
-└── mesh_health property  # Status, score, avg_snr
-```
+ConnectionManager, MessageHandler, and mesh_crypto are NOT in this chain.
 
-### Robustness Constants (from meshforge)
-```
-CHUTIL_WARNING_THRESHOLD = 25.0%   # Channel util warning
-CHUTIL_CRITICAL_THRESHOLD = 40.0%  # Channel util critical
-AIRUTILTX_WARNING_THRESHOLD = 7.0% # TX airtime warning
-STALE_NODE_HOURS = 72              # Prune after 72h
-MAX_NODES = 10000                  # Memory cap
-MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
-```
+### Files Quick Reference (Updated)
+
+| File | Purpose | Status |
+|------|---------|--------|
+| `mesh_client.py` | Main entry, zero-dep bootstrap | ✅ |
+| `configure_bot.py` | Bot setup wizard (~2000 lines) | ✅ |
+| `core/config.py` | INI config management | ✅ Solid |
+| `core/models.py` | Node, Message, Alert, MeshNetwork | ⚠️ 40% dead |
+| `core/mqtt_client.py` | MQTT broker connection | ⚠️ 30% dead |
+| `core/meshtastic_api.py` | Device API + MockAPI | ⚠️ Some dead |
+| `core/connection_manager.py` | Fallback chain (unused) | ❌ Dead |
+| `core/message_handler.py` | Command parsing (unused) | ❌ Dead |
+| `core/mesh_crypto.py` | AES-256-CTR (no deps available) | ❌ Dead |
+| `tui/app.py` | Rich-based terminal UI | ✅ |
+| `web/app.py` | FastAPI web dashboard | ✅ |
+
+---
+
+## Key Decisions
+
+1. **0.5.0-beta version** - Reflects actual development state
+2. **setup/ package** - Setup-only modules separated from runtime core/
+3. **PEP 668 compliance** - Never auto-install outside venv
+4. **Specific exceptions** - No bare except: or except Exception:
+5. **core/__init__.py minimal** - Only 15 runtime exports, no setup bloat
 
 ---
 
@@ -296,205 +280,47 @@ MAX_PAYLOAD_BYTES = 65536          # Reject oversized MQTT
 
 ## Work History (Summary)
 
-### 2026-02-12 (TUI Improvements Session)
-- **Dashboard stats panel:** Added mesh health score, channel utilization with congestion thresholds, avg SNR in 2-column layout
-- **Footer nav bar:** Active screen highlighted with inverted cyan style
-- **Nodes screen:** Pagination (j/k), environment telemetry columns (temp/humidity) when sensor data exists
-- **Alerts screen:** Severity filtering (l/m/H/C keys), acknowledge all (x key)
-- **Help screen:** All new keybindings documented
-- 297 tests passing, black formatting clean
+### 2026-02-15 (Code Trim & Deep Review)
+- **Phase 1:** Deleted 8 files, moved 5 modules to setup/, trimmed 5 test files
+- **Net:** +180 / -3,999 lines. 91 filler tests removed. 228 pass, 49 skip.
+- **Phase 2:** Deep review of all 7 remaining core/ modules
+- **Finding:** 3 modules (message_handler, connection_manager, mesh_crypto) are 100% dead at runtime (~1,920 LOC)
+- **Finding:** models.py and mqtt_client.py have ~40% and ~30% dead code respectively
+- Branch: `claude/trim-code-tests-xT3jh`
+
+### 2026-02-12 (meshtasticd HTTP API)
+- Added HTTP connection type support via HTTPInterface
+- 18 new tests, 320 tests passing
+- Branch: `claude/fix-meshtasticd-api-iuLpP`
+
+### 2026-02-12 (TUI Improvements)
+- Dashboard stats, pagination, severity filtering, acknowledgment
 - Branch: `claude/improve-meshforge-tui-jwCHI`
 
-### 2026-02-12 (Code Review & Accessibility Health Check)
-- **Full codebase review** targeting Pi Zero 2W deployment behind Arden router
-- **5 bugs fixed** (2 critical, 3 moderate):
-  1. `CONFIG_PATH` undefined in `import_upstream_config` → NameError (CRITICAL)
-  2. `web/app.py` `sys.exit(1)` at import time (CRITICAL)
-  3. Web host inaccessible from network — added `--host`/`--port` CLI args (MODERATE)
-  4. `check_internet()` only tried 8.8.8.8 — added multi-host fallback (MODERATE)
-  5. `_message_count` thread safety — moved inside `_stats_lock` (MODERATE)
-- **Feature accessibility verified:** All 15 features accessible (2 were broken, now fixed)
-- **Architecture note:** Config system had dual path (bootstrap INI vs Config dataclass) with different section names — **now unified in config unification session**
+### 2026-02-12 (Config Unification)
+- `[connection]` → `[interface]` + `[mqtt]` sections
+- Branch: `claude/unify-config-mqtt-test-ie7a1`
+
+### 2026-02-12 (Code Review & Accessibility)
+- 5 bugs fixed (2 critical)
 - Branch: `claude/code-review-accessibility-kSLI6`
 
-### 2026-02-11 (CI Fix & Integration Test Session)
-- **CI failures diagnosed and fixed** across 3 commits:
-  1. `httpx` missing from CI pip install — TestClient import fails without it
-  2. `test_stats_accumulate_across_session` — called `_handle_json_message()` directly,
-     but `messages_received` counter only incremented in `_on_message()` (the MQTT callback);
-     fixed to route through `_on_message()` with a mock mqtt message
-  3. `test_json_post_with_valid_csrf` — double-cookie conflict: both the `/api/csrf-token`
-     route handler and the CSRF middleware generated independent tokens and both called
-     `response.set_cookie()`; middleware token (last Set-Cookie header) overwrote route's,
-     causing cookie/header mismatch on subsequent POST; fixed middleware to check
-     `response.raw_headers` before adding its own cookie
-  4. `black` formatting: generator expression line-wrapping preference
-- **Root cause pattern**: stats tracking (`_on_message` → `_handle_json_message` dispatch)
-  means tests must go through the full callback chain to see counter increments
-- **CSRF architecture note**: middleware auto-sets cookie on first visit, but must yield
-  to route-level cookie setting when `/api/csrf-token` is explicitly called
-- 410 tests passing (14 skipped), all linters clean
-- Branch: `claude/integration-tests-failover-EBrRD` (PR #51)
+### 2026-02-11 (CI Fix & Integration Tests)
+- httpx, stats test, CSRF double-cookie
+- Branch: `claude/integration-tests-failover-EBrRD`
 
-### 2026-02-09 (CSRF, Rate Limit, Search, Clustering Session)
-- **CSRF Protection** (web/app.py: CSRFProtection class + middleware):
-  - Double-submit cookie pattern with hmac.compare_digest validation
-  - JSON requests exempt (CORS-protected), form POSTs require token
-  - API key and Bearer auth requests exempt
-  - `/api/csrf-token` endpoint + cookie auto-set on first GET
-  - Frontend getCsrfToken() helper in app.js
-- **Rate Limiting** (web/app.py: RateLimiter class + middleware):
-  - Sliding-window per-IP tracking with configurable RPM limits
-  - 60 RPM default, 20 RPM write, 120 RPM burst categories
-  - X-RateLimit-Limit/Remaining/Reset headers on all responses
-  - 429 response with Retry-After when exceeded
-- **Message Search/Filter** (web/app.py + messages.html):
-  - `/api/messages?search=&sender=&since=` query parameters
-  - Case-insensitive text search and sender substring match
-  - ISO timestamp `since` filter with proper error handling
-  - Debounced search UI with clear button in messages template
-- **Map Marker Clustering** (map.html, embedded map in app.py):
-  - Leaflet.markercluster@1.5.3 integration
-  - Dark theme cluster styling (cyan/yellow/red gradient)
-  - `maxClusterRadius: 50`, `disableClusteringAtZoom: 16`, `chunkedLoading: true`
-  - Applied to both template-based and embedded fallback maps
-- **Web Endpoint Tests** (test_web_app.py: 68 tests):
-  - CSRFProtection unit tests (10): token generation, validation logic
-  - RateLimiter unit tests (5): limits, categories, IP isolation
-  - API endpoint tests (38): all HTML pages, all REST endpoints
-  - Auth tests (8): unauthorized, authorized, wrong key
-  - Search/filter tests (5): text, sender, since, invalid
-  - Middleware integration tests (5): rate limit 429, CSRF cookie
-  - Factory function tests (2)
-- 363 tests passing (3 skipped), 0 lint errors
-- Branch: `claude/csrf-rate-limit-search-eyRLu`
-
-### 2026-02-08 (Map & Traceroute Session)
-- **Map Visualization** (new: map.html, web/app.py changes):
-  - Leaflet.js map page at `/map` with dark CartoDB tile layer
-  - GeoJSON markers from existing `/api/geojson` endpoint
-  - Online/offline node coloring with popups (battery, SNR, hardware, altitude)
-  - Route line visualization between nodes with known routes
-  - Auto-refresh every 30 seconds, fit-to-bounds control
-  - Embedded fallback HTML for template-less mode
-  - Nav link added to base.html
-- **Traceroute API** (`/api/traceroute` endpoint):
-  - Returns routes enriched with node positions for map drawing
-  - Hop-level lat/lon for route line visualization
-  - Destination position included when available
-- 284 tests passing (14 skipped), 0 lint errors
-- Branch: `claude/test-meshtastic-hardware-mqtt-W97ne`
-
-### 2026-02-08 (Reliability Session)
-- **MQTT Reliability Overhaul** (mqtt_client.py, +310/-79 lines):
-  - Paho-mqtt v1/v2 API compatibility (`_create_mqtt_client()`, `_PAHO_V2` detection)
-  - Built-in reconnection via `reconnect_delay_set()` + proper `_on_disconnect` handling
-  - Thread-safe stats with `_stats_lock` (all `_stats` mutations protected)
-  - Safe node access: all `self.network.nodes[id]` replaced with `self.network.get_node(id)`
-  - Relay node discovery (Meshtastic 2.6+): `_handle_relay_node()` with partial ID placeholders
-  - GeoJSON export: `get_geojson()` for Leaflet.js map visualization
-  - New methods: `get_online_nodes()`, `get_nodes_with_position()`, `get_congested_nodes()`
-  - Clean shutdown: `_stop_event` threading.Event for responsive thread cleanup
-  - Intentional vs unexpected disconnect tracking (`_intentional_disconnect` flag)
-  - Enriched stats: reconnections, telemetry_updates, position_updates counters
-  - MQTT RC code messages for better error logging
-- **Atomic File Writes** (models.py):
-  - `save_to_file()` now uses tempfile + `os.replace()` for crash-safe persistence
-- **Connection Health Double-Check** (connection_manager.py):
-  - `_check_connection_health()` implements meshforge's double-tap pattern
-  - First tap: is_connected flag, Second tap: traffic flow verification
-  - Auto-reconnect when stale >10 minutes without traffic
-- **TUI Error Resilience** (tui/app.py):
-  - Added error guards in both Live mode and interactive mode render loops
-  - Catches transient data issues (AttributeError, KeyError, TypeError, IndexError)
-- **Web App Improvements** (web/app.py):
-  - `/api/geojson` endpoint for map visualization
-  - `/api/congestion` endpoint for channel utilization monitoring
-  - Input validation on send_message: empty text, max 228 chars, channel 0-7
-  - WebSocket message validation with error responses
-- 284 tests passing (14 skipped), 0 lint errors
-- Branch: `claude/improve-reliability-features-9jgUT`
-
-### 2026-02-08 (Earlier)
-- **Bug fixes:** 2 runtime crash bugs in configure_bot.py
-  - `get_serial_ports()` returns SerialPortInfo objects, not strings - crash on `', '.join(ports)`
-  - `run_command(desc=...)` param doesn't exist in real module - crash on git clone
-- **Web template fixes:** topology.html field names (`snr_avg`→`avg_snr`, `last_update`→`last_used`)
-- **Navigation:** Added /topology link to base.html navbar
-- **CI/CD pipeline fixed:**
-  - Ran isort + black on all 20 files
-  - Removed 49 unused imports across 11 files
-  - Fixed 4 unused variables, 1 f-string without placeholders, 22 long lines
-  - Added `noqa: E402` for intentional post-try/except imports
-  - Created pyproject.toml + .flake8 config files
-  - Removed `continue-on-error: true` and `--exit-zero` from CI workflow
-  - All 3 linters now pass cleanly and CI will fail on violations
-- 295 tests passing (3 skipped)
-- Branch: `claude/session-management-entropy-DgYug`
-
-### 2026-02-07
-- Synced meshforge robustness patterns into core modules (3 files, +395/-54 lines)
-- **models.py**: Position.is_valid(), environment metrics, congestion thresholds, stale cleanup
-- **mqtt_client.py**: Payload limits, _safe_float/_safe_int validation, stats, atexit, exponential backoff
-- **connection_manager.py**: ConnectionBusy, cooldown, connection info, logging
-- All 284 tests passing
-- Branch: `claude/sync-meshforge-improvements-v5d19`
-
-### 2026-02-04
-- Fixed 6 remaining exception handlers in configure_bot.py
-- Decomposed configure_bot.py (removed 307 lines of duplicates)
-- All 226 tests passing
-- Consolidated session notes
-
-### 2026-02-03
-- Added mesh_crypto.py (AES-256-CTR, protobuf decoding)
-- Added topology tracking (LinkQuality, MeshRoute, Channel)
-- Added TUI TopologyScreen and Web /topology page
-- MQTT client now decrypts and decodes messages
-
-### 2026-02-01
-- Version bump to 0.5.0-beta
-- README rewrite with Mermaid diagrams
-- Created RELIABILITY_ROADMAP.md
-- Upstream analysis (SpudGunMan/meshing-around)
+### Earlier Sessions (2026-02-01 through 2026-02-09)
+- CSRF, rate limiting, map clustering, MQTT reliability, topology, mesh_crypto
+- See git history for details
 
 ---
 
-## Key Decisions
-
-1. **0.5.0-beta version** - Reflects actual development state
-2. **Fallback architecture** - Modules work with or without new imports
-3. **PEP 668 compliance** - Never auto-install outside venv
-4. **Specific exceptions** - No bare except: or except Exception:
-5. **Upstream compatibility** - Config loader supports both formats
-6. **Meshforge patterns** - Input validation (_safe_float/_safe_int), stale node cleanup, congestion thresholds from Meshtastic ROUTER_LATE docs
-
----
-
-## Files Quick Reference
-
-| File | Purpose |
-|------|---------|
-| `mesh_client.py` | Main entry, zero-dep bootstrap |
-| `configure_bot.py` | Bot setup wizard (~2000 lines) |
-| `core/mqtt_client.py` | MQTT broker connection |
-| `core/mesh_crypto.py` | Encryption, protobuf decode |
-| `core/models.py` | Node, Message, Alert, MeshNetwork |
-| `core/config.py` | INI config management |
-| `tui/app.py` | Rich-based terminal UI |
-| `web/app.py` | FastAPI web dashboard |
-
----
-
-## Commits Reference (Recent)
+## Commits Reference (This Session)
 
 ```
-2a7420e Fix black formatting in CSRF middleware
-6641951 Fix stats test and CSRF token double-cookie conflict
-97004e2 Add httpx to CI test dependencies
-9d3fbf6 Fix black formatting for CI lint check
-bad72b6 Consolidate _on_disconnect lock and fix _save_in_progress race condition
-c95fabe Add integration tests for failover/WebSocket load and fix _intentional_disconnect race
+8b656e2 Remove unused re-exports from setup/__init__.py
+d7b024e Fix isort formatting in setup/__init__.py
+7cf5740 Trim dead code, restructure setup-only modules, prune tests
 ```
 
 ---
