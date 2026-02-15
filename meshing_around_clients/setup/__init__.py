@@ -52,9 +52,16 @@ from .config_schema import (
     ConfigLoader,
 )
 from .config_schema import ConnectionType as SchemaConnectionType
-from .config_schema import EmergencyAlertConfig, GeneralConfig, InterfaceConfig
+from .config_schema import (
+    EmergencyAlertConfig,
+    GeneralConfig,
+    InterfaceConfig,
+)
 from .config_schema import MQTTConfig as SchemaMQTTConfig
-from .config_schema import SentryConfig, UnifiedConfig
+from .config_schema import (
+    SentryConfig,
+    UnifiedConfig,
+)
 from .pi_utils import (
     PiInfo,
     SerialPortInfo,
