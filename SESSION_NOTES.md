@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-15 (Dead Module Removal & Reliability Session)
+**Last Updated:** 2026-02-15 (Architecture Docs & Wiring Session)
 **Version:** 0.5.0-beta
 
 ---
@@ -29,9 +29,9 @@ python3 -m isort --check-only --diff meshing_around_clients/
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
 - **Test Status:** 147 tests passing, 44 skipped (MQTT integration, web/fastapi)
-- **Branch:** `claude/trim-code-tests-xT3jh`
+- **Branch:** `claude/update-architecture-docs-IMWQV`
 
-### Directory Structure (Post-Dead-Module-Removal)
+### Directory Structure (Current)
 
 ```
 meshing_around_meshforge/
@@ -116,18 +116,21 @@ except ImportError:
 ## Pending Tasks — Future Sessions
 
 ### Remaining Opportunities
-- [ ] Wire `update_channel_activity()` into message handlers (currently removed as dead)
-- [ ] Consider wiring mesh_crypto's gas_resistance extraction into NodeTelemetry storage
-- [ ] MessageType enum values other than TEXT are never assigned — consider using them properly
-- [ ] Update CLAUDE.md architecture section (references deleted modules)
-- [ ] Update README.md architecture diagram (references deleted modules)
+- [x] Wire `update_channel_activity()` — now auto-updates in `MeshNetwork.add_message()`
+- [x] Wire gas_resistance into decoded telemetry path — `_process_decoded_packet()` now extracts environment_metrics
+- [x] Update CLAUDE.md architecture section — matches actual codebase
+- [x] Update README.md architecture diagram — matches actual codebase
+- [ ] MessageType enum: only TEXT is assigned because only text packets create Message objects.
+  Position/telemetry/nodeinfo update Node fields directly. Other enum values exist for future use
+  if non-text packets need to be logged as messages. Not a bug — leave as-is unless requirements change.
 
-### P3 — Future Architecture Decision
-- [ ] Should TUI/Web use a connection fallback chain?
-  - Current: TUI/Web create MeshtasticAPI directly, manual demo fallback
-  - TUI prompts user for demo mode on failure
-  - Web now logs warning and retries via POST /api/connect
-  - This is a design decision for the owner, not a code fix
+### P3 — Architecture Decision: Connection Fallback Chain
+- **Decision: Don't add one.** Current explicit approach is correct.
+  - TUI: prompts user for demo mode on connection failure — clear, user-driven
+  - Web: logs warning, retries via POST /api/connect — appropriate for headless
+  - A fallback chain (Serial→TCP→MQTT→Demo) would silently connect to a different mode
+    than intended. For a monitoring tool, users should know exactly what they're connected to.
+  - If owner wants auto-fallback in the future, it should be opt-in via config.
 
 ---
 
@@ -149,6 +152,24 @@ except ImportError:
 ---
 
 ## Work History (Summary)
+
+### 2026-02-15 (Architecture Docs & Wiring — Session 3)
+- **Docs:** Updated CLAUDE.md architecture tree, key files table, connection type instructions
+  - Removed references to deleted modules (connection_manager, message_handler, alert_detector, notifications)
+  - Added setup/ package, mesh_crypto.py, corrected file purposes
+- **Docs:** Updated README.md mermaid architecture diagram and project structure tree
+  - Diagram now shows actual module relationships (API→Serial/TCP/BLE, MQTT→broker, crypto→mqtt)
+  - setup/ package included in structure
+- **Bug fix:** Decoded telemetry path (`_process_decoded_packet`) now extracts environment_metrics
+  - Was only reading device_metrics, skipping temperature/humidity/pressure/gas_resistance
+  - JSON path was correct; protobuf path was missing env metrics entirely
+- **Wiring:** `MeshNetwork.add_message()` now auto-updates channel activity
+  - Increments `Channel.message_count` and sets `Channel.last_activity` on every message add
+  - No separate call needed — tracked automatically inside the lock
+- **P3 decision:** Documented recommendation against connection fallback chain
+- **MessageType:** Confirmed TEXT-only assignment is correct (non-text packets don't create Message objects)
+- **Tests:** 147 pass, 44 skip — no regressions
+- Branch: `claude/update-architecture-docs-IMWQV`
 
 ### 2026-02-15 (Dead Module Removal & Reliability — Session 2)
 - **P0:** Deleted `message_handler.py` (561 LOC) + refs from tui/web + test (644 LOC)
