@@ -39,27 +39,49 @@ SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 # Try to import modular components - fallback to inline if not available
 try:
     from meshing_around_clients.setup.cli_utils import (
-        Colors, print_header, print_section, print_success, print_warning,
-        print_error, print_info, print_step, get_input, get_yes_no,
-        validate_mac_address, validate_coordinates
+        Colors,
+        print_header,
+        print_section,
+        print_success,
+        print_warning,
+        print_error,
+        print_info,
+        print_step,
+        get_input,
+        get_yes_no,
+        validate_mac_address,
+        validate_coordinates,
     )
     from meshing_around_clients.setup.pi_utils import (
-        is_raspberry_pi, get_pi_model, get_os_info, is_bookworm_or_newer,
-        check_pep668_environment, get_serial_ports,
-        check_user_groups, get_pip_command, get_pip_install_flags,
-        get_pi_config_path, check_serial_enabled
+        is_raspberry_pi,
+        get_pi_model,
+        get_os_info,
+        is_bookworm_or_newer,
+        check_pep668_environment,
+        get_serial_ports,
+        check_user_groups,
+        get_pip_command,
+        get_pip_install_flags,
+        get_pi_config_path,
+        check_serial_enabled,
     )
-    from meshing_around_clients.setup.system_maintenance import (
-        run_command, find_meshing_around
-    )
+    from meshing_around_clients.setup.system_maintenance import run_command, find_meshing_around
     from meshing_around_clients.setup.alert_configurators import (
-        configure_interface, configure_general, configure_emergency_alerts,
-        configure_proximity_alerts, configure_altitude_alerts,
-        configure_weather_alerts, configure_battery_alerts,
-        configure_noisy_node_alerts, configure_new_node_alerts,
-        configure_disconnect_alerts, configure_email_sms,
-        configure_global_settings, create_basic_config
+        configure_interface,
+        configure_general,
+        configure_emergency_alerts,
+        configure_proximity_alerts,
+        configure_altitude_alerts,
+        configure_weather_alerts,
+        configure_battery_alerts,
+        configure_noisy_node_alerts,
+        configure_new_node_alerts,
+        configure_disconnect_alerts,
+        configure_email_sms,
+        configure_global_settings,
+        create_basic_config,
     )
+
     MODULES_AVAILABLE = True
 except ImportError:
     MODULES_AVAILABLE = False
@@ -70,17 +92,19 @@ except ImportError:
 # =============================================================================
 
 if not MODULES_AVAILABLE:
+
     class Colors:
         """ANSI color codes for terminal output"""
-        HEADER = '\033[95m'
-        OKBLUE = '\033[94m'
-        OKCYAN = '\033[96m'
-        OKGREEN = '\033[92m'
-        WARNING = '\033[93m'
-        FAIL = '\033[91m'
-        ENDC = '\033[0m'
-        BOLD = '\033[1m'
-        UNDERLINE = '\033[4m'
+
+        HEADER = "\033[95m"
+        OKBLUE = "\033[94m"
+        OKCYAN = "\033[96m"
+        OKGREEN = "\033[92m"
+        WARNING = "\033[93m"
+        FAIL = "\033[91m"
+        ENDC = "\033[0m"
+        BOLD = "\033[1m"
+        UNDERLINE = "\033[4m"
 
     def print_header(text: str):
         """Print a formatted header"""
@@ -127,9 +151,9 @@ if not MODULES_AVAILABLE:
                     value = str(default)
 
                 if input_type == bool:
-                    if str(value).lower() in ['true', 'yes', 'y', '1', 'on']:
+                    if str(value).lower() in ["true", "yes", "y", "1", "on"]:
                         return True
-                    elif str(value).lower() in ['false', 'no', 'n', '0', 'off']:
+                    elif str(value).lower() in ["false", "no", "n", "0", "off"]:
                         return False
                     print_error("Please enter yes/no (y/n) or true/false")
                     continue
@@ -145,21 +169,22 @@ if not MODULES_AVAILABLE:
         """Get yes/no input from user"""
         default_str = "Y/n" if default else "y/N"
         response = get_input(f"{prompt} ({default_str})", "y" if default else "n")
-        return response.lower() in ['y', 'yes', 'true', '1']
+        return response.lower() in ["y", "yes", "true", "1"]
 
     def validate_mac_address(mac: str) -> bool:
         """Validate BLE MAC address format"""
-        return bool(re.match(r'^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$', mac))
+        return bool(re.match(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$", mac))
 
     def validate_coordinates(lat: float, lon: float) -> bool:
         """Validate latitude and longitude values"""
         return -90 <= lat <= 90 and -180 <= lon <= 180
 
-    def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False,
-                    cwd: Optional[str] = None) -> Tuple[int, str, str]:
+    def run_command(
+        cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False, cwd: Optional[str] = None
+    ) -> Tuple[int, str, str]:
         """Run a shell command with optional sudo, cwd, and output"""
         if sudo:
-            cmd = ['sudo'] + cmd
+            cmd = ["sudo"] + cmd
         if desc:
             print_info(f"{desc}...")
         try:
@@ -173,9 +198,12 @@ if not MODULES_AVAILABLE:
     def find_meshing_around() -> Optional[Path]:
         """Find the meshing-around installation directory"""
         common_paths = [
-            Path.home() / "meshing-around", Path.home() / "mesh-bot",
-            Path("/opt/meshing-around"), Path("/opt/mesh-bot"),
-            Path.cwd().parent / "meshing-around", Path.cwd() / "meshing-around",
+            Path.home() / "meshing-around",
+            Path.home() / "mesh-bot",
+            Path("/opt/meshing-around"),
+            Path("/opt/mesh-bot"),
+            Path.cwd().parent / "meshing-around",
+            Path.cwd() / "meshing-around",
         ]
         for path in common_paths:
             if path.exists() and (path / "mesh_bot.py").exists():
@@ -185,18 +213,19 @@ if not MODULES_AVAILABLE:
     def is_raspberry_pi() -> bool:
         """Detect if running on a Raspberry Pi"""
         try:
-            with open('/proc/cpuinfo', 'r') as f:
-                if 'Raspberry Pi' in f.read() or 'BCM' in f.read():
+            with open("/proc/cpuinfo", "r") as f:
+                content = f.read()
+                if "Raspberry Pi" in content or "BCM" in content:
                     return True
         except (FileNotFoundError, PermissionError, IOError):
             pass
-        return os.path.exists('/sys/firmware/devicetree/base/model')
+        return os.path.exists("/sys/firmware/devicetree/base/model")
 
     def get_pi_model() -> str:
         """Get Raspberry Pi model information"""
         try:
-            with open('/sys/firmware/devicetree/base/model', 'r') as f:
-                return f.read().strip().rstrip('\x00')
+            with open("/sys/firmware/devicetree/base/model", "r") as f:
+                return f.read().strip().rstrip("\x00")
         except (FileNotFoundError, PermissionError, IOError):
             return "Unknown"
 
@@ -204,12 +233,12 @@ if not MODULES_AVAILABLE:
         """Get OS name and version (codename)"""
         os_name, os_version = "Unknown", "Unknown"
         try:
-            with open('/etc/os-release', 'r') as f:
+            with open("/etc/os-release", "r") as f:
                 for line in f:
-                    if line.startswith('PRETTY_NAME='):
-                        os_name = line.split('=')[1].strip().strip('"')
-                    elif line.startswith('VERSION_CODENAME='):
-                        os_version = line.split('=')[1].strip().strip('"')
+                    if line.startswith("PRETTY_NAME="):
+                        os_name = line.split("=")[1].strip().strip('"')
+                    elif line.startswith("VERSION_CODENAME="):
+                        os_version = line.split("=")[1].strip().strip('"')
         except (FileNotFoundError, PermissionError, IOError):
             pass
         return os_name, os_version
@@ -217,7 +246,7 @@ if not MODULES_AVAILABLE:
     def is_bookworm_or_newer() -> bool:
         """Check if running Debian Bookworm (12) or newer"""
         _, codename = get_os_info()
-        return codename.lower() in ['bookworm', 'trixie', 'forky', 'sid']
+        return codename.lower() in ["bookworm", "trixie", "forky", "sid"]
 
     def check_pep668_environment() -> bool:
         """Check if PEP 668 externally managed environment is in effect"""
@@ -227,10 +256,11 @@ if not MODULES_AVAILABLE:
     def get_serial_ports() -> List[str]:
         """Get available serial ports"""
         import glob
+
         ports = []
-        for pattern in ['/dev/ttyUSB*', '/dev/ttyACM*']:
+        for pattern in ["/dev/ttyUSB*", "/dev/ttyACM*"]:
             ports.extend(glob.glob(pattern))
-        for port in ['/dev/ttyAMA0', '/dev/serial0', '/dev/serial1', '/dev/ttyS0']:
+        for port in ["/dev/ttyAMA0", "/dev/serial0", "/dev/serial1", "/dev/ttyS0"]:
             if os.path.exists(port):
                 ports.append(port)
         return list(set(ports))
@@ -238,8 +268,8 @@ if not MODULES_AVAILABLE:
     def check_user_groups() -> Tuple[bool, bool]:
         """Check if user is in dialout and gpio groups"""
         try:
-            groups = subprocess.run(['groups'], capture_output=True, text=True).stdout
-            return 'dialout' in groups, 'gpio' in groups
+            groups = subprocess.run(["groups"], capture_output=True, text=True).stdout
+            return "dialout" in groups, "gpio" in groups
         except (subprocess.SubprocessError, FileNotFoundError):
             return False, False
 
@@ -247,11 +277,11 @@ if not MODULES_AVAILABLE:
         """Get the appropriate pip command"""
         if venv_path and venv_path.exists():
             return [str(venv_path / "bin" / "pip3")]
-        return ['pip3']
+        return ["pip3"]
 
     def get_pip_install_flags() -> List[str]:
         """Get extra flags needed for pip install"""
-        return ['--break-system-packages'] if check_pep668_environment() else []
+        return ["--break-system-packages"] if check_pep668_environment() else []
 
     def get_pi_config_path() -> Path:
         """Get the correct config.txt path"""
@@ -264,14 +294,14 @@ if not MODULES_AVAILABLE:
         if not config_path.exists():
             return False, False
         try:
-            with open(config_path, 'r') as f:
+            with open(config_path, "r") as f:
                 content = f.read()
-            uart_enabled = 'enable_uart=1' in content
+            uart_enabled = "enable_uart=1" in content
             cmdline_path = config_path.parent / "cmdline.txt"
             console_enabled = False
             if cmdline_path.exists():
-                with open(cmdline_path, 'r') as f:
-                    console_enabled = 'console=serial' in f.read() or 'console=ttyAMA' in f.read()
+                with open(cmdline_path, "r") as f:
+                    console_enabled = "console=serial" in f.read() or "console=ttyAMA" in f.read()
             return uart_enabled, console_enabled
         except (FileNotFoundError, PermissionError, IOError):
             return False, False
@@ -284,133 +314,147 @@ if not MODULES_AVAILABLE:
         conn_type = get_input("Select connection type (1-3)", "1")
         type_map = {"1": "serial", "2": "tcp", "3": "ble"}
         conn_type_str = type_map.get(conn_type, "serial")
-        if 'interface' not in config:
-            config.add_section('interface')
-        config['interface']['type'] = conn_type_str
+        if "interface" not in config:
+            config.add_section("interface")
+        config["interface"]["type"] = conn_type_str
         if conn_type_str == "serial":
             if not get_yes_no("Use auto-detect for serial port?", True):
-                config['interface']['port'] = get_input("Enter serial port", "/dev/ttyUSB0")
+                config["interface"]["port"] = get_input("Enter serial port", "/dev/ttyUSB0")
         elif conn_type_str == "tcp":
-            config['interface']['hostname'] = get_input("Enter TCP hostname/IP", "192.168.1.100")
+            config["interface"]["hostname"] = get_input("Enter TCP hostname/IP", "192.168.1.100")
         elif conn_type_str == "ble":
-            config['interface']['mac'] = get_input("Enter BLE MAC address", "AA:BB:CC:DD:EE:FF")
+            config["interface"]["mac"] = get_input("Enter BLE MAC address", "AA:BB:CC:DD:EE:FF")
         print_success(f"Interface configured: {conn_type_str}")
 
     def configure_general(config: configparser.ConfigParser):
         """Configure general settings"""
         print_section("General Settings")
-        if 'general' not in config:
-            config.add_section('general')
-        config['general']['bot_name'] = get_input("Bot name", "MeshBot")
+        if "general" not in config:
+            config.add_section("general")
+        config["general"]["bot_name"] = get_input("Bot name", "MeshBot")
         if get_yes_no("Configure admin nodes?", False):
-            config['general']['bbs_admin_list'] = get_input("Admin node numbers (comma-separated)")
+            config["general"]["bbs_admin_list"] = get_input("Admin node numbers (comma-separated)")
         print_success("General settings configured")
 
     def configure_emergency_alerts(config: configparser.ConfigParser):
         """Configure emergency alert settings"""
         print_section("Emergency Alert Configuration")
-        if 'emergencyHandler' not in config:
-            config.add_section('emergencyHandler')
+        if "emergencyHandler" not in config:
+            config.add_section("emergencyHandler")
         if not get_yes_no("Enable emergency keyword detection?", True):
-            config['emergencyHandler']['enabled'] = 'False'
+            config["emergencyHandler"]["enabled"] = "False"
             return
-        config['emergencyHandler']['enabled'] = 'True'
-        config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,police,fire,ambulance,rescue,help,sos,mayday'
-        config['emergencyHandler']['alert_channel'] = str(get_input("Alert channel number", "2", int))
+        config["emergencyHandler"]["enabled"] = "True"
+        config["emergencyHandler"][
+            "emergency_keywords"
+        ] = "emergency,911,112,999,police,fire,ambulance,rescue,help,sos,mayday"
+        config["emergencyHandler"]["alert_channel"] = str(get_input("Alert channel number", "2", int))
         print_success("Emergency alerts configured")
 
     def configure_proximity_alerts(config: configparser.ConfigParser):
         """Configure proximity alerts"""
         print_section("Proximity Alert Configuration")
-        if 'proximityAlert' not in config:
-            config.add_section('proximityAlert')
-        config['proximityAlert']['enabled'] = 'False'
+        if "proximityAlert" not in config:
+            config.add_section("proximityAlert")
+        config["proximityAlert"]["enabled"] = "False"
         print_info("Proximity alerts disabled (use full module for detailed config)")
 
     def configure_altitude_alerts(config: configparser.ConfigParser):
         """Configure altitude alerts"""
         print_section("Altitude Alert Configuration")
-        if 'altitudeAlert' not in config:
-            config.add_section('altitudeAlert')
-        config['altitudeAlert']['enabled'] = 'False'
+        if "altitudeAlert" not in config:
+            config.add_section("altitudeAlert")
+        config["altitudeAlert"]["enabled"] = "False"
         print_info("Altitude alerts disabled (use full module for detailed config)")
 
     def configure_weather_alerts(config: configparser.ConfigParser):
         """Configure weather alerts"""
         print_section("Weather Alert Configuration")
-        if 'weatherAlert' not in config:
-            config.add_section('weatherAlert')
-        config['weatherAlert']['enabled'] = 'False'
+        if "weatherAlert" not in config:
+            config.add_section("weatherAlert")
+        config["weatherAlert"]["enabled"] = "False"
         print_info("Weather alerts disabled (use full module for detailed config)")
 
     def configure_battery_alerts(config: configparser.ConfigParser):
         """Configure battery alerts"""
         print_section("Battery Alert Configuration")
-        if 'batteryAlert' not in config:
-            config.add_section('batteryAlert')
-        config['batteryAlert']['enabled'] = 'False'
+        if "batteryAlert" not in config:
+            config.add_section("batteryAlert")
+        config["batteryAlert"]["enabled"] = "False"
         print_info("Battery alerts disabled (use full module for detailed config)")
 
     def configure_noisy_node_alerts(config: configparser.ConfigParser):
         """Configure noisy node alerts"""
         print_section("Noisy Node Alert Configuration")
-        if 'noisyNodeAlert' not in config:
-            config.add_section('noisyNodeAlert')
-        config['noisyNodeAlert']['enabled'] = 'False'
+        if "noisyNodeAlert" not in config:
+            config.add_section("noisyNodeAlert")
+        config["noisyNodeAlert"]["enabled"] = "False"
         print_info("Noisy node alerts disabled (use full module for detailed config)")
 
     def configure_new_node_alerts(config: configparser.ConfigParser):
         """Configure new node alerts"""
         print_section("New Node Alert Configuration")
-        if 'newNodeAlert' not in config:
-            config.add_section('newNodeAlert')
+        if "newNodeAlert" not in config:
+            config.add_section("newNodeAlert")
         if get_yes_no("Enable new node welcomes?", True):
-            config['newNodeAlert']['enabled'] = 'True'
-            config['newNodeAlert']['welcome_message'] = 'Welcome to the mesh!'
+            config["newNodeAlert"]["enabled"] = "True"
+            config["newNodeAlert"]["welcome_message"] = "Welcome to the mesh!"
         else:
-            config['newNodeAlert']['enabled'] = 'False'
+            config["newNodeAlert"]["enabled"] = "False"
         print_success("New node alerts configured")
 
     def configure_disconnect_alerts(config: configparser.ConfigParser):
         """Configure disconnect alerts"""
         print_section("Disconnect Alert Configuration")
-        if 'disconnectAlert' not in config:
-            config.add_section('disconnectAlert')
-        config['disconnectAlert']['enabled'] = 'False'
+        if "disconnectAlert" not in config:
+            config.add_section("disconnectAlert")
+        config["disconnectAlert"]["enabled"] = "False"
         print_info("Disconnect alerts disabled (use full module for detailed config)")
 
     def configure_email_sms(config: configparser.ConfigParser):
         """Configure email/SMS settings"""
         print_section("Email/SMS Configuration")
-        if 'smtp' not in config:
-            config.add_section('smtp')
-        if 'sms' not in config:
-            config.add_section('sms')
+        if "smtp" not in config:
+            config.add_section("smtp")
+        if "sms" not in config:
+            config.add_section("sms")
         print_info("Email/SMS not configured (use full module for detailed config)")
 
     def configure_global_settings(config: configparser.ConfigParser):
         """Configure global alert settings"""
         print_section("Global Alert Settings")
-        if 'alertGlobal' not in config:
-            config.add_section('alertGlobal')
-        config['alertGlobal']['global_enabled'] = 'True' if get_yes_no("Enable all alerts globally?", True) else 'False'
+        if "alertGlobal" not in config:
+            config.add_section("alertGlobal")
+        config["alertGlobal"]["global_enabled"] = "True" if get_yes_no("Enable all alerts globally?", True) else "False"
         print_success("Global settings configured")
 
     def create_basic_config() -> configparser.ConfigParser:
         """Create a basic configuration"""
         print_section("Basic Configuration")
         config = configparser.ConfigParser()
-        for section in ['interface', 'general', 'emergencyHandler', 'proximityAlert',
-                       'altitudeAlert', 'weatherAlert', 'noisyNodeAlert', 'batteryAlert',
-                       'newNodeAlert', 'disconnectAlert', 'alertGlobal', 'smtp', 'sms']:
+        for section in [
+            "interface",
+            "general",
+            "emergencyHandler",
+            "proximityAlert",
+            "altitudeAlert",
+            "weatherAlert",
+            "noisyNodeAlert",
+            "batteryAlert",
+            "newNodeAlert",
+            "disconnectAlert",
+            "alertGlobal",
+            "smtp",
+            "sms",
+        ]:
             config.add_section(section)
         configure_interface(config)
         configure_general(config)
-        config['emergencyHandler']['enabled'] = 'True'
-        config['emergencyHandler']['emergency_keywords'] = 'emergency,911,112,999,sos,help,mayday'
-        config['newNodeAlert']['enabled'] = 'True'
-        config['newNodeAlert']['welcome_message'] = 'Welcome to the mesh!'
-        config['alertGlobal']['global_enabled'] = 'True'
+        config["emergencyHandler"]["enabled"] = "True"
+        config["emergencyHandler"]["emergency_keywords"] = "emergency,911,112,999,sos,help,mayday"
+        config["newNodeAlert"]["enabled"] = "True"
+        config["newNodeAlert"]["welcome_message"] = "Welcome to the mesh!"
+        config["alertGlobal"]["global_enabled"] = "True"
         print_success("Basic config created")
         return config
 
@@ -419,6 +463,7 @@ if not MODULES_AVAILABLE:
 # ORCHESTRATION FUNCTIONS
 # These functions coordinate module functionality and provide the main user interface
 # =============================================================================
+
 
 def fix_serial_permissions() -> bool:
     """Add current user to dialout group for serial port access"""
@@ -436,12 +481,12 @@ def fix_serial_permissions() -> bool:
         print_warning("Skipping - you may need to run as root or add yourself to dialout group")
         return False
 
-    username = os.environ.get('USER', os.environ.get('LOGNAME', ''))
+    username = os.environ.get("USER", os.environ.get("LOGNAME", ""))
     if not username:
         print_error("Could not determine username")
         return False
 
-    ret, _, stderr = run_command(['usermod', '-a', '-G', 'dialout', username], sudo=True)
+    ret, _, stderr = run_command(["usermod", "-a", "-G", "dialout", username], sudo=True)
 
     if ret == 0:
         print_success(f"Added {username} to 'dialout' group")
@@ -478,17 +523,17 @@ def setup_virtual_environment(venv_path: Path = None) -> Tuple[bool, Optional[Pa
         return False, None
 
     # Check if python3-venv is installed
-    ret, _, _ = run_command(['dpkg', '-l', 'python3-venv'], capture=True)
+    ret, _, _ = run_command(["dpkg", "-l", "python3-venv"], capture=True)
     if ret != 0:
         print_info("Installing python3-venv...")
-        ret, _, stderr = run_command(['apt', 'install', '-y', 'python3-venv'], sudo=True)
+        ret, _, stderr = run_command(["apt", "install", "-y", "python3-venv"], sudo=True)
         if ret != 0:
             print_error(f"Failed to install python3-venv: {stderr}")
             return False, None
 
     # Create virtual environment
     print_info(f"Creating virtual environment at {venv_path}...")
-    ret, _, stderr = run_command(['python3', '-m', 'venv', str(venv_path)])
+    ret, _, stderr = run_command(["python3", "-m", "venv", str(venv_path)])
 
     if ret == 0:
         print_success(f"Virtual environment created: {venv_path}")
@@ -526,7 +571,7 @@ def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
     ports = get_serial_ports()
     if ports:
         # get_serial_ports() returns SerialPortInfo objects when modules available
-        port_names = [p.port if hasattr(p, 'port') else str(p) for p in ports]
+        port_names = [p.port if hasattr(p, "port") else str(p) for p in ports]
         print_success(f"Found serial ports: {', '.join(port_names)}")
     else:
         print_warning("No serial ports found - connect your Meshtastic device")
@@ -540,18 +585,18 @@ def raspberry_pi_setup() -> Tuple[bool, Optional[Path]]:
 
     # Step 4: Check for required system packages
     print_step(4, 4, "Checking system packages...")
-    required_packages = ['python3-pip', 'git']
+    required_packages = ["python3-pip", "git"]
     missing = []
 
     for pkg in required_packages:
-        ret, _, _ = run_command(['dpkg', '-l', pkg], capture=True)
+        ret, _, _ = run_command(["dpkg", "-l", pkg], capture=True)
         if ret != 0:
             missing.append(pkg)
 
     if missing:
         print_warning(f"Missing packages: {', '.join(missing)}")
         if get_yes_no("Install missing packages?", True):
-            ret, _, stderr = run_command(['apt', 'install', '-y'] + missing, sudo=True)
+            ret, _, stderr = run_command(["apt", "install", "-y"] + missing, sudo=True)
             if ret == 0:
                 print_success("Packages installed")
             else:
@@ -585,7 +630,7 @@ def configure_serial_raspi_config() -> bool:
         return True
 
     # Check if raspi-config exists
-    ret, _, _ = run_command(['which', 'raspi-config'], capture=True)
+    ret, _, _ = run_command(["which", "raspi-config"], capture=True)
     if ret != 0:
         print_warning("raspi-config not found - manual configuration may be needed")
         return False
@@ -598,10 +643,7 @@ def configure_serial_raspi_config() -> bool:
             print_warning("Serial console is enabled - this may interfere with Meshtastic")
             if get_yes_no("Disable serial console (recommended for Meshtastic)?", True):
                 # Disable console but keep hardware serial
-                ret, _, stderr = run_command(
-                    ['raspi-config', 'nonint', 'do_serial_cons', '1'],
-                    sudo=True
-                )
+                ret, _, stderr = run_command(["raspi-config", "nonint", "do_serial_cons", "1"], sudo=True)
                 if ret == 0:
                     print_success("Serial console disabled")
                 else:
@@ -616,19 +658,13 @@ def configure_serial_raspi_config() -> bool:
     print_info("Enabling serial port via raspi-config...")
 
     # do_serial_hw 0 = enable, 1 = disable (yes, it's backwards)
-    ret, _, stderr = run_command(
-        ['raspi-config', 'nonint', 'do_serial_hw', '0'],
-        sudo=True
-    )
+    ret, _, stderr = run_command(["raspi-config", "nonint", "do_serial_hw", "0"], sudo=True)
     if ret != 0:
         print_error(f"Failed to enable serial hardware: {stderr}")
         return False
 
     # Disable console on serial
-    ret, _, stderr = run_command(
-        ['raspi-config', 'nonint', 'do_serial_cons', '1'],
-        sudo=True
-    )
+    ret, _, stderr = run_command(["raspi-config", "nonint", "do_serial_cons", "1"], sudo=True)
     if ret == 0:
         print_success("Serial port enabled, console disabled")
         print_warning("A reboot is required for changes to take effect!")
@@ -646,34 +682,34 @@ def enable_i2c_spi() -> bool:
     print_section("I2C/SPI Configuration")
 
     # Check if raspi-config exists
-    ret, _, _ = run_command(['which', 'raspi-config'], capture=True)
+    ret, _, _ = run_command(["which", "raspi-config"], capture=True)
     if ret != 0:
         print_warning("raspi-config not found")
         return False
 
     # Check current I2C status
-    ret, stdout, _ = run_command(['raspi-config', 'nonint', 'get_i2c'], capture=True)
-    i2c_enabled = ret == 0 and stdout.strip() == '0'
+    ret, stdout, _ = run_command(["raspi-config", "nonint", "get_i2c"], capture=True)
+    i2c_enabled = ret == 0 and stdout.strip() == "0"
 
     if i2c_enabled:
         print_success("I2C is already enabled")
     else:
         if get_yes_no("Enable I2C interface?", False):
-            ret, _, _ = run_command(['raspi-config', 'nonint', 'do_i2c', '0'], sudo=True)
+            ret, _, _ = run_command(["raspi-config", "nonint", "do_i2c", "0"], sudo=True)
             if ret == 0:
                 print_success("I2C enabled")
             else:
                 print_warning("Failed to enable I2C")
 
     # Check SPI status
-    ret, stdout, _ = run_command(['raspi-config', 'nonint', 'get_spi'], capture=True)
-    spi_enabled = ret == 0 and stdout.strip() == '0'
+    ret, stdout, _ = run_command(["raspi-config", "nonint", "get_spi"], capture=True)
+    spi_enabled = ret == 0 and stdout.strip() == "0"
 
     if spi_enabled:
         print_success("SPI is already enabled")
     else:
         if get_yes_no("Enable SPI interface?", False):
-            ret, _, _ = run_command(['raspi-config', 'nonint', 'do_spi', '0'], sudo=True)
+            ret, _, _ = run_command(["raspi-config", "nonint", "do_spi", "0"], sudo=True)
             if ret == 0:
                 print_success("SPI enabled")
             else:
@@ -720,7 +756,7 @@ def startup_system_check() -> bool:
 
         # apt update
         print_step(1, 3, "Updating package lists...")
-        ret, _, stderr = run_command(['apt', 'update'], sudo=True)
+        ret, _, stderr = run_command(["apt", "update"], sudo=True)
         if ret != 0:
             errors.append(f"apt update: {stderr}")
             print_warning("Failed to update package lists")
@@ -729,7 +765,7 @@ def startup_system_check() -> bool:
 
         # apt upgrade
         print_step(2, 3, "Upgrading packages...")
-        ret, _, stderr = run_command(['apt', 'upgrade', '-y'], sudo=True)
+        ret, _, stderr = run_command(["apt", "upgrade", "-y"], sudo=True)
         if ret != 0:
             errors.append(f"apt upgrade: {stderr}")
             print_warning("Failed to upgrade packages")
@@ -738,7 +774,7 @@ def startup_system_check() -> bool:
 
         # Cleanup
         print_step(3, 3, "Cleaning up...")
-        run_command(['apt', 'autoremove', '-y'], sudo=True)
+        run_command(["apt", "autoremove", "-y"], sudo=True)
         print_success("Cleanup complete")
 
         if errors:
@@ -753,18 +789,18 @@ def startup_system_check() -> bool:
         # Check for required packages on Pi
         print_section("Raspberry Pi Prerequisites")
 
-        required_pkgs = ['python3-pip', 'python3-venv', 'git', 'i2c-tools']
+        required_pkgs = ["python3-pip", "python3-venv", "git", "i2c-tools"]
         missing = []
 
         for pkg in required_pkgs:
-            ret, _, _ = run_command(['dpkg', '-s', pkg], capture=True)
+            ret, _, _ = run_command(["dpkg", "-s", pkg], capture=True)
             if ret != 0:
                 missing.append(pkg)
 
         if missing:
             print_warning(f"Missing packages: {', '.join(missing)}")
             if get_yes_no("Install missing packages?", True):
-                ret, _, _ = run_command(['apt', 'install', '-y'] + missing, sudo=True)
+                ret, _, _ = run_command(["apt", "install", "-y"] + missing, sudo=True)
                 if ret == 0:
                     print_success("Packages installed")
                 else:
@@ -782,6 +818,7 @@ def startup_system_check() -> bool:
 # SYSTEM MAINTENANCE FUNCTIONS
 # =============================================================================
 
+
 def system_update() -> bool:
     """Run apt update and upgrade"""
     print_section("System Update")
@@ -795,7 +832,7 @@ def system_update() -> bool:
 
     # Step 1: apt update
     print_step(1, 3, "Updating package lists...")
-    ret, stdout, stderr = run_command(['apt', 'update'], sudo=True)
+    ret, stdout, stderr = run_command(["apt", "update"], sudo=True)
     if ret != 0:
         errors.append(f"apt update failed: {stderr}")
         print_error("Failed to update package lists")
@@ -804,7 +841,7 @@ def system_update() -> bool:
 
     # Step 2: apt upgrade
     print_step(2, 3, "Upgrading packages...")
-    ret, stdout, stderr = run_command(['apt', 'upgrade', '-y'], sudo=True)
+    ret, stdout, stderr = run_command(["apt", "upgrade", "-y"], sudo=True)
     if ret != 0:
         errors.append(f"apt upgrade failed: {stderr}")
         print_error("Failed to upgrade packages")
@@ -813,7 +850,7 @@ def system_update() -> bool:
 
     # Step 3: Clean up
     print_step(3, 3, "Cleaning up...")
-    run_command(['apt', 'autoremove', '-y'], sudo=True)
+    run_command(["apt", "autoremove", "-y"], sudo=True)
     print_success("Cleanup complete")
 
     if errors:
@@ -837,7 +874,7 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
     if meshing_path is None:
         print_warning("Meshing-around not found in common locations")
         custom_path = get_input("Enter path to meshing-around directory (or 'skip')")
-        if custom_path.lower() == 'skip':
+        if custom_path.lower() == "skip":
             return True, None
         meshing_path = Path(custom_path)
 
@@ -846,8 +883,7 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
         if get_yes_no("Clone meshing-around from GitHub?", True):
             clone_path = get_input("Clone to directory", str(Path.home() / "meshing-around"))
             ret, _, stderr = run_command(
-                ['git', 'clone', 'https://github.com/SpudGunMan/meshing-around.git', clone_path],
-                capture=True
+                ["git", "clone", "https://github.com/SpudGunMan/meshing-around.git", clone_path], capture=True
             )
             if ret == 0:
                 print_success(f"Cloned to {clone_path}")
@@ -865,7 +901,7 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
     git_cwd = str(meshing_path)
 
     # Check for uncommitted changes
-    ret, stdout, _ = run_command(['git', 'status', '--porcelain'], capture=True, cwd=git_cwd)
+    ret, stdout, _ = run_command(["git", "status", "--porcelain"], capture=True, cwd=git_cwd)
     if stdout.strip():
         print_warning("Uncommitted changes detected:")
         print(stdout)
@@ -873,13 +909,13 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
             return True, meshing_path
 
     # Git pull
-    ret, stdout, stderr = run_command(['git', 'pull', 'origin', 'main'], capture=True, cwd=git_cwd)
+    ret, stdout, stderr = run_command(["git", "pull", "origin", "main"], capture=True, cwd=git_cwd)
     if ret != 0:
         # Try master branch
-        ret, stdout, stderr = run_command(['git', 'pull', 'origin', 'master'], capture=True, cwd=git_cwd)
+        ret, stdout, stderr = run_command(["git", "pull", "origin", "master"], capture=True, cwd=git_cwd)
 
     if ret == 0:
-        if 'Already up to date' in stdout:
+        if "Already up to date" in stdout:
             print_success("Already up to date")
         else:
             print_success("Updated to latest version")
@@ -912,13 +948,13 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
         print_info("Using --break-system-packages flag (or use a virtual environment)")
 
     extra_flags = get_pip_install_flags()
-    pip_display = ' '.join(pip_cmd)
+    pip_display = " ".join(pip_cmd)
 
     print_info(f"Using pip command: {pip_display}")
 
     # Try installing from requirements.txt first
     print_info("Installing from requirements.txt...")
-    install_cmd = pip_cmd + ['install'] + extra_flags + ['-r', str(requirements_file)]
+    install_cmd = pip_cmd + ["install"] + extra_flags + ["-r", str(requirements_file)]
     ret, stdout, stderr = run_command(install_cmd, capture=True)
 
     if ret != 0:
@@ -927,27 +963,27 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
 
         # Known package name fixes for compatibility
         package_fixes = {
-            'pubsub': 'PyPubSub',
-            'pyephem': 'ephem',
+            "pubsub": "PyPubSub",
+            "pyephem": "ephem",
         }
 
         # Install core packages individually with fixes
         core_packages = [
-            'meshtastic',
-            'PyPubSub',  # Instead of pubsub
-            'ephem',     # Instead of pyephem
-            'requests',
-            'maidenhead',
-            'beautifulsoup4',
-            'dadjokes',
-            'geopy',
-            'schedule',
+            "meshtastic",
+            "PyPubSub",  # Instead of pubsub
+            "ephem",  # Instead of pyephem
+            "requests",
+            "maidenhead",
+            "beautifulsoup4",
+            "dadjokes",
+            "geopy",
+            "schedule",
         ]
 
         failed_packages = []
         for pkg in core_packages:
             print_info(f"Installing {pkg}...")
-            install_cmd = pip_cmd + ['install'] + extra_flags + [pkg]
+            install_cmd = pip_cmd + ["install"] + extra_flags + [pkg]
             ret, _, stderr = run_command(install_cmd, capture=True)
             if ret != 0:
                 failed_packages.append(pkg)
@@ -966,9 +1002,9 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
     print_info("Verifying critical packages...")
     python_cmd = str(venv_path / "bin" / "python3") if venv_path else "python3"
 
-    critical = ['meshtastic']
+    critical = ["meshtastic"]
     for pkg in critical:
-        ret, _, _ = run_command([python_cmd, '-c', f'import {pkg}'], capture=True)
+        ret, _, _ = run_command([python_cmd, "-c", f"import {pkg}"], capture=True)
         if ret == 0:
             print_success(f"  {pkg} OK")
         else:
@@ -1036,18 +1072,17 @@ This wizard will:
     print_step(2, 5, "Cloning meshing-around from GitHub...")
 
     # Make sure git is installed
-    ret, _, _ = run_command(['which', 'git'], capture=True)
+    ret, _, _ = run_command(["which", "git"], capture=True)
     if ret != 0:
         print_info("Installing git...")
-        ret, _, stderr = run_command(['apt', 'install', '-y', 'git'], sudo=True)
+        ret, _, stderr = run_command(["apt", "install", "-y", "git"], sudo=True)
         if ret != 0:
             print_error(f"Failed to install git: {stderr}")
             return False, None, None
 
     # Clone the repository
     ret, stdout, stderr = run_command(
-        ['git', 'clone', 'https://github.com/SpudGunMan/meshing-around.git', str(install_path)],
-        capture=True
+        ["git", "clone", "https://github.com/SpudGunMan/meshing-around.git", str(install_path)], capture=True
     )
 
     if ret != 0:
@@ -1067,17 +1102,17 @@ This wizard will:
         venv_path = Path(venv_input)
 
         # Check if python3-venv is installed
-        ret, _, _ = run_command(['dpkg', '-l', 'python3-venv'], capture=True)
+        ret, _, _ = run_command(["dpkg", "-l", "python3-venv"], capture=True)
         if ret != 0:
             print_info("Installing python3-venv...")
-            ret, _, stderr = run_command(['apt', 'install', '-y', 'python3-venv'], sudo=True)
+            ret, _, stderr = run_command(["apt", "install", "-y", "python3-venv"], sudo=True)
             if ret != 0:
                 print_error(f"Failed to install python3-venv: {stderr}")
                 errors.append("Failed to install python3-venv")
 
         if not venv_path.exists():
             print_info(f"Creating virtual environment at {venv_path}...")
-            ret, _, stderr = run_command(['python3', '-m', 'venv', str(venv_path)])
+            ret, _, stderr = run_command(["python3", "-m", "venv", str(venv_path)])
 
             if ret == 0:
                 print_success(f"Virtual environment created")
@@ -1144,7 +1179,7 @@ def create_systemd_service(install_path: Path, venv_path: Optional[Path] = None)
     print_section("Create Systemd Service")
 
     # Get current user
-    username = os.environ.get('USER', os.environ.get('LOGNAME', 'pi'))
+    username = os.environ.get("USER", os.environ.get("LOGNAME", "pi"))
 
     # Determine python path
     if venv_path and venv_path.exists():
@@ -1187,31 +1222,32 @@ WantedBy=multi-user.target
 
     # Write service file
     import tempfile
+
     service_path = Path(f"/etc/systemd/system/{service_name}.service")
 
     temp_path = None
     try:
         # Write to secure temp file (unpredictable path, restricted permissions)
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.service', delete=False) as tf:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".service", delete=False) as tf:
             tf.write(service_content)
             temp_path = Path(tf.name)
 
         # Copy to systemd directory with sudo
-        ret, _, stderr = run_command(['cp', str(temp_path), str(service_path)], sudo=True)
+        ret, _, stderr = run_command(["cp", str(temp_path), str(service_path)], sudo=True)
         if ret != 0:
             print_error(f"Failed to copy service file: {stderr}")
             return False
 
         # Set permissions
-        run_command(['chmod', '644', str(service_path)], sudo=True)
+        run_command(["chmod", "644", str(service_path)], sudo=True)
 
         # Create log file
         log_path = Path("/var/log/meshing-around.log")
-        run_command(['touch', str(log_path)], sudo=True)
-        run_command(['chown', f'{username}:{username}', str(log_path)], sudo=True)
+        run_command(["touch", str(log_path)], sudo=True)
+        run_command(["chown", f"{username}:{username}", str(log_path)], sudo=True)
 
         # Reload systemd
-        ret, _, stderr = run_command(['systemctl', 'daemon-reload'], sudo=True)
+        ret, _, stderr = run_command(["systemctl", "daemon-reload"], sudo=True)
         if ret != 0:
             print_error(f"Failed to reload systemd: {stderr}")
             return False
@@ -1220,19 +1256,19 @@ WantedBy=multi-user.target
 
         # Offer to enable and start
         if get_yes_no("Enable service to start on boot?", True):
-            ret, _, stderr = run_command(['systemctl', 'enable', service_name], sudo=True)
+            ret, _, stderr = run_command(["systemctl", "enable", service_name], sudo=True)
             if ret == 0:
                 print_success("Service enabled for auto-start")
             else:
                 print_error(f"Failed to enable service: {stderr}")
 
         if get_yes_no("Start the service now?", False):
-            ret, _, stderr = run_command(['systemctl', 'start', service_name], sudo=True)
+            ret, _, stderr = run_command(["systemctl", "start", service_name], sudo=True)
             if ret == 0:
                 print_success("Service started")
                 # Show status
                 time.sleep(2)
-                ret, stdout, _ = run_command(['systemctl', 'status', service_name], capture=True)
+                ret, stdout, _ = run_command(["systemctl", "status", service_name], capture=True)
                 if ret == 0:
                     print(stdout)
             else:
@@ -1279,13 +1315,13 @@ def run_install_script(meshing_path: Path) -> bool:
         return False
 
     # Make sure the script is executable
-    run_command(['chmod', '+x', str(install_script)])
+    run_command(["chmod", "+x", str(install_script)])
 
     # Run the install script (use cwd parameter instead of os.chdir)
     print_info("Running install.sh...")
 
     try:
-        ret, stdout, stderr = run_command(['bash', str(install_script)], cwd=str(meshing_path))
+        ret, stdout, stderr = run_command(["bash", str(install_script)], cwd=str(meshing_path))
 
         if ret == 0:
             print_success("install.sh completed successfully!")
@@ -1313,18 +1349,18 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
 
         if get_yes_no("Run launch.sh to start the bot?", True):
             # Make sure the script is executable
-            run_command(['chmod', '+x', str(launch_script)])
+            run_command(["chmod", "+x", str(launch_script)])
 
             # Start bot via launch.sh (use cwd parameter instead of os.chdir)
             print_info("Starting bot via launch.sh...")
 
             try:
                 process = subprocess.Popen(
-                    ['bash', str(launch_script)],
+                    ["bash", str(launch_script)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     start_new_session=True,
-                    cwd=str(meshing_path)
+                    cwd=str(meshing_path),
                 )
 
                 # Wait a few seconds to see if it starts
@@ -1370,7 +1406,7 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     start_new_session=True,
-                    cwd=str(meshing_path)
+                    cwd=str(meshing_path),
                 )
 
                 time.sleep(3)
@@ -1402,7 +1438,7 @@ def verify_bot_running(meshing_path: Path) -> bool:
         return False
 
     # Check if bot is already running
-    ret, stdout, _ = run_command(['pgrep', '-f', 'mesh_bot.py'], capture=True)
+    ret, stdout, _ = run_command(["pgrep", "-f", "mesh_bot.py"], capture=True)
     if ret == 0 and stdout.strip():
         print_success("Bot is already running!")
         print_info(f"PID(s): {stdout.strip()}")
@@ -1410,21 +1446,14 @@ def verify_bot_running(meshing_path: Path) -> bool:
 
     # Test if bot can start (syntax check)
     print_info("Checking bot syntax...")
-    ret, stdout, stderr = run_command(
-        ['python3', '-m', 'py_compile', str(bot_script)],
-        capture=True
-    )
+    ret, stdout, stderr = run_command(["python3", "-m", "py_compile", str(bot_script)], capture=True)
     if ret != 0:
         print_error(f"Syntax error in bot: {stderr}")
         return False
     print_success("Bot syntax OK")
 
     # Check for config file
-    config_locations = [
-        meshing_path / "config.ini",
-        meshing_path / "config.yaml",
-        meshing_path / "config.yml"
-    ]
+    config_locations = [meshing_path / "config.ini", meshing_path / "config.yaml", meshing_path / "config.yml"]
     config_found = any(c.exists() for c in config_locations)
     if not config_found:
         print_warning("No config file found in meshing-around directory")
@@ -1436,11 +1465,11 @@ def verify_bot_running(meshing_path: Path) -> bool:
         try:
             # Start in background
             process = subprocess.Popen(
-                ['python3', str(bot_script)],
+                ["python3", str(bot_script)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
-                cwd=str(meshing_path)
+                cwd=str(meshing_path),
             )
 
             # Wait a few seconds to see if it crashes
@@ -1584,7 +1613,7 @@ def show_system_info():
         print(f"  Codename: {os_codename}")
 
     # Kernel
-    ret, stdout, _ = run_command(['uname', '-r'], capture=True)
+    ret, stdout, _ = run_command(["uname", "-r"], capture=True)
     if ret == 0:
         print(f"Kernel: {stdout.strip()}")
 
@@ -1600,6 +1629,7 @@ def show_system_info():
     # Check for meshtastic library
     try:
         import meshtastic
+
         print(f"Meshtastic library: {meshtastic.__version__ if hasattr(meshtastic, '__version__') else 'installed'}")
     except ImportError:
         print_warning("Meshtastic library: NOT INSTALLED")
@@ -1621,7 +1651,7 @@ def show_system_info():
     ports = get_serial_ports()
     if ports:
         for port in ports:
-            port_name = port.port if hasattr(port, 'port') else str(port)
+            port_name = port.port if hasattr(port, "port") else str(port)
             print_success(f"  {port_name}")
     else:
         print_warning("  No serial ports found - connect your Meshtastic device")
@@ -1646,20 +1676,21 @@ def show_system_info():
         print_warning(f"\nVirtual environment: Not found (recommended for Bookworm)")
 
     # Disk space
-    ret, stdout, _ = run_command(['df', '-h', '/'], capture=True)
+    ret, stdout, _ = run_command(["df", "-h", "/"], capture=True)
     if ret == 0:
         print(f"\nDisk space:\n{stdout}")
 
     # Memory (useful for Pi)
     if is_raspberry_pi():
-        ret, stdout, _ = run_command(['free', '-h'], capture=True)
+        ret, stdout, _ = run_command(["free", "-h"], capture=True)
         if ret == 0:
             print(f"Memory:\n{stdout}")
+
 
 def load_config(config_file: str) -> configparser.ConfigParser:
     """Load existing config or create new one"""
     config = configparser.ConfigParser()
-    
+
     if os.path.exists(config_file):
         print_success(f"Loading existing config from {config_file}")
         config.read(config_file)
@@ -1667,26 +1698,42 @@ def load_config(config_file: str) -> configparser.ConfigParser:
         print_warning(f"No existing config found, creating new configuration")
         # Initialize sections
         sections = [
-            'interface', 'general', 'emergencyHandler', 'proximityAlert',
-            'altitudeAlert', 'weatherAlert', 'ipawsAlert', 'volcanoAlert',
-            'noisyNodeAlert', 'batteryAlert', 'newNodeAlert', 'snrAlert',
-            'disconnectAlert', 'customAlert', 'alertGlobal', 'smtp', 'sms'
+            "interface",
+            "general",
+            "emergencyHandler",
+            "proximityAlert",
+            "altitudeAlert",
+            "weatherAlert",
+            "ipawsAlert",
+            "volcanoAlert",
+            "noisyNodeAlert",
+            "batteryAlert",
+            "newNodeAlert",
+            "snrAlert",
+            "disconnectAlert",
+            "customAlert",
+            "alertGlobal",
+            "smtp",
+            "sms",
         ]
         for section in sections:
             if not config.has_section(section):
                 config.add_section(section)
-    
+
     return config
 
+
 def save_config(config: configparser.ConfigParser, config_file: str):
-    """Save configuration to file"""
+    """Save configuration to file with restricted permissions (may contain passwords)."""
     try:
-        with open(config_file, 'w') as f:
+        with open(config_file, "w") as f:
             config.write(f)
+        os.chmod(config_file, 0o600)
         print_success(f"\nConfiguration saved to {config_file}")
     except OSError as e:
         print_error(f"Failed to save config: {e}")
         sys.exit(1)
+
 
 def main_menu():
     """Display main menu and handle user selection"""
@@ -1970,6 +2017,7 @@ def deploy_and_start(config_file: str, meshing_path: Path):
 
     # Start the bot
     verify_bot_running(meshing_path)
+
 
 if __name__ == "__main__":
     try:
