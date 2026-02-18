@@ -599,9 +599,9 @@ class MQTTMeshtasticClient:
             if self.network.is_duplicate_message(msg_id):
                 return  # Skip duplicate
 
-            # Extract SNR/RSSI with validation (from meshforge patterns)
-            snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE) or 0.0
-            rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE) or 0
+            # Extract SNR/RSSI with validation (None = absent, 0.0 = valid reading)
+            snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
+            rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
             hop_limit = self._safe_int(data.get("hopLimit"), 0, 15) or 3
             hop_start = self._safe_int(data.get("hopStart"), 0, 15) or 3
             hop_count = max(0, hop_start - hop_limit)
@@ -625,9 +625,11 @@ class MQTTMeshtasticClient:
                     node.last_heard = datetime.now(timezone.utc)
                     node.is_online = True
 
-            # Update link quality
-            if snr or rssi:
-                self.network.update_link_quality(sender_id, float(snr), int(rssi), hop_count)
+            # Update link quality (use is not None to preserve valid 0.0 dB readings)
+            if snr is not None or rssi is not None:
+                self.network.update_link_quality(
+                    sender_id, float(snr if snr is not None else 0), int(rssi if rssi is not None else 0), hop_count
+                )
 
             # Track via node for routing info
             via = data.get("via", data.get("relay", ""))
@@ -980,14 +982,14 @@ class MQTTMeshtasticClient:
             existing_node.last_heard = datetime.now(timezone.utc)
             existing_node.is_online = True
 
-        # Extract SNR/RSSI if available
-        snr = decoded.get("rx_snr", 0)
-        rssi = decoded.get("rx_rssi", 0)
+        # Extract SNR/RSSI if available (use None sentinel so 0.0 dB isn't dropped)
+        snr = decoded.get("rx_snr")
+        rssi = decoded.get("rx_rssi")
         hop_limit = decoded.get("hop_limit", 3)
         hop_count = max(0, 3 - hop_limit)  # Estimate hops
 
-        if snr or rssi:
-            self.network.update_link_quality(sender_id, float(snr), int(rssi), hop_count)
+        if snr is not None or rssi is not None:
+            self.network.update_link_quality(sender_id, float(snr or 0), int(rssi or 0), hop_count)
 
         # Handle relay node (Meshtastic 2.6+)
         relay_node = decoded.get("relay_node", 0)
@@ -1138,8 +1140,8 @@ class MQTTMeshtasticClient:
         if node:
             sender_name = node.display_name
 
-        snr = decoded.get("rx_snr", 0)
-        rssi = decoded.get("rx_rssi", 0)
+        snr = decoded.get("rx_snr")
+        rssi = decoded.get("rx_rssi")
         hop_limit = decoded.get("hop_limit", 3)
         hop_count = max(0, 3 - hop_limit)
         channel = decoded.get("channel", 0)
@@ -1154,8 +1156,8 @@ class MQTTMeshtasticClient:
             message_type=MessageType.TEXT,
             timestamp=datetime.now(timezone.utc),
             hop_count=hop_count,
-            snr=float(snr) if snr else 0.0,
-            rssi=int(rssi) if rssi else 0,
+            snr=float(snr) if snr is not None else 0.0,
+            rssi=int(rssi) if rssi is not None else 0,
             is_incoming=True,
         )
 
