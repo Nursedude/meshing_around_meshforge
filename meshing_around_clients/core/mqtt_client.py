@@ -492,9 +492,10 @@ class MQTTMeshtasticClient:
         for topic in topics:
             if topic not in seen:
                 seen.add(topic)
-                result, mid = self._client.subscribe(topic, qos=qos)
-                if result != 0:
-                    logger.warning("Subscribe failed for %s (rc=%d)", topic, result)
+                sub_result = self._client.subscribe(topic, qos=qos)
+                # paho-mqtt returns (rc, mid) tuple; check rc if available
+                if isinstance(sub_result, tuple) and len(sub_result) >= 1 and sub_result[0] != 0:
+                    logger.warning("Subscribe failed for %s (rc=%d)", topic, sub_result[0])
                 else:
                     logger.info("Subscribed to: %s (qos=%d)", topic, qos)
 
