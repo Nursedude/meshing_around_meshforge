@@ -1281,13 +1281,11 @@ def run_install_script(meshing_path: Path) -> bool:
     # Make sure the script is executable
     run_command(['chmod', '+x', str(install_script)])
 
-    # Run the install script
+    # Run the install script (use cwd parameter instead of os.chdir)
     print_info("Running install.sh...")
-    original_dir = os.getcwd()
 
     try:
-        os.chdir(meshing_path)
-        ret, stdout, stderr = run_command(['bash', str(install_script)])
+        ret, stdout, stderr = run_command(['bash', str(install_script)], cwd=str(meshing_path))
 
         if ret == 0:
             print_success("install.sh completed successfully!")
@@ -1300,8 +1298,6 @@ def run_install_script(meshing_path: Path) -> bool:
     except (OSError, FileNotFoundError) as e:
         print_error(f"Failed to run install.sh: {e}")
         return False
-    finally:
-        os.chdir(original_dir)
 
 
 def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> bool:
@@ -1319,18 +1315,16 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
             # Make sure the script is executable
             run_command(['chmod', '+x', str(launch_script)])
 
+            # Start bot via launch.sh (use cwd parameter instead of os.chdir)
             print_info("Starting bot via launch.sh...")
-            original_dir = os.getcwd()
 
             try:
-                os.chdir(meshing_path)
-
-                # Run in background using nohup
                 process = subprocess.Popen(
                     ['bash', str(launch_script)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    start_new_session=True
+                    start_new_session=True,
+                    cwd=str(meshing_path)
                 )
 
                 # Wait a few seconds to see if it starts
@@ -1350,8 +1344,6 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
             except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
                 print_error(f"Failed to run launch.sh: {e}")
                 return False
-            finally:
-                os.chdir(original_dir)
 
     else:
         print_warning("launch.sh not found - using direct Python execution")
@@ -1371,15 +1363,14 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
             print_info("Using system Python")
 
         if get_yes_no("Start the bot now?", True):
-            original_dir = os.getcwd()
             try:
-                os.chdir(meshing_path)
-
+                # Use cwd parameter instead of os.chdir
                 process = subprocess.Popen(
                     [python_cmd, str(bot_script)],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    start_new_session=True
+                    start_new_session=True,
+                    cwd=str(meshing_path)
                 )
 
                 time.sleep(3)
@@ -1397,8 +1388,6 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
             except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
                 print_error(f"Failed to start bot: {e}")
                 return False
-            finally:
-                os.chdir(original_dir)
 
     return False
 
@@ -1441,19 +1430,17 @@ def verify_bot_running(meshing_path: Path) -> bool:
         print_warning("No config file found in meshing-around directory")
         print_info("Run this configurator and copy config.ini to meshing-around directory")
 
-    # Try to start the bot
+    # Try to start the bot (use cwd parameter instead of os.chdir)
     if get_yes_no("Start the bot now?", True):
         print_info("Starting mesh_bot.py...")
-        original_dir = os.getcwd()
         try:
-            os.chdir(meshing_path)
-
             # Start in background
             process = subprocess.Popen(
-                ['python3', 'mesh_bot.py'],
+                ['python3', str(bot_script)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                start_new_session=True
+                start_new_session=True,
+                cwd=str(meshing_path)
             )
 
             # Wait a few seconds to see if it crashes
@@ -1475,8 +1462,6 @@ def verify_bot_running(meshing_path: Path) -> bool:
         except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
             print_error(f"Failed to start bot: {e}")
             return False
-        finally:
-            os.chdir(original_dir)
 
     return True
 
