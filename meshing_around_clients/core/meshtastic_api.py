@@ -166,17 +166,13 @@ class MeshtasticAPI:
         if interface_type == "serial":
             port = self.config.interface.port if self.config.interface.port else None
             self.connection_info.device_path = port or "auto"
-            return meshtastic.serial_interface.SerialInterface(
-                port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-            )
+            return meshtastic.serial_interface.SerialInterface(port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "tcp":
             hostname = self.config.interface.hostname
             if not hostname:
                 raise ValueError("TCP hostname not configured")
             self.connection_info.device_path = hostname
-            return meshtastic.tcp_interface.TCPInterface(
-                hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-            )
+            return meshtastic.tcp_interface.TCPInterface(hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "http":
             base_url = self.config.interface.http_url
             if not base_url:
@@ -185,9 +181,7 @@ class MeshtasticAPI:
                     raise ValueError("HTTP URL not configured (set http_url or hostname)")
                 base_url = f"http://{hostname}"
             self.connection_info.device_path = base_url
-            return meshtastic.http_interface.HTTPInterface(
-                base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-            )
+            return meshtastic.http_interface.HTTPInterface(base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "ble":
             mac = self.config.interface.mac
             if not mac:
