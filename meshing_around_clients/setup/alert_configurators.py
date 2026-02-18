@@ -17,6 +17,7 @@ Extracted from configure_bot.py for modularity.
 """
 
 import configparser
+from typing import Callable
 
 from .cli_utils import (
     get_input,
@@ -27,6 +28,21 @@ from .cli_utils import (
     validate_coordinates,
     validate_email,
 )
+
+
+def _in_range(lo: int, hi: int) -> Callable[[int], bool]:
+    """Return a validator that checks lo <= value <= hi."""
+    return lambda v: lo <= v <= hi
+
+
+def _positive(v: int) -> bool:
+    """Validate that value is positive."""
+    return v > 0
+
+
+# Meshtastic supports channel indices 0-7
+_valid_channel = _in_range(0, 7)
+_valid_percent = _in_range(1, 100)
 
 
 def configure_interface(config: configparser.ConfigParser) -> None:
@@ -105,10 +121,10 @@ def configure_emergency_alerts(config: configparser.ConfigParser) -> None:
         keywords = get_input("Enter emergency keywords (comma-separated)")
         config["emergencyHandler"]["emergency_keywords"] = keywords
 
-    channel = get_input("Alert channel number", "2", int)
+    channel = get_input("Alert channel number (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["emergencyHandler"]["alert_channel"] = str(channel)
 
-    cooldown = get_input("Cooldown period between alerts (seconds)", "300", int)
+    cooldown = get_input("Cooldown period between alerts (seconds)", "300", int, validator=_positive, error_message="Must be positive")
     config["emergencyHandler"]["cooldown_period"] = str(cooldown)
 
     if get_yes_no("Enable email notifications for emergencies?", False):
@@ -150,13 +166,13 @@ def configure_proximity_alerts(config: configparser.ConfigParser) -> None:
     if not validate_coordinates(lat, lon):
         print_warning("Coordinates may be invalid - verify values")
 
-    radius = get_input("Proximity radius in meters", "100", int)
+    radius = get_input("Proximity radius in meters", "100", int, validator=_positive, error_message="Radius must be positive")
     config["proximityAlert"]["radius_meters"] = str(radius)
 
-    channel = get_input("Alert channel", "0", int)
+    channel = get_input("Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["proximityAlert"]["alert_channel"] = str(channel)
 
-    interval = get_input("Check interval in seconds", "60", int)
+    interval = get_input("Check interval in seconds", "60", int, validator=_positive, error_message="Must be positive")
     config["proximityAlert"]["check_interval"] = str(interval)
 
     if get_yes_no("Execute script on proximity trigger?", False):
@@ -180,13 +196,13 @@ def configure_altitude_alerts(config: configparser.ConfigParser) -> None:
 
     config["altitudeAlert"]["enabled"] = "True"
 
-    altitude = get_input("Minimum altitude threshold (meters)", "1000", int)
+    altitude = get_input("Minimum altitude threshold (meters)", "1000", int, validator=_positive, error_message="Must be positive")
     config["altitudeAlert"]["min_altitude"] = str(altitude)
 
-    channel = get_input("Alert channel", "0", int)
+    channel = get_input("Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["altitudeAlert"]["alert_channel"] = str(channel)
 
-    interval = get_input("Check interval (seconds)", "120", int)
+    interval = get_input("Check interval (seconds)", "120", int, validator=_positive, error_message="Must be positive")
     config["altitudeAlert"]["check_interval"] = str(interval)
 
     print_success("Altitude alerts configured")
@@ -212,10 +228,10 @@ def configure_weather_alerts(config: configparser.ConfigParser) -> None:
     severity = get_input("Alert severity levels (comma-separated)", "Extreme,Severe")
     config["weatherAlert"]["severity_levels"] = severity
 
-    interval = get_input("Check interval (minutes)", "30", int)
+    interval = get_input("Check interval (minutes)", "30", int, validator=_positive, error_message="Must be positive")
     config["weatherAlert"]["check_interval_minutes"] = str(interval)
 
-    channel = get_input("Alert channel", "2", int)
+    channel = get_input("Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["weatherAlert"]["alert_channel"] = str(channel)
 
     print_success("Weather alerts configured")
@@ -234,13 +250,13 @@ def configure_battery_alerts(config: configparser.ConfigParser) -> None:
 
     config["batteryAlert"]["enabled"] = "True"
 
-    threshold = get_input("Battery threshold percentage", "20", int)
+    threshold = get_input("Battery threshold percentage (1-100)", "20", int, validator=_valid_percent, error_message="Must be 1-100")
     config["batteryAlert"]["threshold_percent"] = str(threshold)
 
-    interval = get_input("Check interval (minutes)", "30", int)
+    interval = get_input("Check interval (minutes)", "30", int, validator=_positive, error_message="Must be positive")
     config["batteryAlert"]["check_interval_minutes"] = str(interval)
 
-    channel = get_input("Alert channel", "0", int)
+    channel = get_input("Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["batteryAlert"]["alert_channel"] = str(channel)
 
     if get_yes_no("Monitor specific nodes only?", False):
@@ -263,15 +279,15 @@ def configure_noisy_node_alerts(config: configparser.ConfigParser) -> None:
 
     config["noisyNodeAlert"]["enabled"] = "True"
 
-    threshold = get_input("Message threshold (messages per period)", "50", int)
+    threshold = get_input("Message threshold (messages per period)", "50", int, validator=_positive, error_message="Must be positive")
     config["noisyNodeAlert"]["message_threshold"] = str(threshold)
 
-    period = get_input("Time period (minutes)", "10", int)
+    period = get_input("Time period (minutes)", "10", int, validator=_positive, error_message="Must be positive")
     config["noisyNodeAlert"]["time_period_minutes"] = str(period)
 
     if get_yes_no("Auto-mute noisy nodes?", False):
         config["noisyNodeAlert"]["auto_mute"] = "True"
-        duration = get_input("Mute duration (minutes)", "60", int)
+        duration = get_input("Mute duration (minutes)", "60", int, validator=_positive, error_message="Must be positive")
         config["noisyNodeAlert"]["mute_duration_minutes"] = str(duration)
 
     print_success("Noisy node alerts configured")
@@ -298,7 +314,7 @@ def configure_new_node_alerts(config: configparser.ConfigParser) -> None:
 
     if get_yes_no("Also announce to channel?", False):
         config["newNodeAlert"]["announce_to_channel"] = "True"
-        channel = get_input("Announcement channel", "0", int)
+        channel = get_input("Announcement channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
         config["newNodeAlert"]["announcement_channel"] = str(channel)
 
     print_success("New node alerts configured")
@@ -317,7 +333,7 @@ def configure_disconnect_alerts(config: configparser.ConfigParser) -> None:
 
     config["disconnectAlert"]["enabled"] = "True"
 
-    timeout = get_input("Consider disconnected after (minutes)", "30", int)
+    timeout = get_input("Consider disconnected after (minutes)", "30", int, validator=_positive, error_message="Must be positive")
     config["disconnectAlert"]["timeout_minutes"] = str(timeout)
 
     if get_yes_no("Monitor specific nodes only?", False):
@@ -326,7 +342,7 @@ def configure_disconnect_alerts(config: configparser.ConfigParser) -> None:
     else:
         config["disconnectAlert"]["monitor_all"] = "True"
 
-    channel = get_input("Alert channel", "0", int)
+    channel = get_input("Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["disconnectAlert"]["alert_channel"] = str(channel)
 
     print_success("Disconnect alerts configured")

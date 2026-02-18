@@ -97,12 +97,14 @@ install_system_deps() {
     log_info "Installing system dependencies..."
 
     if command -v apt-get &> /dev/null; then
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq \
-            python3-pip \
-            python3-venv \
-            git \
-            || log_warn "Some packages may have failed"
+        if ! sudo apt-get update -qq; then
+            log_error "apt-get update failed — check network or sources"
+            exit 1
+        fi
+        if ! sudo apt-get install -y -qq python3-pip python3-venv git; then
+            log_error "Failed to install required packages (python3-pip, python3-venv, git)"
+            exit 1
+        fi
         log_ok "System dependencies installed"
     else
         log_warn "apt-get not found, skipping system dependencies"
