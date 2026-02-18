@@ -28,9 +28,12 @@ try:
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
     CRYPTO_AVAILABLE = True
-except BaseException:
-    # Catch any exception including pyo3 panics from broken cryptography backend
-    pass
+except BaseException as e:
+    # Must use BaseException (not Exception) because pyo3_runtime.PanicException
+    # from broken Rust cryptography backends inherits from BaseException directly.
+    # Re-raise KeyboardInterrupt/SystemExit so they aren't silently swallowed.
+    if isinstance(e, (KeyboardInterrupt, SystemExit)):
+        raise
 
 # Try to import meshtastic protobuf definitions
 try:

@@ -155,14 +155,15 @@ if not MODULES_AVAILABLE:
         """Validate latitude and longitude values"""
         return -90 <= lat <= 90 and -180 <= lon <= 180
 
-    def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False) -> Tuple[int, str, str]:
-        """Run a shell command with optional sudo and output"""
+    def run_command(cmd: List[str], desc: str = "", capture: bool = False, sudo: bool = False,
+                    cwd: Optional[str] = None) -> Tuple[int, str, str]:
+        """Run a shell command with optional sudo, cwd, and output"""
         if sudo:
             cmd = ['sudo'] + cmd
         if desc:
             print_info(f"{desc}...")
         try:
-            result = subprocess.run(cmd, capture_output=capture, text=True, timeout=600)
+            result = subprocess.run(cmd, capture_output=capture, text=True, timeout=600, cwd=cwd)
             return result.returncode, result.stdout if capture else "", result.stderr if capture else ""
         except subprocess.TimeoutExpired:
             return -1, "", "Timeout"
@@ -859,40 +860,33 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
 
     print_info(f"Found meshing-around at: {meshing_path}")
 
-    # Git pull
+    # Git pull (use cwd parameter instead of os.chdir for thread safety)
     print_info("Pulling latest changes...")
-    original_dir = os.getcwd()
-    try:
-        os.chdir(meshing_path)
+    git_cwd = str(meshing_path)
 
-        # Check for uncommitted changes
-        ret, stdout, _ = run_command(['git', 'status', '--porcelain'], capture=True)
-        if stdout.strip():
-            print_warning("Uncommitted changes detected:")
-            print(stdout)
-            if not get_yes_no("Continue with git pull anyway?", False):
-                os.chdir(original_dir)
-                return True, meshing_path
+    # Check for uncommitted changes
+    ret, stdout, _ = run_command(['git', 'status', '--porcelain'], capture=True, cwd=git_cwd)
+    if stdout.strip():
+        print_warning("Uncommitted changes detected:")
+        print(stdout)
+        if not get_yes_no("Continue with git pull anyway?", False):
+            return True, meshing_path
 
-        # Git pull
-        ret, stdout, stderr = run_command(['git', 'pull', 'origin', 'main'], capture=True)
-        if ret != 0:
-            # Try master branch
-            ret, stdout, stderr = run_command(['git', 'pull', 'origin', 'master'], capture=True)
+    # Git pull
+    ret, stdout, stderr = run_command(['git', 'pull', 'origin', 'main'], capture=True, cwd=git_cwd)
+    if ret != 0:
+        # Try master branch
+        ret, stdout, stderr = run_command(['git', 'pull', 'origin', 'master'], capture=True, cwd=git_cwd)
 
-        if ret == 0:
-            if 'Already up to date' in stdout:
-                print_success("Already up to date")
-            else:
-                print_success("Updated to latest version")
-                print(stdout)
+    if ret == 0:
+        if 'Already up to date' in stdout:
+            print_success("Already up to date")
         else:
-            print_error(f"Git pull failed: {stderr}")
-            os.chdir(original_dir)
-            return False, meshing_path
-
-    finally:
-        os.chdir(original_dir)
+            print_success("Updated to latest version")
+            print(stdout)
+    else:
+        print_error(f"Git pull failed: {stderr}")
+        return False, meshing_path
 
     return True, meshing_path
 

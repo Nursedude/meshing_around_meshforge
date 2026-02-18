@@ -228,6 +228,11 @@ configure_interface() {
     if [ "$INTERFACE_MODE" = "web" ] || [ "$INTERFACE_MODE" = "both" ]; then
         read -p "Enter web port [8080]: " WEB_PORT
         WEB_PORT=${WEB_PORT:-8080}
+        # Validate port is a number in range 1-65535
+        if ! [[ "$WEB_PORT" =~ ^[0-9]+$ ]] || [ "$WEB_PORT" -lt 1 ] || [ "$WEB_PORT" -gt 65535 ]; then
+            log_warn "Invalid port '$WEB_PORT', using default 8080"
+            WEB_PORT=8080
+        fi
     fi
 
     log_ok "Interface mode: $INTERFACE_MODE"
@@ -381,7 +386,7 @@ setup_systemd_service() {
         # Create service file - use envsubst for safe variable substitution
         SERVICE_USER="$USER"
         SERVICE_WORKDIR="$SCRIPT_DIR"
-        SERVICE_EXEC="$SCRIPT_DIR/.venv/bin/python $SCRIPT_DIR/mesh_client.py"
+        SERVICE_EXEC="\"$SCRIPT_DIR/.venv/bin/python\" \"$SCRIPT_DIR/mesh_client.py\""
         sudo tee "$SERVICE_FILE" > /dev/null <<SVCEOF
 [Unit]
 Description=Meshing-Around Mesh Client

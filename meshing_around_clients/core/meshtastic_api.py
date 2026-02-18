@@ -6,7 +6,6 @@ Provides interface to communicate with Meshtastic devices.
 import logging
 import queue
 import threading
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -78,6 +77,7 @@ class MeshtasticAPI:
             "on_telemetry": [],
         }
         self._running = False
+        self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
@@ -151,13 +151,61 @@ class MeshtasticAPI:
 
         def auto_save_loop():
             interval = self.config.storage.auto_save_interval
-            while self._running:
-                time.sleep(interval)
-                if self._running and self.connection_info.connected:
+            while not self._stop_event.is_set():
+                # Wait for interval or until stop is signaled
+                if self._stop_event.wait(timeout=interval):
+                    break  # Stop event was set
+                if self.connection_info.connected:
                     self._save_state()
 
         self._auto_save_thread = threading.Thread(target=auto_save_loop, daemon=True)
         self._auto_save_thread.start()
+
+    def _create_interface(self, interface_type: str):
+        """Create and return the appropriate Meshtastic interface."""
+        if interface_type == "serial":
+            port = self.config.interface.port if self.config.interface.port else None
+            self.connection_info.device_path = port or "auto"
+            return meshtastic.serial_interface.SerialInterface(port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+        elif interface_type == "tcp":
+            hostname = self.config.interface.hostname
+            if not hostname:
+                raise ValueError("TCP hostname not configured")
+            self.connection_info.device_path = hostname
+            return meshtastic.tcp_interface.TCPInterface(hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+        elif interface_type == "http":
+            base_url = self.config.interface.http_url
+            if not base_url:
+                hostname = self.config.interface.hostname
+                if not hostname:
+                    raise ValueError("HTTP URL not configured (set http_url or hostname)")
+                base_url = f"http://{hostname}"
+            self.connection_info.device_path = base_url
+            return meshtastic.http_interface.HTTPInterface(base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+        elif interface_type == "ble":
+            mac = self.config.interface.mac
+            if not mac:
+                raise ValueError("BLE MAC address not configured")
+            self.connection_info.device_path = mac
+            return meshtastic.ble_interface.BLEInterface(mac)
+        else:
+            raise ValueError(f"Unknown interface type: {interface_type}")
+
+    def _start_worker_thread(self) -> None:
+        """Stop any previous worker thread and start a fresh one."""
+        if self._worker_thread and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=5)
+        # Drain stale messages from previous session
+        while not self._message_queue.empty():
+            try:
+                self._message_queue.get_nowait()
+            except queue.Empty:
+                break
+
+        self._stop_event.clear()
+        self._running = True
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker_thread.start()
 
     def connect(self) -> bool:
         """Connect to the Meshtastic device."""
@@ -172,45 +220,7 @@ class MeshtasticAPI:
             pub.subscribe(self._on_disconnect_event, "meshtastic.connection.lost")
 
             interface_type = self.config.interface.type
-
-            if interface_type == "serial":
-                port = self.config.interface.port if self.config.interface.port else None
-                self.interface = meshtastic.serial_interface.SerialInterface(
-                    port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-                )
-                self.connection_info.device_path = port or "auto"
-            elif interface_type == "tcp":
-                hostname = self.config.interface.hostname
-                if not hostname:
-                    self.connection_info.error_message = "TCP hostname not configured"
-                    return False
-                self.interface = meshtastic.tcp_interface.TCPInterface(
-                    hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-                )
-                self.connection_info.device_path = hostname
-            elif interface_type == "http":
-                base_url = self.config.interface.http_url
-                if not base_url:
-                    # Fall back to hostname with http:// prefix
-                    hostname = self.config.interface.hostname
-                    if not hostname:
-                        self.connection_info.error_message = "HTTP URL not configured (set http_url or hostname)"
-                        return False
-                    base_url = f"http://{hostname}"
-                self.interface = meshtastic.http_interface.HTTPInterface(
-                    base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-                )
-                self.connection_info.device_path = base_url
-            elif interface_type == "ble":
-                mac = self.config.interface.mac
-                if not mac:
-                    self.connection_info.error_message = "BLE MAC address not configured"
-                    return False
-                self.interface = meshtastic.ble_interface.BLEInterface(mac)
-                self.connection_info.device_path = mac
-            else:
-                self.connection_info.error_message = f"Unknown interface type: {interface_type}"
-                return False
+            self.interface = self._create_interface(interface_type)
 
             self.connection_info.interface_type = interface_type
             self.connection_info.connected = True
@@ -225,10 +235,7 @@ class MeshtasticAPI:
             # Load initial node database
             self._load_node_database()
 
-            # Start worker thread
-            self._running = True
-            self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
-            self._worker_thread.start()
+            self._start_worker_thread()
 
             # Start auto-save thread
             self._start_auto_save()
@@ -254,6 +261,7 @@ class MeshtasticAPI:
             self._save_state()
 
         self._running = False
+        self._stop_event.set()
 
         # Wait for worker threads to finish (with timeout to avoid hangs)
         if self._worker_thread and self._worker_thread.is_alive():
@@ -314,6 +322,7 @@ class MeshtasticAPI:
             try:
                 role = NodeRole[role_str.upper()]
             except (KeyError, AttributeError):
+                logger.debug("Unknown node role '%s', defaulting to CLIENT", role_str)
                 role = NodeRole.CLIENT
 
             # Determine if favorite/admin

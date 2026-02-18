@@ -152,6 +152,8 @@ class LinkQuality:
         self.rssi = rssi
         self.hop_count = hop_count
         self.packet_count += 1
+        # Clamp SNR to valid range to prevent quality_percent going out of bounds
+        snr = max(VALID_SNR_RANGE[0], min(VALID_SNR_RANGE[1], snr))
         # Exponential moving average for SNR
         alpha = 0.3  # Weight for new values
         if self.packet_count == 1:
@@ -245,7 +247,12 @@ class Position:
     precision_bits: int = 0
 
     def is_valid(self) -> bool:
-        """Check if position has valid coordinates."""
+        """Check if position has valid coordinates.
+
+        Note: (0.0, 0.0) is treated as invalid because Meshtastic uses it
+        as the default/unset position marker. This is standard Meshtastic
+        convention, not a geographic exclusion of Null Island.
+        """
         return (
             (self.latitude != 0.0 or self.longitude != 0.0)
             and -90 <= self.latitude <= 90
@@ -379,7 +386,7 @@ class Node:
             return self.long_name
         if self.short_name:
             return self.short_name
-        node_suffix = self.node_id.lstrip("!")[-4:]
+        node_suffix = (self.node_id.lstrip("!") or "unknown")[-4:]
         return f"!{node_suffix}"
 
     @property

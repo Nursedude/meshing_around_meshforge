@@ -14,8 +14,10 @@ Supports:
 """
 
 import atexit
+import hashlib
 import json
 import logging
+import math
 import struct
 import threading
 import time
@@ -223,6 +225,8 @@ class MQTTMeshtasticClient:
             return None
         try:
             f = float(value)
+            if math.isnan(f) or math.isinf(f):
+                return None
             if min_val <= f <= max_val:
                 return f
         except (TypeError, ValueError):
@@ -488,8 +492,12 @@ class MQTTMeshtasticClient:
         for topic in topics:
             if topic not in seen:
                 seen.add(topic)
-                _ = self._client.subscribe(topic, qos=qos)
-                logger.info("Subscribed to: %s (qos=%d)", topic, qos)
+                sub_result = self._client.subscribe(topic, qos=qos)
+                # paho-mqtt returns (rc, mid) tuple; check rc if available
+                if isinstance(sub_result, tuple) and len(sub_result) >= 1 and sub_result[0] != 0:
+                    logger.warning("Subscribe failed for %s (rc=%d)", topic, sub_result[0])
+                else:
+                    logger.info("Subscribed to: %s (qos=%d)", topic, qos)
 
     def _on_message(self, client, userdata, msg):
         """Handle incoming MQTT message."""
@@ -583,11 +591,9 @@ class MQTTMeshtasticClient:
             # Generate a message ID for deduplication
             msg_id = data.get("id", "")
             if not msg_id:
-                # Generate from sender + timestamp + content hash
-                import hashlib
-
+                # Generate from sender + content hash for deduplication
                 content = json.dumps(data.get("payload", {}), sort_keys=True)
-                msg_id = hashlib.md5(f"{sender_id}{content}".encode()).hexdigest()[:16]
+                msg_id = hashlib.sha256(f"{sender_id}{content}".encode()).hexdigest()[:16]
 
             # Check for duplicate
             if self.network.is_duplicate_message(msg_id):
