@@ -262,27 +262,33 @@ import os
 
 config = configparser.ConfigParser()
 
-# Connection
-config['connection'] = {
+# Interface (canonical format — no legacy [connection] section)
+config['interface'] = {
     'type': os.environ.get('_CFG_CONN_TYPE', 'serial'),
-    'serial_port': 'auto',
-    'serial_baud': '115200',
-    'tcp_host': os.environ.get('_CFG_TCP_HOST', ''),
-    'tcp_port': '4403',
-    'mqtt_enabled': os.environ.get('_CFG_MQTT_ENABLED', 'false'),
-    'mqtt_broker': os.environ.get('_CFG_MQTT_BROKER', 'mqtt.meshtastic.org'),
-    'mqtt_port': '1883',
-    'mqtt_use_tls': 'false',
-    'mqtt_username': 'meshdev',
-    'mqtt_password': 'large4cats',
-    'mqtt_topic_root': os.environ.get('_CFG_MQTT_TOPIC', 'msh/US'),
-    'mqtt_channel': 'LongFast',
-    'mqtt_node_id': '',
-    'ble_address': '',
+    'port': '',
+    'baudrate': '115200',
+    'hostname': os.environ.get('_CFG_TCP_HOST', ''),
+    'http_url': '',
+    'mac': '',
     'auto_reconnect': 'true',
     'reconnect_delay': '5',
     'connection_timeout': '30',
-    'meshtastic_enabled': os.environ.get('_CFG_MESHTASTIC_ENABLED', 'false'),
+}
+
+# MQTT
+config['mqtt'] = {
+    'enabled': os.environ.get('_CFG_MQTT_ENABLED', 'false'),
+    'broker': os.environ.get('_CFG_MQTT_BROKER', 'mqtt.meshtastic.org'),
+    'port': '1883',
+    'use_tls': 'false',
+    'username': 'meshdev',
+    'password': 'large4cats',
+    'topic_root': os.environ.get('_CFG_MQTT_TOPIC', 'msh/US'),
+    'channel': 'LongFast',
+    'node_id': '',
+    'qos': '1',
+    'reconnect_delay': '5',
+    'max_reconnect_attempts': '10',
 }
 
 # Features

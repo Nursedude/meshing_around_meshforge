@@ -665,11 +665,11 @@ class MQTTMeshtasticClient:
         if node:
             sender_name = node.display_name
 
-        # Extract signal info for the message
-        snr = data.get("snr", data.get("rxSnr", 0.0))
-        rssi = data.get("rssi", data.get("rxRssi", 0))
-        hop_limit = data.get("hopLimit", 3)
-        hop_start = data.get("hopStart", 3)
+        # Extract signal info with validation (consistent with _handle_json_message)
+        snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE) or 0.0
+        rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE) or 0
+        hop_limit = self._safe_int(data.get("hopLimit"), 0, 15) or 3
+        hop_start = self._safe_int(data.get("hopStart"), 0, 15) or 3
         hop_count = max(0, hop_start - hop_limit)
 
         message = Message(
@@ -682,7 +682,7 @@ class MQTTMeshtasticClient:
             message_type=MessageType.TEXT,
             timestamp=datetime.now(timezone.utc),
             hop_count=hop_count,
-            snr=float(snr) if snr else 0.0,
+            snr=snr,
             rssi=int(rssi) if rssi else 0,
             is_incoming=True,
         )
