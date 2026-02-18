@@ -38,11 +38,13 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
+
     # Stubs so type annotations and base classes resolve without FastAPI installed.
     # These are only used for class definitions and type hints at module level;
     # actual runtime code paths are guarded by FASTAPI_AVAILABLE checks.
     class _Stub:  # noqa: E303
         pass
+
     uvicorn = None  # type: ignore[assignment]
     Depends = FastAPI = HTTPException = Request = WebSocket = WebSocketDisconnect = _Stub  # type: ignore[misc,assignment]
     HTMLResponse = JSONResponse = StaticFiles = Jinja2Templates = _Stub  # type: ignore[misc,assignment]

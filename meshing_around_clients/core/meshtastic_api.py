@@ -684,9 +684,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
 
         # Start background demo traffic
         self._stop_event.clear()
-        self._demo_thread = threading.Thread(
-            target=self._demo_traffic_loop, daemon=True, name="demo-traffic"
-        )
+        self._demo_thread = threading.Thread(target=self._demo_traffic_loop, daemon=True, name="demo-traffic")
         self._demo_thread.start()
         return True
 
@@ -741,15 +739,9 @@ class MockMeshtasticAPI(MeshtasticAPI):
             self._trigger_callbacks("on_message", message)
         else:
             # Telemetry drift: battery slowly drains, SNR fluctuates
-            node.telemetry.battery_level = max(
-                0, node.telemetry.battery_level + random.randint(-2, 1)
-            )
-            node.telemetry.snr = round(
-                node.telemetry.snr + random.uniform(-1.0, 1.0), 1
-            )
-            node.telemetry.channel_utilization = round(
-                max(0.0, min(100.0, random.uniform(5.0, 35.0))), 1
-            )
+            node.telemetry.battery_level = max(0, node.telemetry.battery_level + random.randint(-2, 1))
+            node.telemetry.snr = round(node.telemetry.snr + random.uniform(-1.0, 1.0), 1)
+            node.telemetry.channel_utilization = round(max(0.0, min(100.0, random.uniform(5.0, 35.0))), 1)
             node.telemetry.last_updated = now
             node.last_heard = now
             self._trigger_callbacks("on_telemetry", node)
