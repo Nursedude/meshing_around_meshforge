@@ -1242,12 +1242,18 @@ class MQTTMeshtasticClient:
         """Get alerts."""
         if unread_only:
             return self.network.unread_alerts
-        return self.network.alerts
+        return list(self.network.alerts)
 
     @property
     def connection_health(self) -> Dict[str, Any]:
         """Get connection health metrics."""
         now = datetime.now(timezone.utc)
+
+        # Snapshot lock-protected values
+        with self._stats_lock:
+            message_count = self._message_count
+            stats_copy = dict(self._stats)
+            reconnect_count = self._reconnect_count
 
         # Calculate uptime
         uptime_seconds = 0
@@ -1258,7 +1264,7 @@ class MQTTMeshtasticClient:
         # Calculate message rate (messages per minute)
         msg_rate = 0.0
         if uptime_seconds > 0:
-            msg_rate = (self._message_count / uptime_seconds) * 60
+            msg_rate = (message_count / uptime_seconds) * 60
 
         # Time since last message
         last_msg_ago = None
@@ -1277,16 +1283,12 @@ class MQTTMeshtasticClient:
         else:
             status = "healthy"
 
-        with self._stats_lock:
-            stats_copy = dict(self._stats)
-            reconnect_count = self._reconnect_count
-
         return {
             "status": status,
             "connected": connected,
             "broker": self.mqtt_config.broker,
             "uptime_seconds": int(uptime_seconds),
-            "message_count": self._message_count,
+            "message_count": message_count,
             "messages_per_minute": round(msg_rate, 2),
             "last_message_ago_seconds": int(last_msg_ago) if last_msg_ago else None,
             "reconnect_count": reconnect_count,

@@ -7,6 +7,7 @@ import logging
 import queue
 import random
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -84,6 +85,10 @@ class MeshtasticAPI:
         self._last_save_time: Optional[datetime] = None
         self._save_lock = threading.Lock()  # Guard against overlapping saves
 
+        # Alert deduplication: (node_id, alert_type) -> last alert time (monotonic)
+        self._alert_cooldowns: Dict[str, float] = {}
+        self._alert_cooldown_seconds = 300  # 5 minute cooldown per node per alert type
+
         # Load persisted state if enabled
         self._load_persisted_state()
 
@@ -104,6 +109,24 @@ class MeshtasticAPI:
                     callback(*args, **kwargs)
                 except (TypeError, ValueError, AttributeError) as e:
                     logger.warning("Callback error for %s (%s): %s", event, type(e).__name__, e)
+
+    def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
+        """Check if enough time has passed since the last alert of this type for this node.
+
+        Returns True if the alert should be suppressed (still in cooldown),
+        False if the alert should fire.
+        """
+        key = f"{node_id}:{alert_type}"
+        now = time.monotonic()
+        last_time = self._alert_cooldowns.get(key)
+        if last_time is not None and (now - last_time) < self._alert_cooldown_seconds:
+            return True  # Still in cooldown — suppress
+        self._alert_cooldowns[key] = now
+        # Prune stale cooldown entries to prevent unbounded growth
+        if len(self._alert_cooldowns) > 1000:
+            cutoff = now - (self._alert_cooldown_seconds * 2)
+            self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
+        return False  # Cooldown expired — allow alert
 
     # ==================== Persistence Methods ====================
 
@@ -397,9 +420,11 @@ class MeshtasticAPI:
 
             # Update sender node last heard
             sender_id = packet.get("fromId", "")
-            if sender_id and sender_id in self.network.nodes:
-                self.network.nodes[sender_id].last_heard = datetime.now(timezone.utc)
-                self.network.nodes[sender_id].is_online = True
+            if sender_id:
+                node = self.network.get_node(sender_id)
+                if node:
+                    node.last_heard = datetime.now(timezone.utc)
+                    node.is_online = True
 
             # Handle different packet types
             if portnum == "TEXT_MESSAGE_APP":
@@ -502,18 +527,19 @@ class MeshtasticAPI:
             node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_telemetry", sender_id, node.telemetry)
 
-            # Check battery alert
+            # Check battery alert (with per-node cooldown to prevent alert fatigue)
             if self.config.alerts.enabled and node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
-                alert = Alert(
-                    id=str(uuid.uuid4()),
-                    alert_type=AlertType.BATTERY,
-                    title="Low Battery Alert",
-                    message=f"{node.display_name} battery at {node.telemetry.battery_level}%",
-                    severity=2,
-                    source_node=sender_id,
-                )
-                self.network.add_alert(alert)
-                self._trigger_callbacks("on_alert", alert)
+                if not self._is_alert_cooled_down(sender_id, "battery"):
+                    alert = Alert(
+                        id=str(uuid.uuid4()),
+                        alert_type=AlertType.BATTERY,
+                        title="Low Battery Alert",
+                        message=f"{node.display_name} battery at {node.telemetry.battery_level}%",
+                        severity=2,
+                        source_node=sender_id,
+                    )
+                    self.network.add_alert(alert)
+                    self._trigger_callbacks("on_alert", alert)
 
     def _handle_nodeinfo(self, packet: dict) -> None:
         """Handle node info update."""
@@ -604,7 +630,7 @@ class MeshtasticAPI:
         """Get alerts."""
         if unread_only:
             return self.network.unread_alerts
-        return self.network.alerts
+        return list(self.network.alerts)
 
     def acknowledge_alert(self, alert_id: str) -> bool:
         """Acknowledge an alert."""
