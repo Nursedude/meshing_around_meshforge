@@ -46,7 +46,8 @@ except ImportError:
         pass
 
     uvicorn = None  # type: ignore[assignment]
-    Depends = FastAPI = HTTPException = Request = WebSocket = WebSocketDisconnect = _Stub  # type: ignore[misc,assignment]
+    Depends = FastAPI = HTTPException = _Stub  # type: ignore[misc,assignment]
+    Request = WebSocket = WebSocketDisconnect = _Stub  # type: ignore[misc,assignment]
     HTMLResponse = JSONResponse = StaticFiles = Jinja2Templates = _Stub  # type: ignore[misc,assignment]
     BaseModel = _Stub  # type: ignore[misc,assignment]
     # Only exit when run directly — allow imports to succeed so callers
