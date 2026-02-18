@@ -5,6 +5,7 @@ Provides interface to communicate with Meshtastic devices.
 
 import logging
 import queue
+import random
 import threading
 import uuid
 from dataclasses import dataclass
@@ -620,12 +621,32 @@ class MockMeshtasticAPI(MeshtasticAPI):
     Generates fake nodes and messages for development.
     """
 
+    # Sample chat lines for demo traffic
+    _DEMO_MESSAGES = [
+        "Anyone copy?",
+        "Signal check - how's my SNR?",
+        "Heading to the trailhead, back in 2h",
+        "Weather looks clear from up here",
+        "Battery swap complete, back online",
+        "Repeater seems solid today",
+        "New firmware is working great",
+        "Copy that, loud and clear",
+        "Roger, standing by",
+        "Testing range from the ridge",
+        "Good morning mesh!",
+        "Check your channel utilization",
+        "Solar panel keeping me at 100%",
+        "Lost GPS fix briefly, back now",
+        "Anyone else seeing packet loss?",
+    ]
+
     def __init__(self, config: Config):
         super().__init__(config)
         self._demo_mode = True
+        self._demo_thread: Optional[threading.Thread] = None
 
     def connect(self) -> bool:
-        """Simulate connection."""
+        """Simulate connection and start generating demo traffic."""
         self.connection_info.connected = True
         self.connection_info.interface_type = "mock"
         self.connection_info.device_path = "demo"
@@ -660,14 +681,70 @@ class MockMeshtasticAPI(MeshtasticAPI):
 
         self._running = True
         self._trigger_callbacks("on_connect", self.connection_info)
+
+        # Start background demo traffic
+        self._stop_event.clear()
+        self._demo_thread = threading.Thread(target=self._demo_traffic_loop, daemon=True, name="demo-traffic")
+        self._demo_thread.start()
         return True
 
     def disconnect(self) -> None:
-        """Simulate disconnect."""
+        """Stop demo traffic and simulate disconnect."""
         self._running = False
+        self._stop_event.set()
+        if self._demo_thread and self._demo_thread.is_alive():
+            self._demo_thread.join(timeout=2)
         self.connection_info.connected = False
         self.network.connection_status = "disconnected"
         self._trigger_callbacks("on_disconnect")
+
+    def _demo_traffic_loop(self) -> None:
+        """Background loop that simulates incoming mesh traffic."""
+        while not self._stop_event.is_set():
+            # Wait 5-15 seconds between events (realistic mesh cadence)
+            if self._stop_event.wait(timeout=random.uniform(5.0, 15.0)):
+                break
+            try:
+                self._generate_demo_event()
+            except Exception:
+                logger.debug("Demo traffic error", exc_info=True)
+
+    def _generate_demo_event(self) -> None:
+        """Generate a single random demo event (message or telemetry update)."""
+        nodes = list(self.network.nodes.values())
+        if not nodes:
+            return
+
+        node = random.choice(nodes)
+        now = datetime.now(timezone.utc)
+
+        # 60% chance: incoming text message, 40% chance: telemetry update
+        if random.random() < 0.6:
+            message = Message(
+                id=str(uuid.uuid4()),
+                sender_id=node.node_id,
+                sender_name=node.short_name or node.long_name,
+                recipient_id="^all",
+                channel=random.choice([0, 0, 0, 1]),  # mostly ch0
+                text=random.choice(self._DEMO_MESSAGES),
+                message_type=MessageType.TEXT,
+                timestamp=now,
+                hop_count=random.randint(0, 3),
+                snr=round(random.uniform(-5.0, 10.0), 1),
+                rssi=random.randint(-120, -60),
+                is_incoming=True,
+            )
+            self.network.add_message(message)
+            node.last_heard = now
+            self._trigger_callbacks("on_message", message)
+        else:
+            # Telemetry drift: battery slowly drains, SNR fluctuates
+            node.telemetry.battery_level = max(0, node.telemetry.battery_level + random.randint(-2, 1))
+            node.telemetry.snr = round(node.telemetry.snr + random.uniform(-1.0, 1.0), 1)
+            node.telemetry.channel_utilization = round(max(0.0, min(100.0, random.uniform(5.0, 35.0))), 1)
+            node.telemetry.last_updated = now
+            node.last_heard = now
+            self._trigger_callbacks("on_telemetry", node)
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
         """Simulate sending a message."""

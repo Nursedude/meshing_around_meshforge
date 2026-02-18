@@ -1079,6 +1079,9 @@ class MeshingAroundTUI:
             else:
                 self.connect()
 
+    # Meshtastic maximum text payload length (bytes)
+    _MAX_MESSAGE_BYTES = 228
+
     def _send_message_prompt(self) -> None:
         """Prompt user to send a message."""
         self.console.clear()
@@ -1087,6 +1090,15 @@ class MeshingAroundTUI:
         try:
             text = Prompt.ask("Message")
             if text:
+                msg_len = len(text.encode("utf-8"))
+                if msg_len > self._MAX_MESSAGE_BYTES:
+                    self.console.print(
+                        f"[red]Message too long: {msg_len}/{self._MAX_MESSAGE_BYTES} bytes. "
+                        f"Please shorten by {msg_len - self._MAX_MESSAGE_BYTES} bytes.[/red]"
+                    )
+                    time.sleep(2)
+                    return
+
                 channel = int(Prompt.ask("Channel", default="0"))
                 dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
 
