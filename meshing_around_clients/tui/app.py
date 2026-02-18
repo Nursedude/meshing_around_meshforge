@@ -215,8 +215,8 @@ class DashboardScreen(Screen):
                 batt_str = "-"
 
             # SNR
-            snr = node.telemetry.snr if node.telemetry else 0
-            snr_str = f"{snr:.1f}" if snr else "-"
+            snr = node.telemetry.snr if node.telemetry else None
+            snr_str = f"{snr:.1f}" if snr is not None else "-"
 
             table.add_row(
                 f"[{name_style}]{node.display_name[:15]}[/{name_style}]", node.time_since_heard, batt_str, snr_str
@@ -349,8 +349,8 @@ class NodesScreen(Screen):
                 batt_str = "-"
 
             # SNR
-            snr = node.telemetry.snr if node.telemetry else 0
-            snr_str = f"{snr:.1f}dB" if snr else "-"
+            snr = node.telemetry.snr if node.telemetry else None
+            snr_str = f"{snr:.1f}dB" if snr is not None else "-"
 
             row = [
                 f"[{status_style}]{idx}[/{status_style}]",
@@ -388,7 +388,10 @@ class NodesScreen(Screen):
 
     def handle_input(self, key: str) -> bool:
         if key == "j":
-            self.page += 1
+            # Clamp to last page so 'k' stays responsive after over-scrolling
+            total_nodes = len(self.app.api.network.nodes)
+            total_pages = max(1, (total_nodes + self.page_size - 1) // self.page_size)
+            self.page = min(self.page + 1, total_pages - 1)
             return True
         elif key == "k":
             self.page = max(0, self.page - 1)
@@ -431,7 +434,7 @@ class MessagesScreen(Screen):
             if len(msg.text) > 50:
                 text += "..."
 
-            snr_str = f"{msg.snr:.1f}" if msg.snr else "-"
+            snr_str = f"{msg.snr:.1f}" if msg.snr is not None else "-"
 
             table.add_row(msg.time_formatted, str(msg.channel), direction, from_str, to_str, text, snr_str)
 
