@@ -78,6 +78,7 @@ class MeshtasticAPI:
             "on_telemetry": [],
         }
         self._running = False
+        self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
@@ -151,9 +152,11 @@ class MeshtasticAPI:
 
         def auto_save_loop():
             interval = self.config.storage.auto_save_interval
-            while self._running:
-                time.sleep(interval)
-                if self._running and self.connection_info.connected:
+            while not self._stop_event.is_set():
+                # Wait for interval or until stop is signaled
+                if self._stop_event.wait(timeout=interval):
+                    break  # Stop event was set
+                if self.connection_info.connected:
                     self._save_state()
 
         self._auto_save_thread = threading.Thread(target=auto_save_loop, daemon=True)
@@ -225,7 +228,17 @@ class MeshtasticAPI:
             # Load initial node database
             self._load_node_database()
 
-            # Start worker thread
+            # Ensure any previous worker thread is stopped before starting a new one
+            if self._worker_thread and self._worker_thread.is_alive():
+                self._worker_thread.join(timeout=5)
+            # Drain stale messages from previous session
+            while not self._message_queue.empty():
+                try:
+                    self._message_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+            self._stop_event.clear()
             self._running = True
             self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
             self._worker_thread.start()
@@ -254,6 +267,7 @@ class MeshtasticAPI:
             self._save_state()
 
         self._running = False
+        self._stop_event.set()
 
         # Wait for worker threads to finish (with timeout to avoid hangs)
         if self._worker_thread and self._worker_thread.is_alive():
@@ -314,6 +328,7 @@ class MeshtasticAPI:
             try:
                 role = NodeRole[role_str.upper()]
             except (KeyError, AttributeError):
+                logger.debug("Unknown node role '%s', defaulting to CLIENT", role_str)
                 role = NodeRole.CLIENT
 
             # Determine if favorite/admin

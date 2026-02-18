@@ -138,7 +138,7 @@ class CSRFProtection:
         response.set_cookie(
             key=self.COOKIE_NAME,
             value=token,
-            httponly=False,  # Must be readable by JavaScript
+            httponly=False,  # Must be readable by JavaScript for double-submit cookie pattern
             samesite="strict",
             secure=False,  # Set True if using HTTPS
             max_age=3600,
@@ -249,11 +249,11 @@ class WebSocketManager:
                 await connection.send_json(message)
             except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError):
                 dead_connections.append(connection)
-            except Exception:
+            except Exception as e:
                 # Catch-all for unexpected transport errors to prevent
                 # zombie connections from accumulating
                 dead_connections.append(connection)
-                logger.debug("Unexpected error broadcasting to WebSocket client")
+                logger.debug("Unexpected %s broadcasting to WebSocket client", type(e).__name__)
         for dead in dead_connections:
             self.disconnect(dead)
 
@@ -326,6 +326,14 @@ class WebApplication:
             version=VERSION,
             lifespan=lifespan,
         )
+
+        # ---- Middleware: Security Headers ----
+        @app.middleware("http")
+        async def security_headers_middleware(request: Request, call_next):
+            response = await call_next(request)
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            return response
 
         # ---- Middleware: Request Body Size Limit ----
         @app.middleware("http")
