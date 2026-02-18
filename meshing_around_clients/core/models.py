@@ -290,7 +290,7 @@ class NodeTelemetry:
     @property
     def has_environment_data(self) -> bool:
         """Check if any environment sensor data is present."""
-        return any([self.temperature, self.humidity, self.pressure, self.gas_resistance])
+        return any(v is not None for v in [self.temperature, self.humidity, self.pressure, self.gas_resistance])
 
     @property
     def channel_utilization_status(self) -> str:

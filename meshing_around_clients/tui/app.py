@@ -237,9 +237,11 @@ class DashboardScreen(Screen):
             sender = msg.sender_name or msg.sender_id[-6:]
 
             if msg.is_incoming:
-                prefix = "[cyan]<<[/cyan]"
+                prefix_text = "<< "
+                prefix_style = "cyan"
             else:
-                prefix = "[green]>>[/green]"
+                prefix_text = ">> "
+                prefix_style = "green"
 
             # Check for emergency keywords
             is_emergency = any(kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords)
@@ -251,7 +253,7 @@ class DashboardScreen(Screen):
 
             line = Text()
             line.append(f"{time_str} ", style="dim")
-            line.append(f"{prefix} ")
+            line.append(prefix_text, style=prefix_style)
             line.append(f"{sender}: ", style="cyan")
             line.append(msg.text[:60], style=text_style)
             if len(msg.text) > 60:
@@ -1099,7 +1101,16 @@ class MeshingAroundTUI:
                     time.sleep(2)
                     return
 
-                channel = int(Prompt.ask("Channel", default="0"))
+                try:
+                    channel = int(Prompt.ask("Channel", default="0"))
+                except ValueError:
+                    self.console.print("[red]Invalid channel number[/red]")
+                    time.sleep(1)
+                    return
+                if channel < 0 or channel > 7:
+                    self.console.print("[red]Channel must be 0-7[/red]")
+                    time.sleep(1)
+                    return
                 dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
 
                 if self.api.send_message(text, dest, channel):

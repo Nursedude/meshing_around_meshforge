@@ -686,8 +686,13 @@ class WebApplication:
             # Validate message text
             if not request.text or not request.text.strip():
                 raise HTTPException(status_code=400, detail="Message text cannot be empty")
-            if len(request.text) > 228:  # Meshtastic max message length
-                raise HTTPException(status_code=400, detail="Message too long (max 228 chars)")
+            # Meshtastic limit is 228 bytes, not characters
+            msg_bytes = len(request.text.strip().encode("utf-8"))
+            if msg_bytes > 228:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Message too long ({msg_bytes}/228 bytes)",
+                )
             # Validate channel range
             if request.channel < 0 or request.channel > 7:
                 raise HTTPException(status_code=400, detail="Channel must be 0-7")
@@ -981,9 +986,10 @@ class WebApplication:
             if not text or not text.strip():
                 await websocket.send_json({"type": "message_status", "success": False, "error": "Empty message"})
                 return
-            if len(text) > 228:
+            msg_bytes = len(text.strip().encode("utf-8"))
+            if msg_bytes > 228:
                 await websocket.send_json(
-                    {"type": "message_status", "success": False, "error": "Message too long (max 228)"}
+                    {"type": "message_status", "success": False, "error": f"Message too long ({msg_bytes}/228 bytes)"}
                 )
                 return
             if not isinstance(channel, int) or channel < 0 or channel > 7:
