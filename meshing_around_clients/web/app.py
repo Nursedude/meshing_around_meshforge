@@ -297,6 +297,9 @@ class WebApplication:
         self.csrf = CSRFProtection()
         self.rate_limiter = RateLimiter()
 
+        # Track server start time for uptime reporting
+        self._start_time = time.monotonic()
+
         # Event loop reference for cross-thread async scheduling
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         # Buffer for coroutines scheduled before event loop is available
@@ -586,24 +589,50 @@ class WebApplication:
                 "demo_mode": self.demo_mode,
             }
 
+        @app.get("/health")
+        async def health():
+            """Health check endpoint for load balancers and monitoring."""
+            uptime = time.monotonic() - self._start_time
+            connected = self.api.is_connected
+            return JSONResponse(
+                status_code=200 if connected else 503,
+                content={
+                    "status": "healthy" if connected else "degraded",
+                    "connected": connected,
+                    "uptime_seconds": round(uptime, 1),
+                    "demo_mode": self.demo_mode,
+                },
+            )
+
         @app.get("/api/network")
         async def api_network():
             """Get full network state."""
             return self.api.network.to_dict()
 
         @app.get("/api/nodes")
-        async def api_nodes():
-            """Get all nodes."""
+        async def api_nodes(offset: int = 0, limit: int = 200):
+            """Get nodes with pagination.
+
+            Query parameters:
+                offset: Skip first N nodes (default 0)
+                limit: Max nodes to return (default 200)
+            """
+            all_nodes = self.api.get_nodes()
+            total = len(all_nodes)
+            online = len(self.api.network.online_nodes)
+            page = all_nodes[offset : offset + limit]
             nodes = []
-            for n in self.api.get_nodes():
+            for n in page:
                 try:
                     nodes.append(n.to_dict())
                 except (AttributeError, TypeError, ValueError) as e:
                     logger.warning("Failed to serialize node %s: %s", getattr(n, "node_id", "?"), e)
             return {
                 "nodes": nodes,
-                "total": len(self.api.network.nodes),
-                "online": len(self.api.network.online_nodes),
+                "total": total,
+                "online": online,
+                "offset": offset,
+                "limit": limit,
             }
 
         @app.get("/api/nodes/{node_id}")
@@ -618,20 +647,22 @@ class WebApplication:
         async def api_messages(
             channel: Optional[int] = None,
             limit: int = 100,
+            offset: int = 0,
             search: Optional[str] = None,
             sender: Optional[str] = None,
             since: Optional[str] = None,
         ):
-            """Get messages with optional search/filter.
+            """Get messages with optional search/filter and pagination.
 
             Query parameters:
                 channel: Filter by channel number (0-7)
                 limit: Max messages to return (default 100)
+                offset: Skip first N messages (default 0)
                 search: Full-text search in message text (case-insensitive)
                 sender: Filter by sender name or ID (case-insensitive substring)
                 since: ISO timestamp — only messages after this time
             """
-            messages = self.api.get_messages(channel=channel, limit=limit)
+            messages = self.api.get_messages(channel=channel, limit=limit + offset)
             serialized = []
 
             # Parse 'since' filter
@@ -678,7 +709,9 @@ class WebApplication:
 
                 serialized.append(d)
 
-            return {"messages": serialized, "total": len(serialized)}
+            # Apply offset pagination after filtering
+            paginated = serialized[offset:]
+            return {"messages": paginated, "total": len(serialized), "offset": offset, "limit": limit}
 
         @app.post("/api/messages/send", dependencies=[Depends(require_auth)])
         async def api_send_message(request: SendMessageRequest):
