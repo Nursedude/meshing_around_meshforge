@@ -314,7 +314,9 @@ class Config:
                 self.tui.refresh_rate = self._parser.getfloat("tui", "refresh_rate", fallback=1.0)
                 self.tui.color_scheme = self._parser.get("tui", "color_scheme", fallback="default")
                 self.tui.show_timestamps = self._parser.getboolean("tui", "show_timestamps", fallback=True)
-                self.tui.message_history = self._parser.getint("tui", "message_history", fallback=500)
+                self.tui.message_history = max(
+                    10, min(self._parser.getint("tui", "message_history", fallback=500), 10000)
+                )
                 self.tui.alert_sound = self._parser.getboolean("tui", "alert_sound", fallback=True)
 
             # MQTT
@@ -330,7 +332,8 @@ class Config:
                 self.mqtt.node_id = self._parser.get("mqtt", "node_id", fallback="")
                 self.mqtt.client_id = self._parser.get("mqtt", "client_id", fallback="")
                 self.mqtt.encryption_key = self._parser.get("mqtt", "encryption_key", fallback="")
-                self.mqtt.qos = self._parser.getint("mqtt", "qos", fallback=1)
+                raw_qos = self._parser.getint("mqtt", "qos", fallback=1)
+                self.mqtt.qos = raw_qos if raw_qos in (0, 1, 2) else 1
                 self.mqtt.reconnect_delay = self._parser.getint("mqtt", "reconnect_delay", fallback=5)
                 self.mqtt.max_reconnect_attempts = self._parser.getint("mqtt", "max_reconnect_attempts", fallback=10)
 

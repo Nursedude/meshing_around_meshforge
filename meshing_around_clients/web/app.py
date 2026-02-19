@@ -204,7 +204,7 @@ class RateLimiter:
         headers = {
             "X-RateLimit-Limit": str(limit),
             "X-RateLimit-Remaining": str(remaining),
-            "X-RateLimit-Reset": str(int(time.monotonic() + self._window)),
+            "X-RateLimit-Reset": str(int(time.time() + self._window)),
         }
 
         if current >= limit:
