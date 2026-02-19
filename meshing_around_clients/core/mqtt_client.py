@@ -668,8 +668,8 @@ class MQTTMeshtasticClient:
             sender_name = node.display_name
 
         # Extract signal info with validation (consistent with _handle_json_message)
-        snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE) or 0.0
-        rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE) or 0
+        snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
+        rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
         hop_limit = self._safe_int(data.get("hopLimit"), 0, 15) or 3
         hop_start = self._safe_int(data.get("hopStart"), 0, 15) or 3
         hop_count = max(0, hop_start - hop_limit)
@@ -684,8 +684,8 @@ class MQTTMeshtasticClient:
             message_type=MessageType.TEXT,
             timestamp=datetime.now(timezone.utc),
             hop_count=hop_count,
-            snr=snr,
-            rssi=int(rssi) if rssi else 0,
+            snr=float(snr) if snr is not None else 0.0,
+            rssi=int(rssi) if rssi is not None else 0,
             is_incoming=True,
         )
 
@@ -1096,8 +1096,8 @@ class MQTTMeshtasticClient:
                     neighbor_node_id = node_num_to_id(neighbor_id) if isinstance(neighbor_id, int) else str(neighbor_id)
                     self.network.update_neighbor_relationship(sender_id, neighbor_node_id)
                     # Update link quality between sender and neighbor
-                    neighbor_snr = neighbor.get("snr", 0)
-                    if neighbor_snr and self.network.get_node(neighbor_node_id):
+                    neighbor_snr = neighbor.get("snr")
+                    if neighbor_snr is not None and self.network.get_node(neighbor_node_id):
                         self.network.update_link_quality(neighbor_node_id, float(neighbor_snr), 0, 1)
 
     def _handle_relay_node(self, relay_node: int, sender_id: str) -> None:

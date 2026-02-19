@@ -301,7 +301,8 @@ if not MODULES_AVAILABLE:
             console_enabled = False
             if cmdline_path.exists():
                 with open(cmdline_path, "r") as f:
-                    console_enabled = "console=serial" in f.read() or "console=ttyAMA" in f.read()
+                    cmdline = f.read()
+                    console_enabled = "console=serial" in cmdline or "console=ttyAMA" in cmdline
             return uart_enabled, console_enabled
         except (FileNotFoundError, PermissionError, IOError):
             return False, False
