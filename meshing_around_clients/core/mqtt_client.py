@@ -88,6 +88,13 @@ except (ImportError, OSError, Exception) as _crypto_exc:
     )
 
 
+# Connection health thresholds (seconds)
+HEALTH_STALE_TIMEOUT = 300  # 5 minutes without messages = stale
+HEALTH_SLOW_TIMEOUT = 60  # 1 minute without messages = slow
+# Alert cooldown pruning
+MAX_ALERT_COOLDOWNS = 1000  # Prune oldest entries when exceeded
+
+
 @dataclass
 class MQTTConfig:
     """MQTT connection configuration."""
@@ -265,7 +272,7 @@ class MQTTMeshtasticClient:
                 return True  # Still in cooldown — suppress
             self._alert_cooldowns[key] = now
             # Prune stale cooldown entries (older than 2x cooldown) to prevent unbounded growth
-            if len(self._alert_cooldowns) > 1000:
+            if len(self._alert_cooldowns) > MAX_ALERT_COOLDOWNS:
                 cutoff = now - (self._alert_cooldown_seconds * 2)
                 self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
             return False  # Cooldown expired — allow alert
@@ -1278,9 +1285,9 @@ class MQTTMeshtasticClient:
             status = "disconnected"
         elif last_msg_ago is None:
             status = "connected_no_traffic"
-        elif last_msg_ago > 300:  # 5 minutes
+        elif last_msg_ago > HEALTH_STALE_TIMEOUT:
             status = "stale"
-        elif last_msg_ago > 60:
+        elif last_msg_ago > HEALTH_SLOW_TIMEOUT:
             status = "slow"
         else:
             status = "healthy"
