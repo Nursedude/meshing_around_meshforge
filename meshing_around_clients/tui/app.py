@@ -849,6 +849,7 @@ class MeshingAroundTUI:
 
         # State
         self._running = False
+        self._interactive = False  # True when run_interactive() has input handling
         self._last_refresh = datetime.now()
 
     def _get_header(self) -> Panel:
@@ -865,6 +866,13 @@ class MeshingAroundTUI:
     def _get_footer(self) -> Panel:
         """Create the application footer with active screen highlighted."""
         shortcuts = Text()
+
+        if not self._interactive:
+            # Display-only mode — only Ctrl+C works
+            shortcuts.append("Display-only mode ", style="dim")
+            shortcuts.append("[Ctrl+C]", style="red bold")
+            shortcuts.append(" Exit", style="dim")
+            return Panel(Align.center(shortcuts), box=box.SIMPLE, border_style="dim")
 
         # Map screen keys to names and their screen identifiers
         nav_items = [
@@ -937,7 +945,12 @@ class MeshingAroundTUI:
         self.api.disconnect()
 
     def run(self) -> None:
-        """Run the TUI application."""
+        """Run TUI in display-only mode (no keyboard input).
+
+        This is the fallback when run_interactive() fails (e.g. termios
+        unavailable on Windows, or stdin is not a terminal). Shows a
+        live-updating dashboard; exit with Ctrl+C.
+        """
         self.console.clear()
 
         # Show startup banner
@@ -1013,11 +1026,12 @@ class MeshingAroundTUI:
             self.api.connect()
 
         self._running = True
+        self._interactive = True
 
-        # Save terminal settings
-        old_settings = termios.tcgetattr(sys.stdin)
-
+        # Save terminal settings (guard: tcgetattr can raise OSError)
+        old_settings = None
         try:
+            old_settings = termios.tcgetattr(sys.stdin)
             # Set terminal to raw mode
             tty.setcbreak(sys.stdin.fileno())
 
@@ -1041,8 +1055,9 @@ class MeshingAroundTUI:
         except OSError as e:
             self.console.print(f"[red]I/O Error: {e}[/red]")
         finally:
-            # Restore terminal settings
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            # Restore terminal settings if we saved them successfully
+            if old_settings is not None:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
             self._running = False
             self.disconnect()
             self.console.clear()
