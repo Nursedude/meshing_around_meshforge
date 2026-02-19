@@ -238,13 +238,14 @@ class MeshtasticAPI:
             return False
 
         try:
-            # Subscribe to meshtastic events
+            interface_type = self.config.interface.type
+            self.interface = self._create_interface(interface_type)
+
+            # Subscribe to meshtastic events AFTER interface creation
+            # to prevent leaked subscriptions if creation fails
             pub.subscribe(self._on_receive, "meshtastic.receive")
             pub.subscribe(self._on_connection, "meshtastic.connection.established")
             pub.subscribe(self._on_disconnect_event, "meshtastic.connection.lost")
-
-            interface_type = self.config.interface.type
-            self.interface = self._create_interface(interface_type)
 
             self.connection_info.interface_type = interface_type
             self.connection_info.connected = True

@@ -915,33 +915,39 @@ class WebApplication:
             """WebSocket endpoint for real-time updates."""
             # Authenticate before accepting the connection
             if self.config.web.enable_auth:
-                api_key = websocket.query_params.get("api_key")
-                auth_ok = False
-                if self.config.web.api_key and api_key:
-                    auth_ok = hmac.compare_digest(api_key, self.config.web.api_key)
-                if not auth_ok:
-                    # Check Authorization header (some WS clients support it)
-                    auth_header = websocket.headers.get("authorization", "")
-                    if auth_header.startswith("Basic "):
-                        import base64
+                # If auth enabled but no credentials configured, warn and allow
+                if not self.config.web.api_key and not self.config.web.password_hash:
+                    logger.warning(
+                        "Auth enabled but no api_key or password_hash configured — allowing WebSocket connection"
+                    )
+                else:
+                    api_key = websocket.query_params.get("api_key")
+                    auth_ok = False
+                    if self.config.web.api_key and api_key:
+                        auth_ok = hmac.compare_digest(api_key, self.config.web.api_key)
+                    if not auth_ok:
+                        # Check Authorization header (some WS clients support it)
+                        auth_header = websocket.headers.get("authorization", "")
+                        if auth_header.startswith("Basic "):
+                            import base64
 
-                        try:
-                            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-                            username, password = decoded.split(":", 1)
-                            pw_hash = hashlib.sha256(password.encode()).hexdigest()
-                            if (
-                                hmac.compare_digest(username, self.config.web.username)
-                                and self.config.web.password_hash
-                                and hmac.compare_digest(pw_hash, self.config.web.password_hash)
-                            ):
-                                auth_ok = True
-                        except (ValueError, UnicodeDecodeError):
-                            pass
-                if not auth_ok:
-                    client_host = websocket.client.host if websocket.client else "unknown"
-                    logger.info("Authentication failed for WebSocket from %s", client_host)
-                    await websocket.close(code=1008, reason="Unauthorized")
-                    return
+                            try:
+                                decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                                username, password = decoded.split(":", 1)
+                                pw_hash = hashlib.sha256(password.encode()).hexdigest()
+                                if (
+                                    hmac.compare_digest(username, self.config.web.username)
+                                    and self.config.web.password_hash
+                                    and hmac.compare_digest(pw_hash, self.config.web.password_hash)
+                                ):
+                                    auth_ok = True
+                            except (ValueError, UnicodeDecodeError):
+                                pass
+                    if not auth_ok:
+                        client_host = websocket.client.host if websocket.client else "unknown"
+                        logger.info("Authentication failed for WebSocket from %s", client_host)
+                        await websocket.close(code=1008, reason="Unauthorized")
+                        return
 
             accepted = await self.ws_manager.connect(websocket)
             if not accepted:
@@ -952,8 +958,8 @@ class WebApplication:
 
                 while True:
                     try:
-                        # Use timeout to detect dead connections
-                        data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_RECEIVE_TIMEOUT)
+                        # Use heartbeat interval as timeout for proactive liveness checks
+                        data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_HEARTBEAT_INTERVAL)
                         try:
                             msg = json.loads(data)
                             await self._handle_ws_message(websocket, msg)
