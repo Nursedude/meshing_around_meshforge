@@ -18,6 +18,14 @@ from typing import Any, Optional
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+from meshing_around_clients.tui.helpers import (  # noqa: E402
+    HEALTH_STATUS_COLORS,
+    SEVERITY_COLORS,
+    SEVERITY_ICONS,
+    format_battery,
+    format_snr,
+)
+
 # Check for Rich library - do NOT auto-install (PEP 668 compliance)
 try:
     from rich import box
@@ -127,15 +135,7 @@ class DashboardScreen(Screen):
         health = network.mesh_health
         health_status = health.get("status", "unknown")
         health_score = health.get("score", 0)
-        health_colors = {
-            "excellent": "green bold",
-            "good": "green",
-            "fair": "yellow",
-            "poor": "orange1",
-            "critical": "red bold",
-            "unknown": "dim",
-        }
-        health_style = health_colors.get(health_status, "white")
+        health_style = HEALTH_STATUS_COLORS.get(health_status, "white")
 
         # Congestion indicator from avg channel utilization
         avg_util = health.get("avg_channel_utilization", 0)
@@ -203,20 +203,12 @@ class DashboardScreen(Screen):
                 name_style = "white"
 
             # Battery indicator
-            if node.telemetry and node.telemetry.battery_level > 0:
-                batt = node.telemetry.battery_level
-                if batt > 50:
-                    batt_str = f"[green]{batt}%[/green]"
-                elif batt > 20:
-                    batt_str = f"[yellow]{batt}%[/yellow]"
-                else:
-                    batt_str = f"[red]{batt}%[/red]"
-            else:
-                batt_str = "-"
+            batt_level = node.telemetry.battery_level if node.telemetry else None
+            batt_str = format_battery(batt_level)
 
             # SNR
             snr = node.telemetry.snr if node.telemetry else None
-            snr_str = f"{snr:.1f}" if snr is not None else "-"
+            snr_str = format_snr(snr)
 
             table.add_row(
                 f"[{name_style}]{node.display_name[:15]}[/{name_style}]", node.time_since_heard, batt_str, snr_str
@@ -272,9 +264,8 @@ class DashboardScreen(Screen):
 
         content = []
         for alert in reversed(alerts):
-            style = {1: "blue", 2: "yellow", 3: "orange1", 4: "red bold"}.get(alert.severity, "white")
-
-            icon = {1: "i", 2: "!", 3: "!!", 4: "!!!"}.get(alert.severity, "*")
+            style = SEVERITY_COLORS.get(alert.severity, "white")
+            icon = SEVERITY_ICONS.get(alert.severity, "*")
 
             line = Text()
             line.append(f"[{icon}] ", style=style)
@@ -337,20 +328,12 @@ class NodesScreen(Screen):
                 status_style = "red"
 
             # Battery
-            if node.telemetry and node.telemetry.battery_level > 0:
-                batt = node.telemetry.battery_level
-                if batt > 50:
-                    batt_str = f"[green]{batt}%[/green]"
-                elif batt > 20:
-                    batt_str = f"[yellow]{batt}%[/yellow]"
-                else:
-                    batt_str = f"[red]{batt}%[/red]"
-            else:
-                batt_str = "-"
+            batt_level = node.telemetry.battery_level if node.telemetry else None
+            batt_str = format_battery(batt_level)
 
             # SNR
             snr = node.telemetry.snr if node.telemetry else None
-            snr_str = f"{snr:.1f}dB" if snr is not None else "-"
+            snr_str = format_snr(snr, unit=True)
 
             row = [
                 f"[{status_style}]{idx}[/{status_style}]",
@@ -434,7 +417,7 @@ class MessagesScreen(Screen):
             if len(msg.text) > 50:
                 text += "..."
 
-            snr_str = f"{msg.snr:.1f}" if msg.snr is not None else "-"
+            snr_str = format_snr(msg.snr)
 
             table.add_row(msg.time_formatted, str(msg.channel), direction, from_str, to_str, text, snr_str)
 
@@ -481,10 +464,8 @@ class AlertsScreen(Screen):
         table.add_column("Ack", justify="center", width=4)
 
         for alert in reversed(alerts):
-            severity_colors = {1: "blue", 2: "yellow", 3: "orange1", 4: "red"}
-            sev_color = severity_colors.get(alert.severity, "white")
-            sev_icons = {1: "i", 2: "!", 3: "!!", 4: "!!!"}
-            sev_icon = sev_icons.get(alert.severity, "*")
+            sev_color = SEVERITY_COLORS.get(alert.severity, "white")
+            sev_icon = SEVERITY_ICONS.get(alert.severity, "*")
 
             ack = "[green]Yes[/green]" if alert.acknowledged else "[red]No[/red]"
 
@@ -577,15 +558,7 @@ class TopologyScreen(Screen):
         health = self.app.api.network.mesh_health
 
         # Status color mapping
-        status_colors = {
-            "excellent": "green bold",
-            "good": "green",
-            "fair": "yellow",
-            "poor": "orange1",
-            "critical": "red bold",
-            "unknown": "dim",
-        }
-        status_style = status_colors.get(health["status"], "white")
+        status_style = HEALTH_STATUS_COLORS.get(health["status"], "white")
 
         # Create health bar visualization
         score = health.get("score", 0)
@@ -701,7 +674,6 @@ class TopologyScreen(Screen):
             hop_style = "green" if hop_count <= 1 else "yellow" if hop_count <= 3 else "orange1"
 
             avg_snr = route.avg_snr
-            snr_style = "green" if avg_snr > 0 else "yellow" if avg_snr > -10 else "red"
 
             via = ""
             if route.hops:
@@ -711,7 +683,7 @@ class TopologyScreen(Screen):
                     via += f" (+{len(route.hops)-1})"
 
             table.add_row(
-                dest_name, f"[{hop_style}]{hop_count}[/{hop_style}]", f"[{snr_style}]{avg_snr:.1f}[/{snr_style}]", via
+                dest_name, f"[{hop_style}]{hop_count}[/{hop_style}]", format_snr(avg_snr, styled=True), via
             )
 
         if not routes:
