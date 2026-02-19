@@ -146,7 +146,7 @@ CORE_DEPS = [
 OPTIONAL_DEPS = {
     "web": ["fastapi", "uvicorn", "jinja2", "python-multipart"],
     "mqtt": ["paho-mqtt"],
-    "meshtastic": ["meshtastic", "pypubsub"],
+    "meshtastic": ["meshtastic", "pypubsub", "pyopenssl>=25.3.0", "cryptography>=45.0.7,<47"],
     "ble": ["bleak"],
 }
 
@@ -156,13 +156,18 @@ _IMPORT_NAME_MAP = {
     "paho-mqtt": "paho.mqtt.client",
     "python-multipart": "multipart",
     "pypubsub": "pubsub",
+    "pyopenssl": "OpenSSL",
 }
 
 
 def check_dependency(package: str) -> bool:
     """Check if a Python package is installed."""
     try:
-        import_name = _IMPORT_NAME_MAP.get(package, package.replace("-", "_").split("[")[0])
+        # Strip version specifiers (>=, <=, etc.) and extras ([...]) from package name
+        base_name = package
+        for sep in ['>=', '<=', '!=', '~=', '==', '>', '<', '[']:
+            base_name = base_name.split(sep)[0]
+        import_name = _IMPORT_NAME_MAP.get(base_name, base_name.replace("-", "_"))
         __import__(import_name)
         return True
     except ImportError:

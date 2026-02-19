@@ -151,6 +151,10 @@ install_python_deps() {
         pip install meshtastic pypubsub -q
         log_ok "Installed: meshtastic (Radio support)"
     fi
+
+    # Cryptography / SSL (pin to resolve pyopenssl conflict)
+    pip install 'pyopenssl>=25.3.0' 'cryptography>=45.0.7,<47' -q
+    log_ok "Installed: cryptography (SSL/encryption)"
 }
 
 configure_connection() {
