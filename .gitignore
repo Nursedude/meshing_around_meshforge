@@ -37,6 +37,14 @@ mesh_client.ini
 client_config.ini
 *.local.ini
 
+# Secrets and credentials
+.env
+.env.*
+credentials*.json
+secrets*.json
+*.key
+*.pem
+
 # Logs
 logs/
 *.log

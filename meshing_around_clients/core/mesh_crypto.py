@@ -100,7 +100,9 @@ class MeshCrypto:
             encryption_key: Base64-encoded encryption key, or empty for default
         """
         self._key: bytes = DEFAULT_CHANNEL_KEY
-        self._derived_key: Optional[bytes] = None
+        # Always derive from default key so decrypt works out-of-the-box
+        # for standard Meshtastic traffic. set_key("none") clears this.
+        self._derived_key: Optional[bytes] = self._derive_key(DEFAULT_CHANNEL_KEY)
 
         if encryption_key:
             self.set_key(encryption_key)

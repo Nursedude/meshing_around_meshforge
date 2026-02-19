@@ -204,7 +204,7 @@ class RateLimiter:
         headers = {
             "X-RateLimit-Limit": str(limit),
             "X-RateLimit-Remaining": str(remaining),
-            "X-RateLimit-Reset": str(int(time.monotonic() + self._window)),
+            "X-RateLimit-Reset": str(int(time.time() + self._window)),
         }
 
         if current >= limit:
@@ -296,6 +296,9 @@ class WebApplication:
         # Security: CSRF protection and rate limiting
         self.csrf = CSRFProtection()
         self.rate_limiter = RateLimiter()
+
+        # Track server start time for uptime reporting
+        self._start_time = time.monotonic()
 
         # Event loop reference for cross-thread async scheduling
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -586,24 +589,50 @@ class WebApplication:
                 "demo_mode": self.demo_mode,
             }
 
+        @app.get("/health")
+        async def health():
+            """Health check endpoint for load balancers and monitoring."""
+            uptime = time.monotonic() - self._start_time
+            connected = self.api.is_connected
+            return JSONResponse(
+                status_code=200 if connected else 503,
+                content={
+                    "status": "healthy" if connected else "degraded",
+                    "connected": connected,
+                    "uptime_seconds": round(uptime, 1),
+                    "demo_mode": self.demo_mode,
+                },
+            )
+
         @app.get("/api/network")
         async def api_network():
             """Get full network state."""
             return self.api.network.to_dict()
 
         @app.get("/api/nodes")
-        async def api_nodes():
-            """Get all nodes."""
+        async def api_nodes(offset: int = 0, limit: int = 200):
+            """Get nodes with pagination.
+
+            Query parameters:
+                offset: Skip first N nodes (default 0)
+                limit: Max nodes to return (default 200)
+            """
+            all_nodes = self.api.get_nodes()
+            total = len(all_nodes)
+            online = len(self.api.network.online_nodes)
+            page = all_nodes[offset : offset + limit]
             nodes = []
-            for n in self.api.get_nodes():
+            for n in page:
                 try:
                     nodes.append(n.to_dict())
                 except (AttributeError, TypeError, ValueError) as e:
                     logger.warning("Failed to serialize node %s: %s", getattr(n, "node_id", "?"), e)
             return {
                 "nodes": nodes,
-                "total": len(self.api.network.nodes),
-                "online": len(self.api.network.online_nodes),
+                "total": total,
+                "online": online,
+                "offset": offset,
+                "limit": limit,
             }
 
         @app.get("/api/nodes/{node_id}")
@@ -618,20 +647,22 @@ class WebApplication:
         async def api_messages(
             channel: Optional[int] = None,
             limit: int = 100,
+            offset: int = 0,
             search: Optional[str] = None,
             sender: Optional[str] = None,
             since: Optional[str] = None,
         ):
-            """Get messages with optional search/filter.
+            """Get messages with optional search/filter and pagination.
 
             Query parameters:
                 channel: Filter by channel number (0-7)
                 limit: Max messages to return (default 100)
+                offset: Skip first N messages (default 0)
                 search: Full-text search in message text (case-insensitive)
                 sender: Filter by sender name or ID (case-insensitive substring)
                 since: ISO timestamp — only messages after this time
             """
-            messages = self.api.get_messages(channel=channel, limit=limit)
+            messages = self.api.get_messages(channel=channel, limit=limit + offset)
             serialized = []
 
             # Parse 'since' filter
@@ -678,7 +709,9 @@ class WebApplication:
 
                 serialized.append(d)
 
-            return {"messages": serialized, "total": len(serialized)}
+            # Apply offset pagination after filtering
+            paginated = serialized[offset:]
+            return {"messages": paginated, "total": len(serialized), "offset": offset, "limit": limit}
 
         @app.post("/api/messages/send", dependencies=[Depends(require_auth)])
         async def api_send_message(request: SendMessageRequest):
@@ -915,33 +948,39 @@ class WebApplication:
             """WebSocket endpoint for real-time updates."""
             # Authenticate before accepting the connection
             if self.config.web.enable_auth:
-                api_key = websocket.query_params.get("api_key")
-                auth_ok = False
-                if self.config.web.api_key and api_key:
-                    auth_ok = hmac.compare_digest(api_key, self.config.web.api_key)
-                if not auth_ok:
-                    # Check Authorization header (some WS clients support it)
-                    auth_header = websocket.headers.get("authorization", "")
-                    if auth_header.startswith("Basic "):
-                        import base64
+                # If auth enabled but no credentials configured, warn and allow
+                if not self.config.web.api_key and not self.config.web.password_hash:
+                    logger.warning(
+                        "Auth enabled but no api_key or password_hash configured — allowing WebSocket connection"
+                    )
+                else:
+                    api_key = websocket.query_params.get("api_key")
+                    auth_ok = False
+                    if self.config.web.api_key and api_key:
+                        auth_ok = hmac.compare_digest(api_key, self.config.web.api_key)
+                    if not auth_ok:
+                        # Check Authorization header (some WS clients support it)
+                        auth_header = websocket.headers.get("authorization", "")
+                        if auth_header.startswith("Basic "):
+                            import base64
 
-                        try:
-                            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
-                            username, password = decoded.split(":", 1)
-                            pw_hash = hashlib.sha256(password.encode()).hexdigest()
-                            if (
-                                hmac.compare_digest(username, self.config.web.username)
-                                and self.config.web.password_hash
-                                and hmac.compare_digest(pw_hash, self.config.web.password_hash)
-                            ):
-                                auth_ok = True
-                        except (ValueError, UnicodeDecodeError):
-                            pass
-                if not auth_ok:
-                    client_host = websocket.client.host if websocket.client else "unknown"
-                    logger.info("Authentication failed for WebSocket from %s", client_host)
-                    await websocket.close(code=1008, reason="Unauthorized")
-                    return
+                            try:
+                                decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+                                username, password = decoded.split(":", 1)
+                                pw_hash = hashlib.sha256(password.encode()).hexdigest()
+                                if (
+                                    hmac.compare_digest(username, self.config.web.username)
+                                    and self.config.web.password_hash
+                                    and hmac.compare_digest(pw_hash, self.config.web.password_hash)
+                                ):
+                                    auth_ok = True
+                            except (ValueError, UnicodeDecodeError):
+                                pass
+                    if not auth_ok:
+                        client_host = websocket.client.host if websocket.client else "unknown"
+                        logger.info("Authentication failed for WebSocket from %s", client_host)
+                        await websocket.close(code=1008, reason="Unauthorized")
+                        return
 
             accepted = await self.ws_manager.connect(websocket)
             if not accepted:
@@ -952,8 +991,8 @@ class WebApplication:
 
                 while True:
                     try:
-                        # Use timeout to detect dead connections
-                        data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_RECEIVE_TIMEOUT)
+                        # Use heartbeat interval as timeout for proactive liveness checks
+                        data = await asyncio.wait_for(websocket.receive_text(), timeout=WS_HEARTBEAT_INTERVAL)
                         try:
                             msg = json.loads(data)
                             await self._handle_ws_message(websocket, msg)

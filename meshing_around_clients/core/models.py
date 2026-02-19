@@ -596,6 +596,19 @@ class MeshNetwork:
     def add_node(self, node: Node) -> None:
         with self._lock:
             self.nodes[node.node_id] = node
+            # Auto-prune when node count exceeds limit to prevent unbounded growth
+            if len(self.nodes) > MAX_NODES:
+                self._prune_oldest_nodes_unlocked(MAX_NODES)
+
+    def _prune_oldest_nodes_unlocked(self, target: int) -> None:
+        """Remove oldest nodes to bring count to target. Caller must hold _lock."""
+        if len(self.nodes) <= target:
+            return
+        # Sort by last_heard (oldest first), remove excess
+        sorted_ids = sorted(self.nodes.keys(), key=lambda nid: self.nodes[nid].last_heard or DATETIME_MIN_UTC)
+        excess = len(self.nodes) - target
+        for nid in sorted_ids[:excess]:
+            del self.nodes[nid]
 
     def add_message(self, message: Message) -> None:
         with self._lock:
