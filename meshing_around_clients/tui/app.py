@@ -682,9 +682,7 @@ class TopologyScreen(Screen):
                 if len(route.hops) > 1:
                     via += f" (+{len(route.hops)-1})"
 
-            table.add_row(
-                dest_name, f"[{hop_style}]{hop_count}[/{hop_style}]", format_snr(avg_snr, styled=True), via
-            )
+            table.add_row(dest_name, f"[{hop_style}]{hop_count}[/{hop_style}]", format_snr(avg_snr, styled=True), via)
 
         if not routes:
             table.add_row("[dim]No routes discovered[/dim]", "", "", "")

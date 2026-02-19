@@ -6,7 +6,6 @@ icons) so every screen uses the same thresholds and styling.
 
 from typing import Optional
 
-
 # ---------------------------------------------------------------------------
 # Health status colour map (used in DashboardScreen & TopologyScreen)
 # ---------------------------------------------------------------------------
