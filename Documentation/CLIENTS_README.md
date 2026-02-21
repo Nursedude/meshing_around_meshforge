@@ -168,7 +168,8 @@ meshing_around_meshforge/
     │   ├── models.py            # Data models (Node, Message, Alert, MeshNetwork)
     │   ├── meshtastic_api.py    # Device API + MockAPI (Serial/TCP/HTTP/BLE)
     │   ├── mqtt_client.py       # MQTT broker connection
-    │   └── mesh_crypto.py       # AES-256-CTR decryption (optional deps)
+    │   ├── mesh_crypto.py       # AES-256-CTR decryption (optional deps)
+    │   └── callbacks.py         # Shared callback/cooldown mixin
     ├── setup/                   # Setup-only modules (configure_bot.py)
     │   ├── cli_utils.py         # Terminal colors, input helpers
     │   ├── pi_utils.py          # Pi detection, serial ports
@@ -176,9 +177,11 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py # Alert wizards
     │   └── config_schema.py     # Upstream format conversion
     ├── tui/
-    │   └── app.py               # Rich-based terminal UI
+    │   ├── app.py               # Rich-based terminal UI (6 screens)
+    │   └── helpers.py           # TUI helper utilities
     └── web/
         ├── app.py               # FastAPI application
+        ├── middleware.py        # CSRF, rate limiting, security
         ├── templates/           # HTML templates
         └── static/              # CSS/JS assets
 ```

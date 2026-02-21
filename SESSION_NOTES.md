@@ -43,7 +43,8 @@ meshing_around_meshforge/
 │   │   ├── models.py           # Data models (1032 lines)
 │   │   ├── mqtt_client.py      # MQTT connection (1321 lines)
 │   │   ├── meshtastic_api.py   # Device API (678 lines)
-│   │   └── mesh_crypto.py      # Encryption (713 lines) — upgrade path
+│   │   ├── mesh_crypto.py      # Encryption (713 lines) — upgrade path
+│   │   └── callbacks.py        # Shared callback/cooldown mixin (65 lines)
 │   ├── setup/                  # SETUP-ONLY modules (configure_bot.py)
 │   │   ├── __init__.py         # Docstring only
 │   │   ├── cli_utils.py        # Terminal colors, input helpers
@@ -51,8 +52,12 @@ meshing_around_meshforge/
 │   │   ├── system_maintenance.py # Updates, systemd
 │   │   ├── alert_configurators.py # Alert wizards
 │   │   └── config_schema.py    # Upstream format conversion
-│   ├── tui/app.py              # Terminal UI (~1147 lines)
-│   └── web/app.py              # Web dashboard (~1034 lines)
+│   ├── tui/
+│   │   ├── app.py              # Terminal UI (~1147 lines, 6 screens)
+│   │   └── helpers.py          # TUI helper utilities (62 lines)
+│   └── web/
+│       ├── app.py              # Web dashboard (~1034 lines)
+│       └── middleware.py       # CSRF, rate limiting, security (214 lines)
 └── tests/                      # 3784 lines, 10 test files
 ```
 
@@ -95,8 +100,11 @@ except ImportError:
 | `core/mqtt_client.py` | MQTT broker connection | Cleaned |
 | `core/meshtastic_api.py` | Device API + MockAPI | Cleaned |
 | `core/mesh_crypto.py` | AES-256-CTR (upgrade path) | Waiting on deps |
-| `tui/app.py` | Rich-based terminal UI | Working |
+| `core/callbacks.py` | Shared callback/cooldown mixin | Working |
+| `tui/app.py` | Rich-based terminal UI (6 screens) | Working |
+| `tui/helpers.py` | TUI helper utilities | Working |
 | `web/app.py` | FastAPI web dashboard | Fixed |
+| `web/middleware.py` | CSRF, rate limiting, security | Working |
 
 ---
 
