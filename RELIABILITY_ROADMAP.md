@@ -1,7 +1,7 @@
 # Reliability Improvement Roadmap
 
 **Version:** 0.5.0-beta
-**Date:** 2026-02-21
+**Date:** 2026-02-21 (updated: Security Review Session)
 
 This document tracks reliability improvements needed for MeshForge to reach stable release.
 
@@ -181,6 +181,25 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 
 ---
 
+## Security Hardening (P1)
+
+> See SECURITY_REVIEW.md for full audit details.
+
+- [x] WebSocket auth bypass when credentials misconfigured — fixed
+- [x] Bounded message queue (prevent memory exhaustion) — fixed
+- [x] MQTT topic component validation — fixed
+- [x] Deprecated SSL constant for Python 3.10+ — fixed
+- [x] Hostname validation for TCP/HTTP interfaces — fixed
+- [x] Config validation bounds (port, intervals, delays) — fixed
+- [ ] Subprocess argument validation for usernames/paths
+- [ ] Warn when non-default MQTT credentials used without TLS
+- [ ] Tighten CSP (remove `'unsafe-inline'`)
+- [ ] Proxy-aware rate limiting
+- [ ] Explicit CORS middleware configuration
+- [ ] Narrow remaining `except Exception` to specific types
+
+---
+
 ## Upstream Integration (P2)
 
 ### Multi-Interface Support
@@ -224,11 +243,12 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Web | 0 | 0 | 3 | 0 | **33%** |
 | Notifications | 0 | 0 | 0 | 2 | 0% |
 | Config | 0 | 0 | 2 | 0 | **75%** |
+| Security | 0 | 6 | 6 | 0 | **50%** |
 | Testing | 0 | 2 | 0 | 0 | **40%** |
 | Docs | 0 | 0 | 0 | 2 | 0% |
 | Upstream | 0 | 0 | 3 | 0 | 0% |
 
-**Total Items:** 24 (P0: 0, P1: 6, P2: 14, P3: 4)
+**Total Items:** 36 (P0: 0, P1: 12, P2: 18, P3: 4)
 **Unit Tests:** 147 passing, 44 skipped (MQTT integration, web/fastapi)
 
 ---

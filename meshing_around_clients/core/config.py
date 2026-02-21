@@ -306,7 +306,8 @@ class Config:
             # Web
             if self._parser.has_section("web"):
                 self.web.host = self._parser.get("web", "host", fallback="127.0.0.1")
-                self.web.port = self._parser.getint("web", "port", fallback=8080)
+                raw_port = self._parser.getint("web", "port", fallback=8080)
+                self.web.port = max(1, min(raw_port, 65535))
                 self.web.debug = self._parser.getboolean("web", "debug", fallback=False)
                 self.web.api_key = self._parser.get("web", "api_key", fallback="")
                 self.web.enable_auth = self._parser.getboolean("web", "enable_auth", fallback=False)
@@ -337,15 +338,21 @@ class Config:
                 self.mqtt.encryption_key = self._parser.get("mqtt", "encryption_key", fallback="")
                 raw_qos = self._parser.getint("mqtt", "qos", fallback=1)
                 self.mqtt.qos = raw_qos if raw_qos in (0, 1, 2) else 1
-                self.mqtt.reconnect_delay = self._parser.getint("mqtt", "reconnect_delay", fallback=5)
-                self.mqtt.max_reconnect_delay = self._parser.getint("mqtt", "max_reconnect_delay", fallback=300)
+                self.mqtt.reconnect_delay = max(1, min(
+                    self._parser.getint("mqtt", "reconnect_delay", fallback=5), 3600
+                ))
+                self.mqtt.max_reconnect_delay = max(self.mqtt.reconnect_delay, min(
+                    self._parser.getint("mqtt", "max_reconnect_delay", fallback=300), 86400
+                ))
                 self.mqtt.max_reconnect_attempts = self._parser.getint("mqtt", "max_reconnect_attempts", fallback=10)
 
             # Storage
             if self._parser.has_section("storage"):
                 self.storage.enabled = self._parser.getboolean("storage", "enabled", fallback=True)
                 self.storage.state_file = self._parser.get("storage", "state_file", fallback="")
-                self.storage.auto_save_interval = self._parser.getint("storage", "auto_save_interval", fallback=300)
+                self.storage.auto_save_interval = max(0, min(
+                    self._parser.getint("storage", "auto_save_interval", fallback=300), 86400
+                ))
                 self.storage.max_message_history = self._parser.getint("storage", "max_message_history", fallback=1000)
                 self.storage.max_node_history_days = self._parser.getint(
                     "storage", "max_node_history_days", fallback=30
