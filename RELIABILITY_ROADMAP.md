@@ -1,7 +1,7 @@
 # Reliability Improvement Roadmap
 
 **Version:** 0.5.0-beta
-**Date:** 2026-02-01
+**Date:** 2026-02-21
 
 This document tracks reliability improvements needed for MeshForge to reach stable release.
 
@@ -150,14 +150,11 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ### Unit Tests
 - [x] Add tests for models.py (Node, Message, Alert) - 45+ tests
 - [x] Add tests for config.py - 18+ tests
-- [x] Add tests for alert_detector.py - 36+ tests
-- [x] Add tests for message_handler.py - 70+ tests
 - [ ] Target 80% code coverage
 
 ### Integration Tests
 - [ ] Test TUI screen rendering
 - [ ] Test Web API endpoints
-- [ ] Test connection manager modes
 - [ ] Mock Meshtastic device for testing
 
 ### CI/CD
@@ -227,12 +224,12 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Web | 0 | 0 | 3 | 0 | 0% |
 | Notifications | 0 | 0 | 0 | 2 | 0% |
 | Config | 0 | 0 | 2 | 0 | **75%** |
-| Testing | 0 | 3 | 0 | 0 | **80%** |
+| Testing | 0 | 2 | 0 | 0 | **40%** |
 | Docs | 0 | 0 | 0 | 2 | 0% |
 | Upstream | 0 | 0 | 3 | 0 | 0% |
 
-**Total Items:** 26 (P0: 0, P1: 7, P2: 15, P3: 4)
-**Unit Tests:** 226 tests passing (6 core modules fully tested)
+**Total Items:** 24 (P0: 0, P1: 6, P2: 14, P3: 4)
+**Unit Tests:** 147 passing, 44 skipped (MQTT integration, web/fastapi)
 
 ---
 
@@ -248,7 +245,6 @@ Before releasing v1.0.0-stable, the following must be complete:
 - Fixed 7 broad exceptions in `mqtt_client.py`
 - Fixed 8 broad exceptions in `meshtastic_api.py`
 - Fixed 6 broad exceptions in `configure_bot.py` (shutil, os.chdir, subprocess)
-- Fixed exceptions in `connection_manager.py` and `alert_detector.py`
 - All exceptions now use specific types (OSError, ValueError, etc.)
 
 ### configure_bot.py Decomposition
@@ -263,4 +259,4 @@ Before releasing v1.0.0-stable, the following must be complete:
 
 ---
 
-*Last updated: 2026-02-04*
+*Last updated: 2026-02-21*
