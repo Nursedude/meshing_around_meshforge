@@ -23,8 +23,9 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
+from .callbacks import CallbackMixin
 from .config import Config, MQTTConfig
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
@@ -94,7 +95,7 @@ HEALTH_SLOW_TIMEOUT = 60  # 1 minute without messages = slow
 MAX_ALERT_COOLDOWNS = 1000  # Prune oldest entries when exceeded
 
 
-class MQTTMeshtasticClient:
+class MQTTMeshtasticClient(CallbackMixin):
     """
     MQTT client for Meshtastic mesh networks.
     Allows monitoring and participating in mesh without a radio.
@@ -119,16 +120,8 @@ class MQTTMeshtasticClient:
         # Network state
         self.network = MeshNetwork()
 
-        # Callbacks
-        self._callbacks: Dict[str, List[Callable]] = {
-            "on_connect": [],
-            "on_disconnect": [],
-            "on_message": [],
-            "on_node_update": [],
-            "on_alert": [],
-            "on_position": [],
-            "on_telemetry": [],
-        }
+        # Callbacks and alert cooldowns (from CallbackMixin)
+        self._init_callbacks()
 
         # Connection health tracking
         self._last_message_time: Optional[datetime] = None
@@ -146,12 +139,6 @@ class MQTTMeshtasticClient:
             "telemetry_updates": 0,
             "position_updates": 0,
         }
-
-        # Alert deduplication: (node_id, alert_type) -> last alert timestamp
-        # Prevents alert fatigue from repeated threshold crossings
-        self._alert_cooldowns: Dict[tuple, float] = {}
-        _ALERT_COOLDOWN_SECONDS = 300  # 5 minute cooldown per node per alert type
-        self._alert_cooldown_seconds = _ALERT_COOLDOWN_SECONDS
 
         # Stale node cleanup
         self._cleanup_interval = STALE_CLEANUP_INTERVAL
@@ -209,37 +196,10 @@ class MQTTMeshtasticClient:
             pass
         return None
 
-    def register_callback(self, event: str, callback: Callable) -> None:
-        """Register a callback for an event."""
-        if event in self._callbacks:
-            self._callbacks[event].append(callback)
-
     def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
-        """Check if enough time has passed since the last alert of this type for this node.
-
-        Returns True if the alert should be suppressed (still in cooldown),
-        False if the alert should fire.
-        """
-        key = (node_id, alert_type)
-        now = time.monotonic()
+        """Thread-safe override — wraps base implementation with stats lock."""
         with self._stats_lock:
-            last_time = self._alert_cooldowns.get(key)
-            if last_time is not None and (now - last_time) < self._alert_cooldown_seconds:
-                return True  # Still in cooldown — suppress
-            self._alert_cooldowns[key] = now
-            # Prune stale cooldown entries (older than 2x cooldown) to prevent unbounded growth
-            if len(self._alert_cooldowns) > MAX_ALERT_COOLDOWNS:
-                cutoff = now - (self._alert_cooldown_seconds * 2)
-                self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
-            return False  # Cooldown expired — allow alert
-
-    def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
-        """Trigger all callbacks for an event."""
-        for callback in self._callbacks.get(event, []):
-            try:
-                callback(*args, **kwargs)
-            except (TypeError, ValueError, AttributeError) as e:
-                logger.warning("MQTT callback error (%s): %s", type(e).__name__, e)
+            return super()._is_alert_cooled_down(node_id, alert_type)
 
     def _create_mqtt_client(self):
         """Create MQTT client with paho v1/v2 API compatibility."""
