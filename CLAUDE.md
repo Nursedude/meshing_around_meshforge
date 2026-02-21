@@ -67,6 +67,7 @@ meshing_around_meshforge/
     │   ├── meshtastic_api.py   # Device API + MockAPI (Serial/TCP/HTTP/BLE)
     │   ├── mqtt_client.py      # MQTT broker connection (no radio needed)
     │   ├── mesh_crypto.py      # AES-256-CTR decryption (optional deps)
+    │   ├── callbacks.py        # Shared callback/cooldown mixin
     │   └── models.py           # Data models (Node, Message, Alert, MeshNetwork)
     ├── setup/                  # Setup-only modules (used by configure_bot.py)
     │   ├── cli_utils.py        # Terminal colors, input helpers
@@ -75,9 +76,11 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py # Alert wizards
     │   └── config_schema.py    # Upstream format conversion
     ├── tui/
-    │   └── app.py              # Rich-based terminal UI
+    │   ├── app.py              # Rich-based terminal UI (6 screens)
+    │   └── helpers.py          # TUI helper utilities
     └── web/
-        └── app.py              # FastAPI web dashboard
+        ├── app.py              # FastAPI web dashboard
+        └── middleware.py       # CSRF, rate limiting, security middleware
 ```
 
 ## Connection Modes
@@ -176,7 +179,7 @@ python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883
 ### Modifying the TUI
 - Main app in `tui/app.py`
 - Uses Rich library with fallback
-- 4 screens: Dashboard, Nodes, Messages, Alerts
+- 6 screens: Dashboard, Nodes, Messages, Alerts, Topology, Help
 
 ### Modifying the Web UI
 - FastAPI app in `web/app.py`

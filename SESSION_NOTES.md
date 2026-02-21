@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-15 (Architecture Docs & Wiring Session)
+**Last Updated:** 2026-02-21 (Markdown Cleanup Session)
 **Version:** 0.5.0-beta
 
 ---
@@ -29,7 +29,6 @@ python3 -m isort --check-only --diff meshing_around_clients/
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
 - **Test Status:** 147 tests passing, 44 skipped (MQTT integration, web/fastapi)
-- **Branch:** `claude/update-architecture-docs-IMWQV`
 
 ### Directory Structure (Current)
 
@@ -40,11 +39,12 @@ meshing_around_meshforge/
 ├── meshing_around_clients/
 │   ├── core/                   # RUNTIME modules only
 │   │   ├── __init__.py         # 48 lines, 11 exports
-│   │   ├── config.py           # Config loading (533 lines) ✅ SOLID
-│   │   ├── models.py           # Data models (1032 lines) ✅ CLEANED
-│   │   ├── mqtt_client.py      # MQTT connection (1321 lines) ✅ CLEANED
-│   │   ├── meshtastic_api.py   # Device API (678 lines) ✅ CLEANED
-│   │   └── mesh_crypto.py      # Encryption (713 lines) ⏳ UPGRADE PATH
+│   │   ├── config.py           # Config loading (533 lines)
+│   │   ├── models.py           # Data models (1032 lines)
+│   │   ├── mqtt_client.py      # MQTT connection (1321 lines)
+│   │   ├── meshtastic_api.py   # Device API (678 lines)
+│   │   ├── mesh_crypto.py      # Encryption (713 lines) — upgrade path
+│   │   └── callbacks.py        # Shared callback/cooldown mixin (65 lines)
 │   ├── setup/                  # SETUP-ONLY modules (configure_bot.py)
 │   │   ├── __init__.py         # Docstring only
 │   │   ├── cli_utils.py        # Terminal colors, input helpers
@@ -52,8 +52,12 @@ meshing_around_meshforge/
 │   │   ├── system_maintenance.py # Updates, systemd
 │   │   ├── alert_configurators.py # Alert wizards
 │   │   └── config_schema.py    # Upstream format conversion
-│   ├── tui/app.py              # Terminal UI (~1147 lines)
-│   └── web/app.py              # Web dashboard (~1034 lines)
+│   ├── tui/
+│   │   ├── app.py              # Terminal UI (~1147 lines, 6 screens)
+│   │   └── helpers.py          # TUI helper utilities (62 lines)
+│   └── web/
+│       ├── app.py              # Web dashboard (~1034 lines)
+│       └── middleware.py       # CSRF, rate limiting, security (214 lines)
 └── tests/                      # 3784 lines, 10 test files
 ```
 
@@ -61,7 +65,7 @@ meshing_around_meshforge/
 
 ## Architecture Notes
 
-### Actual Runtime Object Graph
+### Runtime Object Graph
 ```
 mesh_client.py
   └── creates MeshtasticAPI or MockMeshtasticAPI directly
@@ -89,15 +93,18 @@ except ImportError:
 
 | File | Purpose | Status |
 |------|---------|--------|
-| `mesh_client.py` | Main entry, zero-dep bootstrap | ✅ |
-| `configure_bot.py` | Bot setup wizard (~2000 lines) | ✅ |
-| `core/config.py` | INI config management | ✅ Solid |
-| `core/models.py` | Node, Message, Alert, MeshNetwork | ✅ Cleaned |
-| `core/mqtt_client.py` | MQTT broker connection | ✅ Cleaned |
-| `core/meshtastic_api.py` | Device API + MockAPI | ✅ Cleaned |
-| `core/mesh_crypto.py` | AES-256-CTR (upgrade path) | ⏳ Waiting on deps |
-| `tui/app.py` | Rich-based terminal UI | ✅ |
-| `web/app.py` | FastAPI web dashboard | ✅ Fixed |
+| `mesh_client.py` | Main entry, zero-dep bootstrap | Solid |
+| `configure_bot.py` | Bot setup wizard (~2000 lines) | Working |
+| `core/config.py` | INI config management | Solid |
+| `core/models.py` | Node, Message, Alert, MeshNetwork | Cleaned |
+| `core/mqtt_client.py` | MQTT broker connection | Cleaned |
+| `core/meshtastic_api.py` | Device API + MockAPI | Cleaned |
+| `core/mesh_crypto.py` | AES-256-CTR (upgrade path) | Waiting on deps |
+| `core/callbacks.py` | Shared callback/cooldown mixin | Working |
+| `tui/app.py` | Rich-based terminal UI (6 screens) | Working |
+| `tui/helpers.py` | TUI helper utilities | Working |
+| `web/app.py` | FastAPI web dashboard | Fixed |
+| `web/middleware.py` | CSRF, rate limiting, security | Working |
 
 ---
 
@@ -110,27 +117,17 @@ except ImportError:
 5. **core/__init__.py minimal** - Only 11 runtime exports, no setup bloat
 6. **mesh_crypto kept** - Legitimate upgrade path; mqtt_client.py already has conditional wiring
 7. **WebSocketManager rename** - web/app.py's WS connection class renamed from ConnectionManager
+8. **No connection fallback chain** - Current explicit approach is correct. Users should know exactly what they're connected to. Auto-fallback would be opt-in via config if ever added.
 
 ---
 
 ## Pending Tasks — Future Sessions
 
-### Remaining Opportunities
-- [x] Wire `update_channel_activity()` — now auto-updates in `MeshNetwork.add_message()`
-- [x] Wire gas_resistance into decoded telemetry path — `_process_decoded_packet()` now extracts environment_metrics
-- [x] Update CLAUDE.md architecture section — matches actual codebase
-- [x] Update README.md architecture diagram — matches actual codebase
 - [ ] MessageType enum: only TEXT is assigned because only text packets create Message objects.
-  Position/telemetry/nodeinfo update Node fields directly. Other enum values exist for future use
-  if non-text packets need to be logged as messages. Not a bug — leave as-is unless requirements change.
-
-### P3 — Architecture Decision: Connection Fallback Chain
-- **Decision: Don't add one.** Current explicit approach is correct.
-  - TUI: prompts user for demo mode on connection failure — clear, user-driven
-  - Web: logs warning, retries via POST /api/connect — appropriate for headless
-  - A fallback chain (Serial→TCP→MQTT→Demo) would silently connect to a different mode
-    than intended. For a monitoring tool, users should know exactly what they're connected to.
-  - If owner wants auto-fallback in the future, it should be opt-in via config.
+  Position/telemetry/nodeinfo update Node fields directly. Other enum values exist for future use.
+  Not a bug — leave as-is unless requirements change.
+- [ ] TUI Rich fallback: CLAUDE.md requires plain-text fallback but TUI exits without Rich (see CODE_REVIEW.md)
+- [ ] Remaining broad `except Exception` in configure_bot.py, meshtastic_api.py, mqtt_client.py
 
 ---
 
@@ -151,75 +148,33 @@ except ImportError:
 
 ---
 
-## Work History (Summary)
+## Work History
 
-### 2026-02-15 (Architecture Docs & Wiring — Session 3)
-- **Docs:** Updated CLAUDE.md architecture tree, key files table, connection type instructions
-  - Removed references to deleted modules (connection_manager, message_handler, alert_detector, notifications)
-  - Added setup/ package, mesh_crypto.py, corrected file purposes
-- **Docs:** Updated README.md mermaid architecture diagram and project structure tree
-  - Diagram now shows actual module relationships (API→Serial/TCP/BLE, MQTT→broker, crypto→mqtt)
-  - setup/ package included in structure
-- **Bug fix:** Decoded telemetry path (`_process_decoded_packet`) now extracts environment_metrics
-  - Was only reading device_metrics, skipping temperature/humidity/pressure/gas_resistance
-  - JSON path was correct; protobuf path was missing env metrics entirely
-- **Wiring:** `MeshNetwork.add_message()` now auto-updates channel activity
-  - Increments `Channel.message_count` and sets `Channel.last_activity` on every message add
-  - No separate call needed — tracked automatically inside the lock
-- **P3 decision:** Documented recommendation against connection fallback chain
-- **MessageType:** Confirmed TEXT-only assignment is correct (non-text packets don't create Message objects)
-- **Tests:** 147 pass, 44 skip — no regressions
-- Branch: `claude/update-architecture-docs-IMWQV`
+### 2026-02-21 (Markdown Cleanup)
+- Deleted QUICK_REFERENCE.md (obsolete), 6 session archive files
+- Rewrote CODE_REVIEW.md as focused tech debt tracker (338→~90 lines)
+- Updated RELIABILITY_ROADMAP.md, SESSION_NOTES.md, CLIENTS_README.md
+- Session archives consolidated — all useful info now in this file
 
-### 2026-02-15 (Dead Module Removal & Reliability — Session 2)
-- **P0:** Deleted `message_handler.py` (561 LOC) + refs from tui/web + test (644 LOC)
-- **P0:** Deleted `connection_manager.py` (646 LOC) + `test_http_connection.py` (275 LOC)
-- **P0:** Kept `mesh_crypto.py` (713 LOC) — legitimate upgrade path, already wired
-- **P0:** Renamed web/app.py `ConnectionManager` → `WebSocketManager`
-- **P0:** Removed `TestConnectionManagerFailoverIntegration` from integration tests (145 LOC)
-- **P1:** Trimmed `models.py`: removed `update_channel_activity()` (7 LOC)
-  - Previous review was wrong: most "dead" items (is_duplicate_message, update_neighbor_relationship, update_link_quality, update_route, heard_by, neighbors, VALID_*_RANGE, precision_bits) are actually used by mqtt_client.py
-- **P1:** Trimmed `mqtt_client.py`: removed 3 dead utility methods, dead attributes, unused constant (29 LOC)
-- **P1:** Trimmed `meshtastic_api.py`: removed `request_position()`, `unregister_callback()` (17 LOC)
-- **P2:** Fixed web app silent failure — now attempts connect on startup, logs warning on failure
-- **P2:** Added info log when mesh_crypto deps unavailable (was silent)
-- **core/__init__.py:** Trimmed from 55→48 lines, 15→11 exports
-- **Net:** +23 / -2,337 lines. 147 pass, 44 skip.
-- Branch: `claude/trim-code-tests-xT3jh`
+### 2026-02-15 (Architecture Docs & Wiring — 3 sessions)
+- Updated CLAUDE.md and README.md architecture to match actual codebase
+- Deleted dead modules: message_handler.py, connection_manager.py (+tests, ~3,300 LOC)
+- Kept mesh_crypto.py (legitimate upgrade path)
+- Fixed decoded telemetry path, wired channel activity auto-updates
+- Net: +23 / -2,337 lines. 147 pass, 44 skip.
 
-### 2026-02-15 (Code Trim & Deep Review — Session 1)
-- **Phase 1:** Deleted 8 files, moved 5 modules to setup/, trimmed 5 test files
-- **Net:** +180 / -3,999 lines. 91 filler tests removed. 228 pass, 49 skip.
-- **Phase 2:** Deep review of all 7 remaining core/ modules
-- **Finding:** 3 modules (message_handler, connection_manager, mesh_crypto) are 100% dead at runtime
-- **Finding:** Previous dead code estimates for models.py were significantly overstated
-- Branch: `claude/trim-code-tests-xT3jh`
+### 2026-02-12 (4 sessions)
+- HTTP connection type support, TUI improvements, config unification, code review fixes
 
-### 2026-02-12 (meshtasticd HTTP API)
-- Added HTTP connection type support via HTTPInterface
-- 18 new tests, 320 tests passing
-- Branch: `claude/fix-meshtasticd-api-iuLpP`
+### 2026-02-04 (2 sessions)
+- configure_bot.py decomposition, 4 new setup/ modules, exception handling fixes
 
-### 2026-02-12 (TUI Improvements)
-- Dashboard stats, pagination, severity filtering, acknowledgment
-- Branch: `claude/improve-meshforge-tui-jwCHI`
+### 2026-02-01 (2 sessions)
+- Version bump to 0.5.0-beta, README rewrite with Mermaid diagrams, upstream analysis
 
-### 2026-02-12 (Config Unification)
-- `[connection]` → `[interface]` + `[mqtt]` sections
-- Branch: `claude/unify-config-mqtt-test-ie7a1`
-
-### 2026-02-12 (Code Review & Accessibility)
-- 5 bugs fixed (2 critical)
-- Branch: `claude/code-review-accessibility-kSLI6`
-
-### 2026-02-11 (CI Fix & Integration Tests)
-- httpx, stats test, CSRF double-cookie
-- Branch: `claude/integration-tests-failover-EBrRD`
-
-### Earlier Sessions (2026-02-01 through 2026-02-09)
-- CSRF, rate limiting, map clustering, MQTT reliability, topology, mesh_crypto
-- See git history for details
+### Earlier (2026-01-25 through 2026-01-31)
+- Initial beta, CSRF, rate limiting, map clustering, MQTT reliability, topology, mesh_crypto
 
 ---
 
-*End of session notes - update after each session*
+*End of session notes — update after each session*

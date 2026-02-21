@@ -102,7 +102,7 @@ sudo systemctl start mesh-client
 All settings are in `mesh_client.ini`:
 
 ```ini
-[connection]
+[interface]
 # Connection type: auto, serial, tcp, mqtt, ble
 type = auto
 
@@ -114,14 +114,15 @@ serial_baud = 115200
 tcp_host = 192.168.1.100
 tcp_port = 4403
 
+[mqtt]
 # MQTT settings (for radio-less operation)
-mqtt_enabled = true
-mqtt_broker = mqtt.meshtastic.org
-mqtt_port = 1883
-mqtt_username = meshdev
-mqtt_password = large4cats
-mqtt_topic_root = msh/US
-mqtt_channel = LongFast
+enabled = true
+broker = mqtt.meshtastic.org
+port = 1883
+username = meshdev
+password = large4cats
+topic_root = msh/US
+channel = LongFast
 
 [features]
 # Interface mode: tui, web, both, headless
@@ -129,7 +130,7 @@ mode = tui
 
 # Web server
 web_server = false
-web_host = 0.0.0.0
+web_host = 127.0.0.1
 web_port = 8080
 
 # Feature toggles
@@ -158,23 +159,29 @@ demo_mode = false
 meshing_around_meshforge/
 ├── mesh_client.py              # Standalone launcher (zero-dep bootstrap)
 ├── mesh_client.ini             # Master configuration file
+├── configure_bot.py            # Bot setup wizard
 ├── setup_headless.sh           # Headless/Pi setup script
-├── run_tui.py                  # TUI launcher
-├── run_web.py                  # Web launcher
 │
 └── meshing_around_clients/
-    ├── requirements.txt
     ├── core/
     │   ├── config.py            # Configuration management
-    │   ├── models.py            # Data models
-    │   ├── meshtastic_api.py    # Direct device connection
+    │   ├── models.py            # Data models (Node, Message, Alert, MeshNetwork)
+    │   ├── meshtastic_api.py    # Device API + MockAPI (Serial/TCP/HTTP/BLE)
     │   ├── mqtt_client.py       # MQTT broker connection
-    │   ├── connection_manager.py # Unified connection handling
-    │   └── message_handler.py   # Message processing
+    │   ├── mesh_crypto.py       # AES-256-CTR decryption (optional deps)
+    │   └── callbacks.py         # Shared callback/cooldown mixin
+    ├── setup/                   # Setup-only modules (configure_bot.py)
+    │   ├── cli_utils.py         # Terminal colors, input helpers
+    │   ├── pi_utils.py          # Pi detection, serial ports
+    │   ├── system_maintenance.py # Updates, systemd
+    │   ├── alert_configurators.py # Alert wizards
+    │   └── config_schema.py     # Upstream format conversion
     ├── tui/
-    │   └── app.py               # Rich-based terminal UI
+    │   ├── app.py               # Rich-based terminal UI (6 screens)
+    │   └── helpers.py           # TUI helper utilities
     └── web/
         ├── app.py               # FastAPI application
+        ├── middleware.py        # CSRF, rate limiting, security
         ├── templates/           # HTML templates
         └── static/              # CSS/JS assets
 ```
@@ -277,10 +284,12 @@ Access: SSH + Browser
 
 Configuration:
 ```ini
-[connection]
+[interface]
 type = mqtt
-mqtt_enabled = true
-mqtt_broker = mqtt.meshtastic.org
+
+[mqtt]
+enabled = true
+broker = mqtt.meshtastic.org
 
 [features]
 mode = web
@@ -298,7 +307,7 @@ Interface: TUI
 
 Configuration:
 ```ini
-[connection]
+[interface]
 type = serial
 serial_port = auto
 
@@ -316,7 +325,7 @@ Interface: Web + API
 
 Configuration:
 ```ini
-[connection]
+[interface]
 type = tcp
 tcp_host = 192.168.1.50
 
