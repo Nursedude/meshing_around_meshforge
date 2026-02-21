@@ -150,7 +150,18 @@ except ImportError:
 
 ## Work History
 
-### 2026-02-21 (Markdown Cleanup)
+### 2026-02-21 (Markdown Cleanup — Round 2)
+- Deleted Documentation/CLIENTS_README.md (redundant with README.md), merged unique content
+- Moved Documentation/MQTT_INTEGRATION.md to root, removed Documentation/ directory
+- README.md: expanded API table (5→10 endpoints), added WebSocket example, CLI options, systemd section
+- CHANGELOG.md: populated empty [Unreleased] with 3 weeks of missing work
+- RELIABILITY_ROADMAP.md: fixed stale progress metrics, removed outdated section, checked off items
+- ALERT_CONFIG_README.md: fixed support link, log dates, config file reference
+- HARDWARE_TESTING.md: fixed unittest→pytest, trimmed redundant troubleshooting
+- MQTT_INTEGRATION.md: fixed Python example (MQTTClient→MQTTMeshtasticClient, correct imports)
+- CODE_REVIEW.md: resolved CLIENTS_README documentation issue
+
+### 2026-02-21 (Markdown Cleanup — Round 1)
 - Deleted QUICK_REFERENCE.md (obsolete), 6 session archive files
 - Rewrote CODE_REVIEW.md as focused tech debt tracker (338→~90 lines)
 - Updated RELIABILITY_ROADMAP.md, SESSION_NOTES.md, CLIENTS_README.md

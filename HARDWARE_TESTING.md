@@ -171,61 +171,19 @@ Legend: ✓ = Tested OK, ✗ = Failed, ? = Untested
 
 ## Automated Tests
 
-### Running Unit Tests
 ```bash
 # All unit tests (no hardware needed)
-python3 -m unittest discover tests/ -v
+python3 -m pytest tests/ -v --ignore=tests/test_web_app.py
 
 # Specific module
-python3 -m unittest tests.test_models -v
-python3 -m unittest tests.test_config -v
+python3 -m pytest tests/test_models.py -v
+python3 -m pytest tests/test_config.py -v
+
+# MQTT integration tests (requires network)
+python3 -m pytest tests/test_mqtt_client.py -v -k integration
 ```
 
-### Running Integration Tests
-```bash
-# MQTT integration (requires network)
-python3 -m unittest tests.test_mqtt_client.TestMQTTIntegration -v
-
-# With pytest (if installed)
-pytest tests/ -v -k integration
-```
-
-## Troubleshooting
-
-### Serial Issues
-```bash
-# Permission denied
-sudo chmod 666 /dev/ttyUSB0  # Temporary fix
-# Or add user to dialout group (permanent)
-
-# Device not found
-dmesg | tail -20  # Check kernel messages
-lsusb  # List USB devices
-```
-
-### TCP Issues
-```bash
-# Connection refused
-# Check device WiFi is enabled and connected
-# Check port 4403 is open on device
-
-# Timeout
-ping <device-ip>  # Check basic connectivity
-```
-
-### BLE Issues
-```bash
-# No devices found
-sudo hcitool lescan  # Check Bluetooth adapter works
-# Ensure device BLE is enabled and not connected elsewhere
-```
-
-### MQTT Issues
-```bash
-# Connection failed
-# Check network/firewall allows outbound 1883
-# Try alternative broker port (8883 for TLS)
-```
+> For troubleshooting connection issues (serial, TCP, BLE, MQTT), see the main [README.md](README.md).
 
 ## Reporting Test Results
 

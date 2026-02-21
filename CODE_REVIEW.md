@@ -62,7 +62,7 @@ The public Meshtastic broker credentials (`meshdev`/`large4cats`) are hardcoded 
 | Issue | Location | Status |
 |-------|----------|--------|
 | No security warning about default network binding | README.md | Open |
-| `CLIENTS_README.md` config examples use old section names | Documentation/ | Open |
+| ~~CLIENTS_README.md stale config~~ | ~~Documentation/~~ | Resolved — file deleted, content merged into README.md |
 
 ---
 

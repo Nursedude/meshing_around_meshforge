@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Shared CallbackMixin for callback/cooldown logic (`core/callbacks.py`)
+- TUI helper utilities module (`tui/helpers.py`)
+- Web security middleware — CSRF, rate limiting (`web/middleware.py`)
+- HTTP connection type support in meshtastic_api.py
+
+### Changed
+- Deleted dead modules: message_handler.py, connection_manager.py (~3,300 LOC removed)
+- Refactored alert config fallbacks to data-driven approach
+- Simplified models.py with parse helpers
+- Removed duplicate MQTTConfig wrapper class
+- Removed unused imports (flake8 F401 cleanup)
+- Consolidated Documentation/ into root — deleted CLIENTS_README.md, moved MQTT_INTEGRATION.md
+
+### Fixed
+- Resource leaks on partial connection failure
+- WebSocket race condition in web/app.py
+- Decoded telemetry path wiring in mqtt_client.py
+- Channel activity auto-updates
+
+### Security
+- Hardened web auth, added CSP headers
+- Pinned pyopenssl and cryptography to resolve version conflicts
+- Improved gitignore and dependency bounds
+
+### Documentation
+- Deleted 7+ stale markdown files, consolidated session archives
+- Rewrote CODE_REVIEW.md as focused tech debt tracker
+- Updated architecture docs to match actual codebase
+- Populated CHANGELOG.md [Unreleased] (was empty despite 15+ sessions of work)
+- Fixed stale links, dates, and config references across all markdown files
+
 ## [0.5.0-beta] - 2026-02-01
 
 > **Beta Release** - Significant improvements over 0.1.0. See Feature Status in README.

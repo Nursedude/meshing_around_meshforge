@@ -368,6 +368,7 @@ graph LR
 | `1-4` | Switch screens |
 | `s` | Send message |
 | `r` | Refresh |
+| `c` | Connect/Disconnect |
 | `?` | Help |
 | `q` | Quit |
 
@@ -392,15 +393,72 @@ MeshForge includes 12 configurable alert types. Each can be independently enable
 
 **Notification methods:** Channel message, Direct message, Email (SMTP), SMS (email-to-SMS gateway), Sound alerts, Script execution
 
+## Command Line Options
+
+```
+python3 mesh_client.py [OPTIONS]
+
+Options:
+  --setup         Interactive configuration wizard
+  --check         Check dependencies only
+  --install-deps  Install dependencies and exit
+  --tui           Force TUI mode
+  --web           Force Web mode
+  --demo          Demo mode (no hardware)
+  --mqtt          Force MQTT mode
+  --serial        Force Serial mode
+  --no-venv       Don't use virtual environment
+  --version       Show version
+```
+
 ## API Endpoints (Web)
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/status` | GET | Connection info |
+| `/api/network` | GET | Full network state |
 | `/api/nodes` | GET | Node list |
+| `/api/nodes/{id}` | GET | Specific node details |
 | `/api/messages` | GET | Message history |
 | `/api/messages/send` | POST | Send message |
+| `/api/alerts` | GET | All alerts |
+| `/api/alerts/acknowledge` | POST | Acknowledge alert |
+| `/api/connect` | POST | Connect to device |
+| `/api/disconnect` | POST | Disconnect |
 | `/ws` | WebSocket | Real-time updates |
+
+### WebSocket
+
+Real-time updates via WebSocket at `ws://host:port/ws`:
+
+```javascript
+const ws = new WebSocket('ws://localhost:8080/ws');
+
+ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    // msg.type: 'init', 'message', 'alert', 'node_update'
+};
+
+// Send message
+ws.send(JSON.stringify({
+    type: 'send_message',
+    text: 'Hello mesh!',
+    destination: '^all',
+    channel: 0
+}));
+```
+
+## Systemd Service
+
+Auto-start on boot (installed by `setup_headless.sh`):
+
+```bash
+sudo systemctl enable mesh-client    # Enable auto-start
+sudo systemctl start mesh-client     # Start
+sudo systemctl stop mesh-client      # Stop
+sudo systemctl status mesh-client    # Check status
+sudo journalctl -u mesh-client -f    # View logs
+```
 
 ## Project Structure
 

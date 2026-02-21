@@ -1,6 +1,8 @@
-# Enhanced Alert Configuration for Meshing-Around
+# Enhanced Alert Configuration for MeshForge
 
-This enhanced configuration system provides more granular control over all alert types in the meshing-around bot, along with an interactive configuration tool to make setup easier.
+> Detailed reference for `configure_bot.py`. For a quick overview of all 12 alert types and the project as a whole, see [README.md](README.md).
+
+This configuration system provides granular control over all alert types, along with an interactive configuration tool (`configure_bot.py`) to make setup easier.
 
 ## Features
 
@@ -49,7 +51,7 @@ python3 configure_bot.py
    - Guide you through each configuration section
    - Provide sensible defaults
    - Validate your inputs
-   - Save your configuration to `config.ini`
+   - Save your configuration to `mesh_client.ini` (or the path you specify)
 
 ### Method 2: Manual Configuration
 
@@ -312,8 +314,8 @@ logs/
 
 Log format:
 ```
-2024-12-27 14:30:45 - EMERGENCY - Node:Hiker-01 (1234567890) - Keyword:help - Message:"Need help at coordinates"
-2024-12-27 15:15:22 - PROXIMITY - Node:Camper-02 (9876543210) - Distance:45m - Target:Base Camp
+2026-02-21 14:30:45 - EMERGENCY - Node:Hiker-01 (1234567890) - Keyword:help - Message:"Need help at coordinates"
+2026-02-21 15:15:22 - PROXIMITY - Node:Camper-02 (9876543210) - Distance:45m - Target:Base Camp
 ```
 
 ## Best Practices
@@ -459,7 +461,7 @@ The tool will preserve your existing settings and only prompt for new options.
 ## Support
 
 For issues or questions:
-- GitHub: https://github.com/SpudGunMan/meshing-around/issues
+- GitHub: https://github.com/Nursedude/meshing_around_meshforge/issues
 - Check the main repository README
 - Review logs in the `logs/` directory
 

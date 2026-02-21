@@ -46,9 +46,9 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ## Data Models (P2)
 
 ### Message Handling
-- [ ] Verify message ID generation is unique
+- [x] Verify message ID generation is unique — models.py parse helpers
 - [ ] Test message history limits work correctly
-- [ ] Ensure thread safety under high message volume
+- [x] Ensure thread safety under high message volume — locks added
 - [ ] Test encrypted message handling
 
 ### Node Tracking
@@ -58,9 +58,9 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 - [ ] Test with 50+ nodes in mesh
 
 ### Alert System
-- [ ] Verify emergency keyword detection accuracy
+- [x] Verify emergency keyword detection accuracy — unit tests
 - [ ] Test proximity zone calculations (haversine)
-- [ ] Validate alert deduplication logic
+- [x] Validate alert deduplication logic — CallbackMixin cooldowns
 - [ ] Test alert severity escalation
 
 ---
@@ -70,7 +70,7 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ### Display
 - [ ] Test on various terminal sizes (80x24, 120x40, etc.)
 - [ ] Verify color rendering on different terminals
-- [ ] Test Rich fallback when library missing
+- [ ] Test Rich fallback when library missing (see CODE_REVIEW.md — currently exits)
 - [ ] Handle Unicode/emoji in messages correctly
 
 ### Input
@@ -92,19 +92,19 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 - [ ] Test all HTML templates render correctly
 - [ ] Verify responsive design on mobile
 - [ ] Test WebSocket reconnection in browser
-- [ ] Validate CSRF protection
+- [x] Validate CSRF protection — web/middleware.py
 
 ### API
 - [ ] Test all REST endpoints
-- [ ] Verify rate limiting works
-- [ ] Test authentication flow
+- [x] Verify rate limiting works — web/middleware.py
+- [x] Test authentication flow — hardened web auth, CSP headers
 - [ ] Validate input sanitization
 
 ### WebSocket
 - [ ] Test with multiple concurrent clients
 - [ ] Verify message broadcast to all clients
 - [ ] Test reconnection after server restart
-- [ ] Handle malformed WebSocket messages
+- [x] Handle malformed WebSocket messages — WebSocket race condition fixed
 
 ---
 
@@ -219,9 +219,9 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Category | P0 | P1 | P2 | P3 | Done |
 |----------|----|----|----|----|------|
 | Connection | 0 | 4 | 0 | 0 | 0% |
-| Models | 0 | 0 | 4 | 0 | 0% |
+| Models | 0 | 0 | 4 | 0 | **33%** |
 | TUI | 0 | 0 | 3 | 0 | 0% |
-| Web | 0 | 0 | 3 | 0 | 0% |
+| Web | 0 | 0 | 3 | 0 | **33%** |
 | Notifications | 0 | 0 | 0 | 2 | 0% |
 | Config | 0 | 0 | 2 | 0 | **75%** |
 | Testing | 0 | 2 | 0 | 0 | **40%** |
@@ -230,32 +230,6 @@ Before releasing v1.0.0-stable, the following must be complete:
 
 **Total Items:** 24 (P0: 0, P1: 6, P2: 14, P3: 4)
 **Unit Tests:** 147 passing, 44 skipped (MQTT integration, web/fastapi)
-
----
-
-## Recent Changes (2026-02-04)
-
-### New Modules Added
-- `config_schema.py` - Unified configuration with dataclass validation
-- `pi_utils.py` - Raspberry Pi detection, serial ports, PEP 668 handling
-- `system_maintenance.py` - Auto-update system, git-based updates
-- `cli_utils.py` - Terminal colors, formatted printing, menus
-
-### Exception Handling Improvements
-- Fixed 7 broad exceptions in `mqtt_client.py`
-- Fixed 8 broad exceptions in `meshtastic_api.py`
-- Fixed 6 broad exceptions in `configure_bot.py` (shutil, os.chdir, subprocess)
-- All exceptions now use specific types (OSError, ValueError, etc.)
-
-### configure_bot.py Decomposition
-- Reduced from 2307 to ~2000 lines
-- Extracted code to new modules with fallback support
-- Removed duplicate functions that shadowed imports
-
-### Upstream Integration
-- Added git remote for SpudGunMan/meshing-around
-- Config loader supports both upstream and MeshForge formats
-- Multi-interface support (interface2...interface9)
 
 ---
 
