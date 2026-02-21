@@ -1,6 +1,6 @@
 # MeshForge — Known Issues & Tech Debt
 
-**Last Updated:** 2026-02-21
+**Last Updated:** 2026-02-21 (Security Review Session)
 **Version:** 0.5.0-beta
 
 This document tracks open issues and technical debt. Resolved findings from the original code review (2026-01-27) have been removed — see git history for the full report.
@@ -28,6 +28,18 @@ Several files use `except Exception` where specific types would be better per th
 | `mqtt_client.py` | 283 |
 | `web/middleware.py` | 203 |
 
+#### Alert cooldown race condition in base class
+
+**File:** `callbacks.py:50-65`
+
+`_is_alert_cooled_down()` reads and writes `_alert_cooldowns` dict without a lock. The MQTT client subclass overrides with locking, but the base class is unprotected. Any future subclass that calls from multiple threads would hit a race.
+
+#### Thread resource leak in worker thread restart
+
+**File:** `meshtastic_api.py:174-188`
+
+`_start_worker_thread()` joins the previous thread with a 5-second timeout. If the thread hangs past the timeout, a new thread starts alongside the old one. Under sustained hangs, threads accumulate.
+
 ---
 
 ### MEDIUM
@@ -37,6 +49,22 @@ Several files use `except Exception` where specific types would be better per th
 **Files:** `mqtt_client.py`, `mesh_client.py`
 
 The public Meshtastic broker credentials (`meshdev`/`large4cats`) are hardcoded as fallback defaults. These are well-known public credentials, but hardcoding normalizes a pattern that is dangerous when users add private credentials. Config file permissions are set to 0o600 which mitigates the risk.
+
+---
+
+### LOW
+
+#### Deprecated `ssl.PROTOCOL_TLS_CLIENT` usage
+
+**File:** `mqtt_client.py:244`
+
+~~`ssl.PROTOCOL_TLS_CLIENT` is deprecated in Python 3.10+ and will eventually be removed, breaking TLS connections.~~ **Fixed** — now conditionally applied via `hasattr()` check.
+
+#### Missing hostname validation for HTTP/TCP interface
+
+**File:** `meshtastic_api.py:156-168`
+
+~~Hostnames from config were used directly in URL construction without validation.~~ **Fixed** — added regex validation for hostname characters and optional port.
 
 ---
 
@@ -68,7 +96,7 @@ The public Meshtastic broker credentials (`meshdev`/`large4cats`) are hardcoded 
 
 ## Resolved Since Original Review
 
-The following categories of issues were fixed in PRs #13, #14, #16 and subsequent sessions:
+The following categories of issues were fixed in PRs #13, #14, #16, the security review (2026-02-21), and subsequent sessions:
 
 - Shell injection in `setup_headless.sh` (CRITICAL)
 - XSS in web UI (CRITICAL)
@@ -85,7 +113,14 @@ The following categories of issues were fixed in PRs #13, #14, #16 and subsequen
 - Orphaned `configure_bot_improved.py` deleted
 - `configure_bot.py` partially decomposed (2307 → 2000 lines)
 - 16 additional findings from the original 25-item review
+- WebSocket auth bypass when credentials misconfigured (CRITICAL — security review)
+- Unbounded message queue in MeshtasticAPI (HIGH — security review)
+- Unvalidated MQTT topic components (HIGH — security review)
+- Missing config validation bounds for port, intervals, delays (MEDIUM — security review)
+- Hostname validation for HTTP/TCP interfaces (HIGH — security review)
+- Deprecated SSL constant in MQTT TLS setup (HIGH — security review)
 
 ---
 
+*See SECURITY_REVIEW.md for the full security audit.*
 *See RELIABILITY_ROADMAP.md for the full development tracking list.*

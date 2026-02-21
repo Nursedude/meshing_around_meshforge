@@ -350,6 +350,10 @@ class WebApplication:
         """Check API authentication if enabled in config."""
         if not self.config.web.enable_auth:
             return
+        # Reject if auth enabled but no credentials configured (misconfiguration)
+        if not self.config.web.api_key and not self.config.web.password_hash:
+            logger.error("Auth enabled but no api_key or password_hash configured — rejecting request")
+            raise HTTPException(status_code=503, detail="Server authentication misconfigured")
         # Check API key in header only (query params leak to logs/browser history)
         api_key = request.headers.get("X-API-Key")
         if self.config.web.api_key and api_key:
@@ -819,11 +823,11 @@ class WebApplication:
             """WebSocket endpoint for real-time updates."""
             # Authenticate before accepting the connection
             if self.config.web.enable_auth:
-                # If auth enabled but no credentials configured, warn and allow
+                # Reject if auth enabled but no credentials configured (misconfiguration)
                 if not self.config.web.api_key and not self.config.web.password_hash:
-                    logger.warning(
-                        "Auth enabled but no api_key or password_hash configured — allowing WebSocket connection"
-                    )
+                    logger.error("Auth enabled but no api_key or password_hash configured — rejecting WebSocket")
+                    await websocket.close(code=1008, reason="Server auth misconfigured")
+                    return
                 else:
                     api_key = websocket.query_params.get("api_key")
                     auth_ok = False

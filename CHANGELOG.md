@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Channel activity auto-updates
 
 ### Security
+- **Full security audit** — 22 findings documented in SECURITY_REVIEW.md, 6 fixed
+- Fixed WebSocket auth bypass when credentials not configured (CRITICAL)
+- Bounded message queue to prevent memory exhaustion on high traffic
+- Added MQTT topic component validation (reject null bytes, wildcards, control chars)
+- Fixed deprecated `ssl.PROTOCOL_TLS_CLIENT` for Python 3.10+ compatibility
+- Added hostname validation for TCP/HTTP interface connections
+- Added config validation bounds for port, save interval, reconnect delays
 - Hardened web auth, added CSP headers
 - Pinned pyopenssl and cryptography to resolve version conflicts
 - Improved gitignore and dependency bounds

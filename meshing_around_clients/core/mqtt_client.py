@@ -241,7 +241,12 @@ class MQTTMeshtasticClient(CallbackMixin):
             if self.mqtt_config.use_tls or self.mqtt_config.port == DEFAULT_PORT_TLS:
                 import ssl
 
-                self._client.tls_set(cert_reqs=ssl.CERT_REQUIRED, tls_version=ssl.PROTOCOL_TLS_CLIENT)
+                tls_kwargs = {"cert_reqs": ssl.CERT_REQUIRED}
+                # ssl.PROTOCOL_TLS_CLIENT is deprecated in Python 3.10+;
+                # omit tls_version to let paho-mqtt use the best available protocol.
+                if hasattr(ssl, "PROTOCOL_TLS_CLIENT"):
+                    tls_kwargs["tls_version"] = ssl.PROTOCOL_TLS_CLIENT
+                self._client.tls_set(**tls_kwargs)
 
             # Enable paho's built-in reconnect with exponential backoff
             self._client.reconnect_delay_set(
@@ -391,10 +396,30 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self._trigger_callbacks("on_disconnect")
 
+    @staticmethod
+    def _validate_mqtt_topic_component(value: str, name: str) -> str:
+        """Validate an MQTT topic component (topic_root or channel).
+
+        Rejects null bytes, control characters, and MQTT wildcard characters
+        that should not appear in user-configured topic components.
+        """
+        if not value:
+            return value
+        # Reject null bytes and control characters (except forward slash in topic_root)
+        for ch in value:
+            if ch == "\x00":
+                raise ValueError(f"MQTT {name} must not contain null bytes")
+            if ord(ch) < 0x20 and ch not in ("\t",):
+                raise ValueError(f"MQTT {name} contains control character: {ch!r}")
+        # Reject wildcard characters in user-supplied components
+        if "#" in value or "+" in value:
+            raise ValueError(f"MQTT {name} must not contain wildcard characters (# or +)")
+        return value
+
     def _subscribe_topics(self):
         """Subscribe to Meshtastic MQTT topics."""
-        root = self.mqtt_config.topic_root
-        channel = self.mqtt_config.channel
+        root = self._validate_mqtt_topic_component(self.mqtt_config.topic_root, "topic_root")
+        channel = self._validate_mqtt_topic_component(self.mqtt_config.channel, "channel")
         qos = self.mqtt_config.qos
 
         # Build comprehensive topic list

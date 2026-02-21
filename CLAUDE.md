@@ -149,6 +149,7 @@ meshing_around_meshforge/
 | `core/mesh_crypto.py` | Encryption | AES-256-CTR, optional deps |
 | `tui/app.py` | Terminal UI | Rich-based, 6 screens |
 | `web/app.py` | Web UI | FastAPI + WebSocket |
+| `SECURITY_REVIEW.md` | Security audit | 22 findings, severity-rated, remediation status |
 
 ## Testing
 

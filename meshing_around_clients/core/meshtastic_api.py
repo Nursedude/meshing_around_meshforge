@@ -6,6 +6,7 @@ Provides interface to communicate with Meshtastic devices.
 import logging
 import queue
 import random
+import re
 import threading
 import uuid
 from dataclasses import dataclass
@@ -16,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 # Connection timeout for serial/TCP/BLE interfaces (seconds)
 CONNECT_TIMEOUT_SECONDS = 30.0
+
+# Hostname validation: alphanumeric, dots, hyphens, underscores, optional port
+_HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 
 from .callbacks import CallbackMixin  # noqa: E402
 from .config import Config  # noqa: E402
@@ -68,7 +72,7 @@ class MeshtasticAPI(CallbackMixin):
         self.interface = None
         self.network = MeshNetwork()
         self.connection_info = ConnectionInfo()
-        self._message_queue: queue.Queue = queue.Queue()
+        self._message_queue: queue.Queue = queue.Queue(maxsize=5000)
         self._init_callbacks()
         self._running = False
         self._stop_event = threading.Event()
@@ -151,6 +155,8 @@ class MeshtasticAPI(CallbackMixin):
             hostname = self.config.interface.hostname
             if not hostname:
                 raise ValueError("TCP hostname not configured")
+            if not _HOSTNAME_RE.match(hostname):
+                raise ValueError(f"Invalid TCP hostname: {hostname!r}")
             self.connection_info.device_path = hostname
             return meshtastic.tcp_interface.TCPInterface(hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "http":
@@ -159,6 +165,8 @@ class MeshtasticAPI(CallbackMixin):
                 hostname = self.config.interface.hostname
                 if not hostname:
                     raise ValueError("HTTP URL not configured (set http_url or hostname)")
+                if not _HOSTNAME_RE.match(hostname):
+                    raise ValueError(f"Invalid HTTP hostname: {hostname!r}")
                 base_url = f"http://{hostname}"
             self.connection_info.device_path = base_url
             return meshtastic.http_interface.HTTPInterface(base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
@@ -366,7 +374,10 @@ class MeshtasticAPI(CallbackMixin):
 
     def _on_receive(self, packet: dict, interface: Any) -> None:
         """Handle received packet from Meshtastic."""
-        self._message_queue.put(("receive", packet))
+        try:
+            self._message_queue.put_nowait(("receive", packet))
+        except queue.Full:
+            logger.warning("Message queue full (maxsize=%d), dropping packet", self._message_queue.maxsize)
 
     def _on_connection(self, interface: Any, topic: Any = None) -> None:
         """Handle connection established event."""

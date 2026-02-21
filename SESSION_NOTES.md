@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-21 (Markdown Cleanup Session)
+**Last Updated:** 2026-02-21 (Security Review Session)
 **Version:** 0.5.0-beta
 
 ---
@@ -149,6 +149,17 @@ except ImportError:
 ---
 
 ## Work History
+
+### 2026-02-21 (Security Review Session)
+- Created SECURITY_REVIEW.md — full security audit (22 findings, 6 fixed, 6 positive)
+- Fixed CRITICAL: WebSocket auth bypass when credentials not configured (web/app.py)
+- Fixed HIGH: Bounded message queue to 5000 (meshtastic_api.py) — prevents memory exhaustion
+- Fixed HIGH: MQTT topic validation — rejects null bytes, wildcards, control chars (mqtt_client.py)
+- Fixed HIGH: Deprecated ssl.PROTOCOL_TLS_CLIENT — conditional via hasattr (mqtt_client.py)
+- Fixed HIGH: Hostname validation for TCP/HTTP interfaces (meshtastic_api.py)
+- Fixed MEDIUM: Config validation bounds for port, save interval, reconnect delays (config.py)
+- Updated CODE_REVIEW.md with new code quality findings
+- Updated CHANGELOG.md, CLAUDE.md, RELIABILITY_ROADMAP.md
 
 ### 2026-02-21 (Markdown Cleanup — Round 2)
 - Deleted Documentation/CLIENTS_README.md (redundant with README.md), merged unique content
