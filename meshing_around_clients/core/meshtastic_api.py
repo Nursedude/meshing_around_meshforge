@@ -242,31 +242,55 @@ class MeshtasticAPI:
             self.interface = self._create_interface(interface_type)
 
             # Subscribe to meshtastic events AFTER interface creation
-            # to prevent leaked subscriptions if creation fails
+            # to prevent leaked subscriptions if creation fails.
+            # Wrapped in try/except to clean up subscriptions if subsequent
+            # setup steps (_load_node_database, _start_worker_thread, etc.) fail.
             pub.subscribe(self._on_receive, "meshtastic.receive")
             pub.subscribe(self._on_connection, "meshtastic.connection.established")
             pub.subscribe(self._on_disconnect_event, "meshtastic.connection.lost")
 
-            self.connection_info.interface_type = interface_type
-            self.connection_info.connected = True
-            self.network.connection_status = "connected"
+            try:
+                self.connection_info.interface_type = interface_type
+                self.connection_info.connected = True
+                self.network.connection_status = "connected"
 
-            # Get my node info
-            if self.interface.myInfo:
-                self.connection_info.my_node_id = hex(self.interface.myInfo.my_node_num)
-                self.connection_info.my_node_num = self.interface.myInfo.my_node_num
-                self.network.my_node_id = self.connection_info.my_node_id
+                # Get my node info
+                if self.interface.myInfo:
+                    self.connection_info.my_node_id = hex(self.interface.myInfo.my_node_num)
+                    self.connection_info.my_node_num = self.interface.myInfo.my_node_num
+                    self.network.my_node_id = self.connection_info.my_node_id
 
-            # Load initial node database
-            self._load_node_database()
+                # Load initial node database
+                self._load_node_database()
 
-            self._start_worker_thread()
+                self._start_worker_thread()
 
-            # Start auto-save thread
-            self._start_auto_save()
+                # Start auto-save thread
+                self._start_auto_save()
 
-            self._trigger_callbacks("on_connect", self.connection_info)
-            return True
+                self._trigger_callbacks("on_connect", self.connection_info)
+                return True
+
+            except Exception:
+                # Clean up subscriptions and interface on partial setup failure
+                for topic, handler in [
+                    ("meshtastic.receive", self._on_receive),
+                    ("meshtastic.connection.established", self._on_connection),
+                    ("meshtastic.connection.lost", self._on_disconnect_event),
+                ]:
+                    try:
+                        pub.unsubscribe(handler, topic)
+                    except Exception:
+                        pass
+                if self.interface:
+                    try:
+                        self.interface.close()
+                    except (OSError, AttributeError, RuntimeError):
+                        pass
+                    self.interface = None
+                self.connection_info.connected = False
+                self.network.connection_status = "error"
+                raise
 
         except (OSError, ConnectionError, TimeoutError) as e:
             self.connection_info.error_message = f"Connection failed: {e}"

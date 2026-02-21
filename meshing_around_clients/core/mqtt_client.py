@@ -341,30 +341,35 @@ class MQTTMeshtasticClient:
             # Start network loop in background
             self._client.loop_start()
 
-            # Register atexit cleanup (from meshforge)
-            atexit.register(self._atexit_cleanup)
+            try:
+                # Register atexit cleanup (from meshforge)
+                atexit.register(self._atexit_cleanup)
 
-            # Wait for connection (monotonic clock avoids wall-clock jumps)
-            timeout = 10
-            start = time.monotonic()
-            while not self.is_connected and (time.monotonic() - start) < timeout:
-                time.sleep(0.1)
+                # Wait for connection (monotonic clock avoids wall-clock jumps)
+                timeout = 10
+                start = time.monotonic()
+                while not self.is_connected and (time.monotonic() - start) < timeout:
+                    time.sleep(0.1)
 
-            if self.is_connected:
-                self.network.connection_status = "connected (MQTT)"
-                self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
-                self._connection_start = datetime.now(timezone.utc)
-                self._message_count = 0
-                with self._stats_lock:
-                    self._stats["messages_received"] = 0
-                    self._stats["messages_rejected"] = 0
-                # Start background stale node cleanup thread
-                self._start_cleanup_thread()
-                return True
-            else:
-                # Connection timed out - stop the background loop thread
+                if self.is_connected:
+                    self.network.connection_status = "connected (MQTT)"
+                    self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
+                    self._connection_start = datetime.now(timezone.utc)
+                    self._message_count = 0
+                    with self._stats_lock:
+                        self._stats["messages_received"] = 0
+                        self._stats["messages_rejected"] = 0
+                    # Start background stale node cleanup thread
+                    self._start_cleanup_thread()
+                    return True
+                else:
+                    # Connection timed out - stop the background loop thread
+                    self._client.loop_stop()
+                    return False
+            except Exception:
+                # Ensure the background loop is stopped if anything goes wrong
                 self._client.loop_stop()
-                return False
+                raise
 
         except (OSError, ConnectionError, TimeoutError) as e:
             logger.error("MQTT connection error (%s): %s", type(e).__name__, e)
