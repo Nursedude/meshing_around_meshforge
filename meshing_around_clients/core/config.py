@@ -127,6 +127,7 @@ class MQTTConfig:
     qos: int = 1
     # Reconnect settings
     reconnect_delay: int = 5
+    max_reconnect_delay: int = 300  # Max backoff between reconnect attempts
     max_reconnect_attempts: int = 10
 
 
@@ -337,6 +338,7 @@ class Config:
                 raw_qos = self._parser.getint("mqtt", "qos", fallback=1)
                 self.mqtt.qos = raw_qos if raw_qos in (0, 1, 2) else 1
                 self.mqtt.reconnect_delay = self._parser.getint("mqtt", "reconnect_delay", fallback=5)
+                self.mqtt.max_reconnect_delay = self._parser.getint("mqtt", "max_reconnect_delay", fallback=300)
                 self.mqtt.max_reconnect_attempts = self._parser.getint("mqtt", "max_reconnect_attempts", fallback=10)
 
             # Storage
@@ -432,6 +434,7 @@ class Config:
             self._parser.set("mqtt", "encryption_key", self.mqtt.encryption_key)
             self._parser.set("mqtt", "qos", str(self.mqtt.qos))
             self._parser.set("mqtt", "reconnect_delay", str(self.mqtt.reconnect_delay))
+            self._parser.set("mqtt", "max_reconnect_delay", str(self.mqtt.max_reconnect_delay))
             self._parser.set("mqtt", "max_reconnect_attempts", str(self.mqtt.max_reconnect_attempts))
 
             # Storage

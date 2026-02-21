@@ -22,11 +22,10 @@ import struct
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
-from .config import Config
+from .config import Config, MQTTConfig
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
     CHUTIL_WARNING_THRESHOLD,
@@ -95,47 +94,6 @@ HEALTH_SLOW_TIMEOUT = 60  # 1 minute without messages = slow
 MAX_ALERT_COOLDOWNS = 1000  # Prune oldest entries when exceeded
 
 
-@dataclass
-class MQTTConfig:
-    """MQTT connection configuration."""
-
-    broker: str = "mqtt.meshtastic.org"
-    port: int = 1883
-    use_tls: bool = False
-    # Public credentials for mqtt.meshtastic.org (see meshtastic.org/docs/software/mqtt).
-    # These are intentionally public and shared by all Meshtastic clients.
-    username: str = "meshdev"
-    password: str = "large4cats"
-    topic_root: str = "msh/US"
-    channel: str = "LongFast"
-    node_id: str = ""  # Our node ID for sending
-    client_id: str = ""
-    encryption_key: str = ""  # Base64 encoded encryption key
-    qos: int = 1  # MQTT QoS level
-    reconnect_delay: int = 5
-    max_reconnect_delay: int = 300  # Max delay between reconnect attempts
-    max_reconnect_attempts: int = 10
-
-    @classmethod
-    def from_config(cls, config: Config) -> "MQTTConfig":
-        """Create MQTTConfig from Config object."""
-        return cls(
-            broker=config.mqtt.broker,
-            port=config.mqtt.port,
-            use_tls=config.mqtt.use_tls,
-            username=config.mqtt.username,
-            password=config.mqtt.password,
-            topic_root=config.mqtt.topic_root,
-            channel=config.mqtt.channel,
-            node_id=config.mqtt.node_id,
-            client_id=config.mqtt.client_id,
-            encryption_key=config.mqtt.encryption_key,
-            qos=config.mqtt.qos,
-            reconnect_delay=config.mqtt.reconnect_delay,
-            max_reconnect_attempts=config.mqtt.max_reconnect_attempts,
-        )
-
-
 class MQTTMeshtasticClient:
     """
     MQTT client for Meshtastic mesh networks.
@@ -150,11 +108,7 @@ class MQTTMeshtasticClient:
             raise ImportError("paho-mqtt not installed. Run: pip install paho-mqtt")
 
         self.config = config
-        # Use provided config or build from Config object
-        if mqtt_config:
-            self.mqtt_config = mqtt_config
-        else:
-            self.mqtt_config = MQTTConfig.from_config(config)
+        self.mqtt_config = mqtt_config or config.mqtt
 
         # MQTT client
         self._client: Optional[mqtt.Client] = None
