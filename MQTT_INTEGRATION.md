@@ -198,26 +198,26 @@ type = mqtt
 ## Python Integration
 
 ```python
-from meshing_around_clients.core.mqtt_client import MQTTClient, MQTTConfig
+from meshing_around_clients.core.config import Config, MQTTConfig
+from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
 # Configure
-config = MQTTConfig(
-    broker="mqtt.meshforge-hi.local",
-    port=1883,
-    topic_root="msh/US",
-    channel="meshforge",
-    encryption_key="YOUR_256BIT_PSK_BASE64",
-    node_id="!meshforg"
-)
+config = Config()
+config.mqtt = MQTTConfig()
+config.mqtt.broker = "mqtt.meshforge-hi.local"
+config.mqtt.port = 1883
+config.mqtt.topic_root = "msh/US"
+config.mqtt.channel = "meshforge"
+config.mqtt.encryption_key = "YOUR_256BIT_PSK_BASE64"
+config.mqtt.node_id = "!meshforg"
 
 # Connect
-client = MQTTClient(config)
-client.on_message = lambda msg: print(f"Received: {msg}")
-client.on_node_update = lambda node: print(f"Node: {node.short_name}")
+client = MQTTMeshtasticClient(config)
 client.connect()
 
-# Send
-client.send_text("Hello from MeshForge!", channel="meshforge")
+# Access network state
+for node in client.network.nodes.values():
+    print(f"Node: {node.short_name} ({node.node_id})")
 ```
 
 ---
