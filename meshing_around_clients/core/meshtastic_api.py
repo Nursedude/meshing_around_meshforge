@@ -7,17 +7,17 @@ import logging
 import queue
 import random
 import threading
-import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # Connection timeout for serial/TCP/BLE interfaces (seconds)
 CONNECT_TIMEOUT_SECONDS = 30.0
 
+from .callbacks import CallbackMixin  # noqa: E402
 from .config import Config  # noqa: E402
 from .models import (  # noqa: E402
     Alert,
@@ -57,7 +57,7 @@ class ConnectionInfo:
     my_node_num: int = 0
 
 
-class MeshtasticAPI:
+class MeshtasticAPI(CallbackMixin):
     """
     API layer for Meshtastic device communication.
     Provides a unified interface for serial, TCP, and BLE connections.
@@ -69,15 +69,7 @@ class MeshtasticAPI:
         self.network = MeshNetwork()
         self.connection_info = ConnectionInfo()
         self._message_queue: queue.Queue = queue.Queue()
-        self._callbacks: Dict[str, List[Callable]] = {
-            "on_connect": [],
-            "on_disconnect": [],
-            "on_message": [],
-            "on_node_update": [],
-            "on_alert": [],
-            "on_position": [],
-            "on_telemetry": [],
-        }
+        self._init_callbacks()
         self._running = False
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -85,48 +77,12 @@ class MeshtasticAPI:
         self._last_save_time: Optional[datetime] = None
         self._save_lock = threading.Lock()  # Guard against overlapping saves
 
-        # Alert deduplication: (node_id, alert_type) -> last alert time (monotonic)
-        self._alert_cooldowns: Dict[str, float] = {}
-        self._alert_cooldown_seconds = 300  # 5 minute cooldown per node per alert type
-
         # Load persisted state if enabled
         self._load_persisted_state()
 
     @property
     def is_connected(self) -> bool:
         return self.connection_info.connected
-
-    def register_callback(self, event: str, callback: Callable) -> None:
-        """Register a callback for an event."""
-        if event in self._callbacks:
-            self._callbacks[event].append(callback)
-
-    def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
-        """Trigger all callbacks for an event."""
-        if event in self._callbacks:
-            for callback in self._callbacks[event]:
-                try:
-                    callback(*args, **kwargs)
-                except (TypeError, ValueError, AttributeError) as e:
-                    logger.warning("Callback error for %s (%s): %s", event, type(e).__name__, e)
-
-    def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
-        """Check if enough time has passed since the last alert of this type for this node.
-
-        Returns True if the alert should be suppressed (still in cooldown),
-        False if the alert should fire.
-        """
-        key = f"{node_id}:{alert_type}"
-        now = time.monotonic()
-        last_time = self._alert_cooldowns.get(key)
-        if last_time is not None and (now - last_time) < self._alert_cooldown_seconds:
-            return True  # Still in cooldown — suppress
-        self._alert_cooldowns[key] = now
-        # Prune stale cooldown entries to prevent unbounded growth
-        if len(self._alert_cooldowns) > 1000:
-            cutoff = now - (self._alert_cooldown_seconds * 2)
-            self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
-        return False  # Cooldown expired — allow alert
 
     # ==================== Persistence Methods ====================
 
@@ -242,31 +198,55 @@ class MeshtasticAPI:
             self.interface = self._create_interface(interface_type)
 
             # Subscribe to meshtastic events AFTER interface creation
-            # to prevent leaked subscriptions if creation fails
+            # to prevent leaked subscriptions if creation fails.
+            # Wrapped in try/except to clean up subscriptions if subsequent
+            # setup steps (_load_node_database, _start_worker_thread, etc.) fail.
             pub.subscribe(self._on_receive, "meshtastic.receive")
             pub.subscribe(self._on_connection, "meshtastic.connection.established")
             pub.subscribe(self._on_disconnect_event, "meshtastic.connection.lost")
 
-            self.connection_info.interface_type = interface_type
-            self.connection_info.connected = True
-            self.network.connection_status = "connected"
+            try:
+                self.connection_info.interface_type = interface_type
+                self.connection_info.connected = True
+                self.network.connection_status = "connected"
 
-            # Get my node info
-            if self.interface.myInfo:
-                self.connection_info.my_node_id = hex(self.interface.myInfo.my_node_num)
-                self.connection_info.my_node_num = self.interface.myInfo.my_node_num
-                self.network.my_node_id = self.connection_info.my_node_id
+                # Get my node info
+                if self.interface.myInfo:
+                    self.connection_info.my_node_id = hex(self.interface.myInfo.my_node_num)
+                    self.connection_info.my_node_num = self.interface.myInfo.my_node_num
+                    self.network.my_node_id = self.connection_info.my_node_id
 
-            # Load initial node database
-            self._load_node_database()
+                # Load initial node database
+                self._load_node_database()
 
-            self._start_worker_thread()
+                self._start_worker_thread()
 
-            # Start auto-save thread
-            self._start_auto_save()
+                # Start auto-save thread
+                self._start_auto_save()
 
-            self._trigger_callbacks("on_connect", self.connection_info)
-            return True
+                self._trigger_callbacks("on_connect", self.connection_info)
+                return True
+
+            except Exception:
+                # Clean up subscriptions and interface on partial setup failure
+                for topic, handler in [
+                    ("meshtastic.receive", self._on_receive),
+                    ("meshtastic.connection.established", self._on_connection),
+                    ("meshtastic.connection.lost", self._on_disconnect_event),
+                ]:
+                    try:
+                        pub.unsubscribe(handler, topic)
+                    except Exception:
+                        pass
+                if self.interface:
+                    try:
+                        self.interface.close()
+                    except (OSError, AttributeError, RuntimeError):
+                        pass
+                    self.interface = None
+                self.connection_info.connected = False
+                self.network.connection_status = "error"
+                raise
 
         except (OSError, ConnectionError, TimeoutError) as e:
             self.connection_info.error_message = f"Connection failed: {e}"

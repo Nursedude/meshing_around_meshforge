@@ -4,6 +4,7 @@ Extracted from app.py to keep route definitions separate from
 cross-cutting concerns (CSRF, rate limiting, WebSocket management).
 """
 
+import asyncio
 import hmac
 import logging
 import secrets
@@ -87,14 +88,14 @@ class CSRFProtection:
 
         return hmac.compare_digest(cookie_token, header_token)
 
-    def set_cookie(self, response: JSONResponse, token: str) -> None:
+    def set_cookie(self, response: JSONResponse, token: str, *, secure: bool = False) -> None:
         """Set CSRF cookie on a response."""
         response.set_cookie(
             key=self.COOKIE_NAME,
             value=token,
             httponly=False,  # Must be readable by JavaScript for double-submit cookie pattern
             samesite="strict",
-            secure=False,  # Set True if using HTTPS
+            secure=secure,
             max_age=3600,
         )
 
@@ -160,43 +161,53 @@ class RateLimiter:
 
 
 class WebSocketManager:
-    """Manages WebSocket connections for real-time updates."""
+    """Manages WebSocket connections for real-time updates.
+
+    All mutations to ``active_connections`` are protected by an asyncio.Lock
+    to prevent races when broadcast() yields between sends while connect/disconnect
+    modify the list concurrently.
+    """
 
     def __init__(self, max_connections: int = 100):
         self.active_connections: List[WebSocket] = []
         self._max_connections = max_connections
+        self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket) -> bool:
         """Accept and track a WebSocket connection.
 
         Returns False if the connection limit has been reached.
         """
-        if len(self.active_connections) >= self._max_connections:
-            await websocket.close(code=1013, reason="Too many connections")
-            return False
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        return True
+        async with self._lock:
+            if len(self.active_connections) >= self._max_connections:
+                await websocket.close(code=1013, reason="Too many connections")
+                return False
+            await websocket.accept()
+            self.active_connections.append(websocket)
+            return True
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
+    async def disconnect(self, websocket: WebSocket):
+        async with self._lock:
+            if websocket in self.active_connections:
+                self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients."""
-        dead_connections = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError):
-                dead_connections.append(connection)
-            except Exception as e:
-                # Catch-all for unexpected transport errors to prevent
-                # zombie connections from accumulating
-                dead_connections.append(connection)
-                logger.debug("Unexpected %s broadcasting to WebSocket client", type(e).__name__)
-        for dead in dead_connections:
-            self.disconnect(dead)
+        async with self._lock:
+            dead_connections = []
+            for connection in self.active_connections:
+                try:
+                    await connection.send_json(message)
+                except (WebSocketDisconnect, RuntimeError, ConnectionError, OSError):
+                    dead_connections.append(connection)
+                except Exception as e:
+                    # Catch-all for unexpected transport errors to prevent
+                    # zombie connections from accumulating
+                    dead_connections.append(connection)
+                    logger.debug("Unexpected %s broadcasting to WebSocket client", type(e).__name__)
+            for dead in dead_connections:
+                if dead in self.active_connections:
+                    self.active_connections.remove(dead)
 
     async def broadcast_update(self, update_type: str, data: dict):
         """Broadcast an update event."""

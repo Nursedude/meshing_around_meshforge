@@ -39,6 +39,29 @@ MESSAGE_HISTORY_MAX = 1000
 ALERT_HISTORY_MAX = 500
 
 
+def _parse_datetime(value: Any) -> Optional[datetime]:
+    """Parse an ISO datetime string, ensuring UTC timezone."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_enum(enum_cls, value: Any, default):
+    """Parse an enum value with fallback to default."""
+    if not value:
+        return default
+    try:
+        return enum_cls(value)
+    except (ValueError, KeyError):
+        return default
+
+
 class NodeRole(Enum):
     """Node role types in the mesh network."""
 
@@ -834,29 +857,12 @@ class MeshNetwork:
         network.my_node_id = data.get("my_node_id", "")
         network.connection_status = data.get("connection_status", "disconnected")
         network.channel_count = data.get("channel_count", 0)
-
-        # Restore last_update
-        last_update = data.get("last_update")
-        if last_update:
-            try:
-                dt = datetime.fromisoformat(last_update)
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                network.last_update = dt
-            except (ValueError, TypeError):
-                network.last_update = None
+        network.last_update = _parse_datetime(data.get("last_update"))
 
         # Restore nodes
         nodes_data = data.get("nodes", {})
         for node_id, node_dict in nodes_data.items():
             try:
-                # Get role, handling both string and missing values
-                role_str = node_dict.get("role", "CLIENT")
-                try:
-                    role = NodeRole(role_str) if role_str else NodeRole.CLIENT
-                except ValueError:
-                    role = NodeRole.CLIENT
-
                 node = Node(
                     node_id=node_dict.get("node_id", node_id),
                     node_num=node_dict.get("node_num", 0),
@@ -864,27 +870,10 @@ class MeshNetwork:
                     long_name=node_dict.get("long_name", ""),
                     hardware_model=node_dict.get("hardware_model", node_dict.get("hardware", "UNKNOWN")),
                     is_online=node_dict.get("is_online", False),
-                    role=role,
+                    role=_parse_enum(NodeRole, node_dict.get("role", "CLIENT"), NodeRole.CLIENT),
                 )
-                # Restore timestamps
-                last_heard = node_dict.get("last_heard")
-                if last_heard:
-                    try:
-                        dt = datetime.fromisoformat(last_heard)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        node.last_heard = dt
-                    except (ValueError, TypeError):
-                        pass
-                first_seen = node_dict.get("first_seen")
-                if first_seen:
-                    try:
-                        dt = datetime.fromisoformat(first_seen)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        node.first_seen = dt
-                    except (ValueError, TypeError):
-                        pass
+                node.last_heard = _parse_datetime(node_dict.get("last_heard"))
+                node.first_seen = _parse_datetime(node_dict.get("first_seen"))
                 network.nodes[node_id] = node
             except (KeyError, ValueError, TypeError):
                 continue  # Skip invalid node data
@@ -897,20 +886,12 @@ class MeshNetwork:
                 channel = Channel(
                     index=idx,
                     name=ch_dict.get("name", ""),
-                    role=ChannelRole(ch_dict.get("role", "DISABLED")),
+                    role=_parse_enum(ChannelRole, ch_dict.get("role", "DISABLED"), ChannelRole.DISABLED),
                     uplink_enabled=ch_dict.get("uplink_enabled", False),
                     downlink_enabled=ch_dict.get("downlink_enabled", False),
                     message_count=ch_dict.get("message_count", 0),
                 )
-                last_activity = ch_dict.get("last_activity")
-                if last_activity:
-                    try:
-                        dt = datetime.fromisoformat(last_activity)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        channel.last_activity = dt
-                    except (ValueError, TypeError):
-                        pass
+                channel.last_activity = _parse_datetime(ch_dict.get("last_activity"))
                 network.channels[idx] = channel
             except (KeyError, ValueError, TypeError):
                 continue  # Skip invalid channel data
@@ -919,13 +900,6 @@ class MeshNetwork:
         messages_data = data.get("messages", [])
         for msg_dict in messages_data:
             try:
-                # Parse message type
-                msg_type_str = msg_dict.get("message_type", "text")
-                try:
-                    msg_type = MessageType(msg_type_str)
-                except ValueError:
-                    msg_type = MessageType.TEXT
-
                 msg = Message(
                     id=msg_dict.get("id", ""),
                     sender_id=msg_dict.get("sender_id", ""),
@@ -933,7 +907,7 @@ class MeshNetwork:
                     recipient_id=msg_dict.get("recipient_id", ""),
                     channel=msg_dict.get("channel", 0),
                     text=msg_dict.get("text", ""),
-                    message_type=msg_type,
+                    message_type=_parse_enum(MessageType, msg_dict.get("message_type", "text"), MessageType.TEXT),
                     hop_count=msg_dict.get("hop_count", 0),
                     snr=msg_dict.get("snr", 0.0),
                     rssi=msg_dict.get("rssi", 0),
@@ -941,16 +915,7 @@ class MeshNetwork:
                     is_incoming=msg_dict.get("is_incoming", True),
                     ack_received=msg_dict.get("ack_received", False),
                 )
-                # Restore timestamp
-                ts = msg_dict.get("timestamp")
-                if ts:
-                    try:
-                        dt = datetime.fromisoformat(ts)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        msg.timestamp = dt
-                    except (ValueError, TypeError):
-                        pass
+                msg.timestamp = _parse_datetime(msg_dict.get("timestamp")) or msg.timestamp
                 network.messages.append(msg)
             except (KeyError, ValueError, TypeError):
                 continue  # Skip invalid message data
@@ -959,15 +924,9 @@ class MeshNetwork:
         alerts_data = data.get("alerts", [])
         for alert_dict in alerts_data:
             try:
-                alert_type_str = alert_dict.get("alert_type", "custom")
-                try:
-                    alert_type = AlertType(alert_type_str)
-                except ValueError:
-                    alert_type = AlertType.CUSTOM
-
                 alert = Alert(
                     id=alert_dict.get("id", ""),
-                    alert_type=alert_type,
+                    alert_type=_parse_enum(AlertType, alert_dict.get("alert_type", "custom"), AlertType.CUSTOM),
                     title=alert_dict.get("title", ""),
                     message=alert_dict.get("message", ""),
                     severity=alert_dict.get("severity", 1),
@@ -975,16 +934,7 @@ class MeshNetwork:
                     acknowledged=alert_dict.get("acknowledged", False),
                     metadata=alert_dict.get("metadata", {}),
                 )
-                # Restore timestamp
-                ts = alert_dict.get("timestamp")
-                if ts:
-                    try:
-                        dt = datetime.fromisoformat(ts)
-                        if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=timezone.utc)
-                        alert.timestamp = dt
-                    except (ValueError, TypeError):
-                        pass
+                alert.timestamp = _parse_datetime(alert_dict.get("timestamp")) or alert.timestamp
                 network.alerts.append(alert)
             except (KeyError, ValueError, TypeError):
                 continue  # Skip invalid alert data

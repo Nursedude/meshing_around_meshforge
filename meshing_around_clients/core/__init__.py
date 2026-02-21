@@ -15,19 +15,18 @@ alert_configurators, config_schema) have been moved to
 meshing_around_clients.setup.
 """
 
-from .config import Config
+from .config import Config, MQTTConfig
 from .meshtastic_api import MeshtasticAPI, MockMeshtasticAPI
 from .models import Alert, MeshNetwork, Message, Node, NodeTelemetry, Position
 
 # MQTT is optional
 try:
-    from .mqtt_client import MQTTConfig, MQTTMeshtasticClient
+    from .mqtt_client import MQTTMeshtasticClient
 
     MQTT_AVAILABLE = True
 except ImportError:
     MQTT_AVAILABLE = False
     MQTTMeshtasticClient = None
-    MQTTConfig = None
 
 __all__ = [
     # Models

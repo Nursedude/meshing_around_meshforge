@@ -22,11 +22,11 @@ import struct
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from .config import Config
+from .callbacks import CallbackMixin
+from .config import Config, MQTTConfig
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
     CHUTIL_WARNING_THRESHOLD,
@@ -95,46 +95,7 @@ HEALTH_SLOW_TIMEOUT = 60  # 1 minute without messages = slow
 MAX_ALERT_COOLDOWNS = 1000  # Prune oldest entries when exceeded
 
 
-@dataclass
-class MQTTConfig:
-    """MQTT connection configuration."""
-
-    broker: str = "mqtt.meshtastic.org"
-    port: int = 1883
-    use_tls: bool = False
-    username: str = "meshdev"
-    password: str = "large4cats"
-    topic_root: str = "msh/US"
-    channel: str = "LongFast"
-    node_id: str = ""  # Our node ID for sending
-    client_id: str = ""
-    encryption_key: str = ""  # Base64 encoded encryption key
-    qos: int = 1  # MQTT QoS level
-    reconnect_delay: int = 5
-    max_reconnect_delay: int = 300  # Max delay between reconnect attempts
-    max_reconnect_attempts: int = 10
-
-    @classmethod
-    def from_config(cls, config: Config) -> "MQTTConfig":
-        """Create MQTTConfig from Config object."""
-        return cls(
-            broker=config.mqtt.broker,
-            port=config.mqtt.port,
-            use_tls=config.mqtt.use_tls,
-            username=config.mqtt.username,
-            password=config.mqtt.password,
-            topic_root=config.mqtt.topic_root,
-            channel=config.mqtt.channel,
-            node_id=config.mqtt.node_id,
-            client_id=config.mqtt.client_id,
-            encryption_key=config.mqtt.encryption_key,
-            qos=config.mqtt.qos,
-            reconnect_delay=config.mqtt.reconnect_delay,
-            max_reconnect_attempts=config.mqtt.max_reconnect_attempts,
-        )
-
-
-class MQTTMeshtasticClient:
+class MQTTMeshtasticClient(CallbackMixin):
     """
     MQTT client for Meshtastic mesh networks.
     Allows monitoring and participating in mesh without a radio.
@@ -148,11 +109,7 @@ class MQTTMeshtasticClient:
             raise ImportError("paho-mqtt not installed. Run: pip install paho-mqtt")
 
         self.config = config
-        # Use provided config or build from Config object
-        if mqtt_config:
-            self.mqtt_config = mqtt_config
-        else:
-            self.mqtt_config = MQTTConfig.from_config(config)
+        self.mqtt_config = mqtt_config or config.mqtt
 
         # MQTT client
         self._client: Optional[mqtt.Client] = None
@@ -163,16 +120,8 @@ class MQTTMeshtasticClient:
         # Network state
         self.network = MeshNetwork()
 
-        # Callbacks
-        self._callbacks: Dict[str, List[Callable]] = {
-            "on_connect": [],
-            "on_disconnect": [],
-            "on_message": [],
-            "on_node_update": [],
-            "on_alert": [],
-            "on_position": [],
-            "on_telemetry": [],
-        }
+        # Callbacks and alert cooldowns (from CallbackMixin)
+        self._init_callbacks()
 
         # Connection health tracking
         self._last_message_time: Optional[datetime] = None
@@ -190,12 +139,6 @@ class MQTTMeshtasticClient:
             "telemetry_updates": 0,
             "position_updates": 0,
         }
-
-        # Alert deduplication: (node_id, alert_type) -> last alert timestamp
-        # Prevents alert fatigue from repeated threshold crossings
-        self._alert_cooldowns: Dict[tuple, float] = {}
-        _ALERT_COOLDOWN_SECONDS = 300  # 5 minute cooldown per node per alert type
-        self._alert_cooldown_seconds = _ALERT_COOLDOWN_SECONDS
 
         # Stale node cleanup
         self._cleanup_interval = STALE_CLEANUP_INTERVAL
@@ -253,37 +196,10 @@ class MQTTMeshtasticClient:
             pass
         return None
 
-    def register_callback(self, event: str, callback: Callable) -> None:
-        """Register a callback for an event."""
-        if event in self._callbacks:
-            self._callbacks[event].append(callback)
-
     def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
-        """Check if enough time has passed since the last alert of this type for this node.
-
-        Returns True if the alert should be suppressed (still in cooldown),
-        False if the alert should fire.
-        """
-        key = (node_id, alert_type)
-        now = time.monotonic()
+        """Thread-safe override — wraps base implementation with stats lock."""
         with self._stats_lock:
-            last_time = self._alert_cooldowns.get(key)
-            if last_time is not None and (now - last_time) < self._alert_cooldown_seconds:
-                return True  # Still in cooldown — suppress
-            self._alert_cooldowns[key] = now
-            # Prune stale cooldown entries (older than 2x cooldown) to prevent unbounded growth
-            if len(self._alert_cooldowns) > MAX_ALERT_COOLDOWNS:
-                cutoff = now - (self._alert_cooldown_seconds * 2)
-                self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
-            return False  # Cooldown expired — allow alert
-
-    def _trigger_callbacks(self, event: str, *args, **kwargs) -> None:
-        """Trigger all callbacks for an event."""
-        for callback in self._callbacks.get(event, []):
-            try:
-                callback(*args, **kwargs)
-            except (TypeError, ValueError, AttributeError) as e:
-                logger.warning("MQTT callback error (%s): %s", type(e).__name__, e)
+            return super()._is_alert_cooled_down(node_id, alert_type)
 
     def _create_mqtt_client(self):
         """Create MQTT client with paho v1/v2 API compatibility."""
@@ -339,30 +255,35 @@ class MQTTMeshtasticClient:
             # Start network loop in background
             self._client.loop_start()
 
-            # Register atexit cleanup (from meshforge)
-            atexit.register(self._atexit_cleanup)
+            try:
+                # Register atexit cleanup (from meshforge)
+                atexit.register(self._atexit_cleanup)
 
-            # Wait for connection (monotonic clock avoids wall-clock jumps)
-            timeout = 10
-            start = time.monotonic()
-            while not self.is_connected and (time.monotonic() - start) < timeout:
-                time.sleep(0.1)
+                # Wait for connection (monotonic clock avoids wall-clock jumps)
+                timeout = 10
+                start = time.monotonic()
+                while not self.is_connected and (time.monotonic() - start) < timeout:
+                    time.sleep(0.1)
 
-            if self.is_connected:
-                self.network.connection_status = "connected (MQTT)"
-                self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
-                self._connection_start = datetime.now(timezone.utc)
-                self._message_count = 0
-                with self._stats_lock:
-                    self._stats["messages_received"] = 0
-                    self._stats["messages_rejected"] = 0
-                # Start background stale node cleanup thread
-                self._start_cleanup_thread()
-                return True
-            else:
-                # Connection timed out - stop the background loop thread
+                if self.is_connected:
+                    self.network.connection_status = "connected (MQTT)"
+                    self.network.my_node_id = self.mqtt_config.node_id or "mqtt-client"
+                    self._connection_start = datetime.now(timezone.utc)
+                    self._message_count = 0
+                    with self._stats_lock:
+                        self._stats["messages_received"] = 0
+                        self._stats["messages_rejected"] = 0
+                    # Start background stale node cleanup thread
+                    self._start_cleanup_thread()
+                    return True
+                else:
+                    # Connection timed out - stop the background loop thread
+                    self._client.loop_stop()
+                    return False
+            except Exception:
+                # Ensure the background loop is stopped if anything goes wrong
                 self._client.loop_stop()
-                return False
+                raise
 
         except (OSError, ConnectionError, TimeoutError) as e:
             logger.error("MQTT connection error (%s): %s", type(e).__name__, e)

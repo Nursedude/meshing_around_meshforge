@@ -58,6 +58,7 @@ except ImportError:
 
 import hashlib  # noqa: E402
 import hmac  # noqa: E402
+import os  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,33 @@ WS_RECEIVE_TIMEOUT = 90
 MAX_WS_CONNECTIONS = 100
 # Maximum request body size (bytes) — 1 MB
 MAX_REQUEST_BODY_SIZE = 1_048_576
+
+_PBKDF2_ITERATIONS = 260_000  # OWASP 2023 recommendation for SHA-256
+
+
+def _hash_password(password: str, salt: bytes = None) -> str:
+    """Hash a password with PBKDF2-HMAC-SHA256 and random salt."""
+    if salt is None:
+        salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2:sha256:{_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+
+
+def _verify_password(password: str, stored: str) -> bool:
+    """Verify password against stored hash. Supports legacy SHA-256 fallback."""
+    if stored.startswith("pbkdf2:"):
+        parts = stored.split("$")
+        header = parts[0]  # "pbkdf2:sha256:260000"
+        iterations = int(header.split(":")[2])
+        salt = bytes.fromhex(parts[1])
+        expected = parts[2]
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, iterations)
+        return hmac.compare_digest(dk.hex(), expected)
+    # Legacy SHA-256 fallback — accept but log deprecation warning
+    logger.warning("Password uses legacy SHA-256 hash. Re-set password to upgrade to PBKDF2.")
+    legacy = hashlib.sha256(password.encode()).hexdigest()
+    return hmac.compare_digest(legacy, stored)
+
 
 from meshing_around_clients.core import Alert, Config, MeshtasticAPI, Message  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
@@ -152,6 +180,12 @@ class WebApplication:
             for coro in self._pending_coros:
                 self._event_loop.create_task(coro)
             self._pending_coros.clear()
+            if self.config.web.host != "127.0.0.1" and not self.config.web.enable_auth:
+                logger.warning(
+                    "Web server binding to %s without authentication enabled. "
+                    "Set enable_auth=True in mesh_client.ini [web] section.",
+                    self.config.web.host,
+                )
             success = self.api.connect()
             if not success and not self.demo_mode:
                 logger.warning(
@@ -178,6 +212,14 @@ class WebApplication:
             response = await call_next(request)
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+                "style-src 'self' 'unsafe-inline' https://unpkg.com; "
+                "img-src 'self' data: https://*.tile.openstreetmap.org https://basemaps.cartocdn.com; "
+                "connect-src 'self' ws: wss:; "
+                "font-src 'self'"
+            )
             return response
 
         # ---- Middleware: Request Body Size Limit ----
@@ -308,8 +350,8 @@ class WebApplication:
         """Check API authentication if enabled in config."""
         if not self.config.web.enable_auth:
             return
-        # Check API key in header or query param
-        api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+        # Check API key in header only (query params leak to logs/browser history)
+        api_key = request.headers.get("X-API-Key")
         if self.config.web.api_key and api_key:
             if hmac.compare_digest(api_key, self.config.web.api_key):
                 return
@@ -321,11 +363,10 @@ class WebApplication:
             try:
                 decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
                 username, password = decoded.split(":", 1)
-                pw_hash = hashlib.sha256(password.encode()).hexdigest()
                 if (
                     hmac.compare_digest(username, self.config.web.username)
                     and self.config.web.password_hash
-                    and hmac.compare_digest(pw_hash, self.config.web.password_hash)
+                    and _verify_password(password, self.config.web.password_hash)
                 ):
                     return
             except (ValueError, UnicodeDecodeError):
@@ -797,11 +838,10 @@ class WebApplication:
                             try:
                                 decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
                                 username, password = decoded.split(":", 1)
-                                pw_hash = hashlib.sha256(password.encode()).hexdigest()
                                 if (
                                     hmac.compare_digest(username, self.config.web.username)
                                     and self.config.web.password_hash
-                                    and hmac.compare_digest(pw_hash, self.config.web.password_hash)
+                                    and _verify_password(password, self.config.web.password_hash)
                                 ):
                                     auth_ok = True
                             except (ValueError, UnicodeDecodeError):
@@ -838,7 +878,7 @@ class WebApplication:
             except WebSocketDisconnect:
                 pass
             finally:
-                self.ws_manager.disconnect(websocket)
+                await self.ws_manager.disconnect(websocket)
 
     async def _handle_ws_message(self, websocket: WebSocket, msg: dict):
         """Handle incoming WebSocket message with input validation."""

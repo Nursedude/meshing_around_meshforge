@@ -26,7 +26,7 @@ class TestMQTTConfigDataclass(unittest.TestCase):
 
     def test_mqtt_config_import(self):
         """Verify MQTTConfig can be imported."""
-        from meshing_around_clients.core.mqtt_client import MQTTConfig
+        from meshing_around_clients.core.config import MQTTConfig
         cfg = MQTTConfig()
         self.assertEqual(cfg.broker, "mqtt.meshtastic.org")
         self.assertEqual(cfg.port, 1883)
@@ -36,7 +36,7 @@ class TestMQTTConfigDataclass(unittest.TestCase):
 
     def test_mqtt_config_custom(self):
         """Test MQTTConfig with custom values."""
-        from meshing_around_clients.core.mqtt_client import MQTTConfig
+        from meshing_around_clients.core.config import MQTTConfig
         cfg = MQTTConfig(
             broker="localhost",
             port=1884,
@@ -359,7 +359,7 @@ class TestMQTTConnectivity(unittest.TestCase):
 
     def test_default_credentials_format(self):
         """Verify default MQTT credentials are properly formatted."""
-        from meshing_around_clients.core.mqtt_client import MQTTConfig
+        from meshing_around_clients.core.config import MQTTConfig
         cfg = MQTTConfig()
 
         # Credentials should be non-empty strings

@@ -352,45 +352,28 @@ if not MODULES_AVAILABLE:
         config["emergencyHandler"]["alert_channel"] = str(get_input("Alert channel number", "2", int))
         print_success("Emergency alerts configured")
 
+    def _configure_disabled_alert(config: configparser.ConfigParser, display_name: str, section_name: str):
+        """Configure an alert type as disabled in fallback mode."""
+        print_section(f"{display_name} Configuration")
+        if section_name not in config:
+            config.add_section(section_name)
+        config[section_name]["enabled"] = "False"
+        print_info(f"{display_name} disabled (use full module for detailed config)")
+
     def configure_proximity_alerts(config: configparser.ConfigParser):
-        """Configure proximity alerts"""
-        print_section("Proximity Alert Configuration")
-        if "proximityAlert" not in config:
-            config.add_section("proximityAlert")
-        config["proximityAlert"]["enabled"] = "False"
-        print_info("Proximity alerts disabled (use full module for detailed config)")
+        _configure_disabled_alert(config, "Proximity Alert", "proximityAlert")
 
     def configure_altitude_alerts(config: configparser.ConfigParser):
-        """Configure altitude alerts"""
-        print_section("Altitude Alert Configuration")
-        if "altitudeAlert" not in config:
-            config.add_section("altitudeAlert")
-        config["altitudeAlert"]["enabled"] = "False"
-        print_info("Altitude alerts disabled (use full module for detailed config)")
+        _configure_disabled_alert(config, "Altitude Alert", "altitudeAlert")
 
     def configure_weather_alerts(config: configparser.ConfigParser):
-        """Configure weather alerts"""
-        print_section("Weather Alert Configuration")
-        if "weatherAlert" not in config:
-            config.add_section("weatherAlert")
-        config["weatherAlert"]["enabled"] = "False"
-        print_info("Weather alerts disabled (use full module for detailed config)")
+        _configure_disabled_alert(config, "Weather Alert", "weatherAlert")
 
     def configure_battery_alerts(config: configparser.ConfigParser):
-        """Configure battery alerts"""
-        print_section("Battery Alert Configuration")
-        if "batteryAlert" not in config:
-            config.add_section("batteryAlert")
-        config["batteryAlert"]["enabled"] = "False"
-        print_info("Battery alerts disabled (use full module for detailed config)")
+        _configure_disabled_alert(config, "Battery Alert", "batteryAlert")
 
     def configure_noisy_node_alerts(config: configparser.ConfigParser):
-        """Configure noisy node alerts"""
-        print_section("Noisy Node Alert Configuration")
-        if "noisyNodeAlert" not in config:
-            config.add_section("noisyNodeAlert")
-        config["noisyNodeAlert"]["enabled"] = "False"
-        print_info("Noisy node alerts disabled (use full module for detailed config)")
+        _configure_disabled_alert(config, "Noisy Node Alert", "noisyNodeAlert")
 
     def configure_new_node_alerts(config: configparser.ConfigParser):
         """Configure new node alerts"""
@@ -405,12 +388,7 @@ if not MODULES_AVAILABLE:
         print_success("New node alerts configured")
 
     def configure_disconnect_alerts(config: configparser.ConfigParser):
-        """Configure disconnect alerts"""
-        print_section("Disconnect Alert Configuration")
-        if "disconnectAlert" not in config:
-            config.add_section("disconnectAlert")
-        config["disconnectAlert"]["enabled"] = "False"
-        print_info("Disconnect alerts disabled (use full module for detailed config)")
+        _configure_disabled_alert(config, "Disconnect Alert", "disconnectAlert")
 
     def configure_email_sms(config: configparser.ConfigParser):
         """Configure email/SMS settings"""
