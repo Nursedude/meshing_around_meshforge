@@ -825,9 +825,7 @@ class WebApplication:
             if self.config.web.enable_auth:
                 # Reject if auth enabled but no credentials configured (misconfiguration)
                 if not self.config.web.api_key and not self.config.web.password_hash:
-                    logger.error(
-                        "Auth enabled but no api_key or password_hash configured — rejecting WebSocket"
-                    )
+                    logger.error("Auth enabled but no api_key or password_hash configured — rejecting WebSocket")
                     await websocket.close(code=1008, reason="Server auth misconfigured")
                     return
                 else:
