@@ -113,6 +113,8 @@ class MQTTConfig:
     broker: str = "mqtt.meshtastic.org"
     port: int = 1883
     use_tls: bool = False
+    # Public credentials for mqtt.meshtastic.org (see meshtastic.org/docs/software/mqtt).
+    # These are intentionally public and shared by all Meshtastic clients.
     username: str = "meshdev"
     password: str = "large4cats"
     topic_root: str = "msh/US"
