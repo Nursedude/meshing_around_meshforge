@@ -81,6 +81,7 @@ class WebConfig:
     enable_auth: bool = False
     username: str = "admin"
     password_hash: str = ""
+    trust_proxy: bool = False  # Trust X-Forwarded-For for client IP (behind reverse proxy)
 
 
 @dataclass
@@ -312,6 +313,7 @@ class Config:
                 self.web.api_key = self._parser.get("web", "api_key", fallback="")
                 self.web.enable_auth = self._parser.getboolean("web", "enable_auth", fallback=False)
                 self.web.username = self._parser.get("web", "username", fallback="admin")
+                self.web.trust_proxy = self._parser.getboolean("web", "trust_proxy", fallback=False)
 
             # TUI
             if self._parser.has_section("tui"):
@@ -416,6 +418,7 @@ class Config:
             self._parser.set("web", "api_key", self.web.api_key)
             self._parser.set("web", "enable_auth", str(self.web.enable_auth))
             self._parser.set("web", "username", self.web.username)
+            self._parser.set("web", "trust_proxy", str(self.web.trust_proxy))
 
             # TUI
             if not self._parser.has_section("tui"):

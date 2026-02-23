@@ -5,6 +5,7 @@ implemented identical copies of these patterns.
 """
 
 import logging
+import threading
 import time
 from typing import Any, Callable, Dict, List
 
@@ -33,6 +34,7 @@ class CallbackMixin:
         self._callbacks: Dict[str, List[Callable]] = {e: [] for e in _CALLBACK_EVENTS}
         self._alert_cooldowns: Dict[str, float] = {}
         self._alert_cooldown_seconds: int = _DEFAULT_COOLDOWN_SECONDS
+        self._cooldown_lock = threading.Lock()
 
     def register_callback(self, event: str, callback: Callable) -> None:
         """Register a callback for an event."""
@@ -50,16 +52,18 @@ class CallbackMixin:
     def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
         """Check if alert should be suppressed (still in cooldown).
 
+        Thread-safe: protected by ``_cooldown_lock``.
         Returns True if suppressed, False if the alert should fire.
         """
         key = f"{node_id}:{alert_type}"
         now = time.monotonic()
-        last = self._alert_cooldowns.get(key)
-        if last is not None and (now - last) < self._alert_cooldown_seconds:
-            return True  # Still in cooldown — suppress
-        self._alert_cooldowns[key] = now
-        # Prune stale cooldown entries to prevent unbounded growth
-        if len(self._alert_cooldowns) > _MAX_COOLDOWN_ENTRIES:
-            cutoff = now - (self._alert_cooldown_seconds * 2)
-            self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
+        with self._cooldown_lock:
+            last = self._alert_cooldowns.get(key)
+            if last is not None and (now - last) < self._alert_cooldown_seconds:
+                return True  # Still in cooldown — suppress
+            self._alert_cooldowns[key] = now
+            # Prune stale cooldown entries to prevent unbounded growth
+            if len(self._alert_cooldowns) > _MAX_COOLDOWN_ENTRIES:
+                cutoff = now - (self._alert_cooldown_seconds * 2)
+                self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
         return False  # Cooldown expired — allow alert

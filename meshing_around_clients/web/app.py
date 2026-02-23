@@ -153,7 +153,7 @@ class WebApplication:
 
         # Security: CSRF protection and rate limiting
         self.csrf = CSRFProtection()
-        self.rate_limiter = RateLimiter()
+        self.rate_limiter = RateLimiter(trust_proxy=self.config.web.trust_proxy)
 
         # Track server start time for uptime reporting
         self._start_time = time.monotonic()
@@ -236,7 +236,7 @@ class WebApplication:
         # ---- Middleware: Rate Limiting ----
         @app.middleware("http")
         async def rate_limit_middleware(request: Request, call_next):
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = self.rate_limiter.get_client_ip(request)
             # Determine rate limit category
             category = "default"
             if request.method in ("POST", "PUT", "DELETE", "PATCH"):
@@ -372,6 +372,13 @@ class WebApplication:
                     and self.config.web.password_hash
                     and _verify_password(password, self.config.web.password_hash)
                 ):
+                    # SEC-12: Warn when basic auth is used without HTTPS
+                    if request.url.scheme != "https":
+                        client_host = request.client.host if request.client else "unknown"
+                        logger.warning(
+                            "Basic auth credentials sent over non-HTTPS from %s",
+                            client_host,
+                        )
                     return
             except (ValueError, UnicodeDecodeError):
                 pass

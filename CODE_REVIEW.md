@@ -19,26 +19,19 @@ The TUI `sys.exit(1)`s when Rich is not installed. CLAUDE.md requires: *"Rich Li
 
 #### Broad `except Exception` in source files
 
-Several files use `except Exception` where specific types would be better per the project style guide:
-
-| File | Line(s) |
-|------|---------|
-| `configure_bot.py` | 2007 |
-| `meshtastic_api.py` | 230, 239, 716 |
-| `mqtt_client.py` | 283 |
-| `web/middleware.py` | 203 |
+~~Several files used `except Exception` where specific types would be better.~~ **Fixed** — `meshtastic_api.py` and `mqtt_client.py` narrowed to specific exception types. `configure_bot.py:2007` (top-level CLI wizard) and `web/middleware.py:203` (broadcast catch-all) are intentional.
 
 #### Alert cooldown race condition in base class
 
 **File:** `callbacks.py:50-65`
 
-`_is_alert_cooled_down()` reads and writes `_alert_cooldowns` dict without a lock. The MQTT client subclass overrides with locking, but the base class is unprotected. Any future subclass that calls from multiple threads would hit a race.
+~~`_is_alert_cooled_down()` read and wrote `_alert_cooldowns` dict without a lock.~~ **Fixed** — Added `threading.Lock` (`_cooldown_lock`) to the base `CallbackMixin` class. The MQTT client no longer needs its override.
 
 #### Thread resource leak in worker thread restart
 
 **File:** `meshtastic_api.py:174-188`
 
-`_start_worker_thread()` joins the previous thread with a 5-second timeout. If the thread hangs past the timeout, a new thread starts alongside the old one. Under sustained hangs, threads accumulate.
+~~`_start_worker_thread()` joined the previous thread with a 5-second timeout with no indication if it failed.~~ **Fixed** — Added a warning log when the previous worker thread doesn't stop within the timeout.
 
 ---
 
@@ -119,6 +112,14 @@ The following categories of issues were fixed in PRs #13, #14, #16, the security
 - Missing config validation bounds for port, intervals, delays (MEDIUM — security review)
 - Hostname validation for HTTP/TCP interfaces (HIGH — security review)
 - Deprecated SSL constant in MQTT TLS setup (HIGH — security review)
+- Subprocess username validation (HIGH — security hardening session)
+- MQTT non-default credentials TLS warning (HIGH — security hardening session)
+- Proxy-aware rate limiting (MEDIUM — security hardening session)
+- Basic auth non-HTTPS warning (MEDIUM — security hardening session)
+- Adaptive malformed MQTT message logging (MEDIUM — security hardening session)
+- Broad `except Exception` narrowed in API and MQTT (MEDIUM — security hardening session)
+- Alert cooldown race condition in CallbackMixin (HIGH — security hardening session)
+- Thread resource leak warning in worker restart (HIGH — security hardening session)
 
 ---
 
