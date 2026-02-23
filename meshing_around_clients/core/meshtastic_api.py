@@ -185,8 +185,7 @@ class MeshtasticAPI(CallbackMixin):
             self._worker_thread.join(timeout=5)
             if self._worker_thread.is_alive():
                 logger.warning(
-                    "Previous worker thread did not stop within 5s — "
-                    "it may continue running in the background"
+                    "Previous worker thread did not stop within 5s — " "it may continue running in the background"
                 )
         # Drain stale messages from previous session
         while not self._message_queue.empty():

@@ -240,15 +240,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._client.username_pw_set(self.mqtt_config.username, self.mqtt_config.password)
 
                 # SEC-07: Warn when non-default credentials are sent without TLS
-                _is_default_creds = (
-                    self.mqtt_config.username == "meshdev"
-                    and self.mqtt_config.password == "large4cats"
-                )
-                if (
-                    not _is_default_creds
-                    and not self.mqtt_config.use_tls
-                    and self.mqtt_config.port != DEFAULT_PORT_TLS
-                ):
+                _is_default_creds = self.mqtt_config.username == "meshdev" and self.mqtt_config.password == "large4cats"
+                if not _is_default_creds and not self.mqtt_config.use_tls and self.mqtt_config.port != DEFAULT_PORT_TLS:
                     logger.warning(
                         "Non-default MQTT credentials configured without TLS (port %d). "
                         "Credentials will be sent in cleartext. Consider enabling TLS (port 8883).",
