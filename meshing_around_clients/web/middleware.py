@@ -108,6 +108,11 @@ class RateLimiter:
 
     Tracks request counts per client IP with configurable limits
     for different endpoint categories.
+
+    When ``trust_proxy`` is True, the client IP is extracted from the
+    first entry in the ``X-Forwarded-For`` header (set by reverse proxies
+    like nginx or Caddy).  Only enable this when running behind a trusted
+    proxy — otherwise clients can spoof their IP via the header.
     """
 
     def __init__(
@@ -115,13 +120,24 @@ class RateLimiter:
         default_rpm: int = 60,
         burst_rpm: int = 120,
         write_rpm: int = 20,
+        trust_proxy: bool = False,
     ):
         self.default_rpm = default_rpm
         self.burst_rpm = burst_rpm
         self.write_rpm = write_rpm
+        self.trust_proxy = trust_proxy
         # {ip: [(timestamp, count)]} — sliding window
         self._requests: Dict[str, List[float]] = defaultdict(list)
         self._window = 60.0  # 1-minute window
+
+    def get_client_ip(self, request: Request) -> str:
+        """Extract client IP, optionally using X-Forwarded-For behind a proxy."""
+        if self.trust_proxy:
+            forwarded = request.headers.get("x-forwarded-for", "")
+            if forwarded:
+                # Use the first (leftmost) IP — set by the outermost proxy
+                return forwarded.split(",")[0].strip()
+        return request.client.host if request.client else "unknown"
 
     def _cleanup(self, ip: str) -> None:
         """Remove expired entries outside the window."""

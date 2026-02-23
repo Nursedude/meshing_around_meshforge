@@ -146,6 +146,10 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self._stop_event = threading.Event()
 
+        # Malformed message rejection rate tracking (SEC-14)
+        self._rejection_window_start: float = time.monotonic()
+        self._rejection_window_count: int = 0
+
         # Generate client ID if not set
         if not self.mqtt_config.client_id:
             self.mqtt_config.client_id = f"meshforge-{uuid.uuid4().hex[:8]}"
@@ -196,10 +200,8 @@ class MQTTMeshtasticClient(CallbackMixin):
             pass
         return None
 
-    def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
-        """Thread-safe override — wraps base implementation with stats lock."""
-        with self._stats_lock:
-            return super()._is_alert_cooled_down(node_id, alert_type)
+    # _is_alert_cooled_down: no override needed — base CallbackMixin
+    # now uses its own _cooldown_lock for thread safety.
 
     def _create_mqtt_client(self):
         """Create MQTT client with paho v1/v2 API compatibility."""
@@ -236,6 +238,15 @@ class MQTTMeshtasticClient(CallbackMixin):
             # Authentication
             if self.mqtt_config.username:
                 self._client.username_pw_set(self.mqtt_config.username, self.mqtt_config.password)
+
+                # SEC-07: Warn when non-default credentials are sent without TLS
+                _is_default_creds = self.mqtt_config.username == "meshdev" and self.mqtt_config.password == "large4cats"
+                if not _is_default_creds and not self.mqtt_config.use_tls and self.mqtt_config.port != DEFAULT_PORT_TLS:
+                    logger.warning(
+                        "Non-default MQTT credentials configured without TLS (port %d). "
+                        "Credentials will be sent in cleartext. Consider enabling TLS (port 8883).",
+                        self.mqtt_config.port,
+                    )
 
             # TLS (auto-detect port 8883)
             if self.mqtt_config.use_tls or self.mqtt_config.port == DEFAULT_PORT_TLS:
@@ -285,7 +296,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                     # Connection timed out - stop the background loop thread
                     self._client.loop_stop()
                     return False
-            except Exception:
+            except (OSError, RuntimeError):
                 # Ensure the background loop is stopped if anything goes wrong
                 self._client.loop_stop()
                 raise
@@ -491,6 +502,17 @@ class MQTTMeshtasticClient(CallbackMixin):
             logger.debug("Malformed MQTT message on %s: %s", topic, e)
             with self._stats_lock:
                 self._stats["messages_rejected"] += 1
+            # SEC-14: Escalate to WARNING if rejection rate is high
+            self._rejection_window_count += 1
+            now = time.monotonic()
+            if now - self._rejection_window_start > 60:
+                if self._rejection_window_count > 10:
+                    logger.warning(
+                        "High malformed message rate: %d rejected in last 60s",
+                        self._rejection_window_count,
+                    )
+                self._rejection_window_start = now
+                self._rejection_window_count = 0
         except (KeyError, ValueError, TypeError, struct.error) as e:
             logger.warning("Error parsing MQTT message (%s): %s", type(e).__name__, e)
 

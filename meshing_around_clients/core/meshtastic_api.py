@@ -183,6 +183,10 @@ class MeshtasticAPI(CallbackMixin):
         """Stop any previous worker thread and start a fresh one."""
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5)
+            if self._worker_thread.is_alive():
+                logger.warning(
+                    "Previous worker thread did not stop within 5s — " "it may continue running in the background"
+                )
         # Drain stale messages from previous session
         while not self._message_queue.empty():
             try:
@@ -235,7 +239,7 @@ class MeshtasticAPI(CallbackMixin):
                 self._trigger_callbacks("on_connect", self.connection_info)
                 return True
 
-            except Exception:
+            except (OSError, ConnectionError, RuntimeError, AttributeError):
                 # Clean up subscriptions and interface on partial setup failure
                 for topic, handler in [
                     ("meshtastic.receive", self._on_receive),
@@ -244,7 +248,7 @@ class MeshtasticAPI(CallbackMixin):
                 ]:
                     try:
                         pub.unsubscribe(handler, topic)
-                    except Exception:
+                    except (ValueError, RuntimeError):
                         pass
                 if self.interface:
                     try:

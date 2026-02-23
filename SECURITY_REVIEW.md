@@ -95,24 +95,22 @@ When constructing an HTTP URL from a hostname config value (`http://{hostname}`)
 #### SEC-06: Unvalidated subprocess arguments from config
 
 **Files:** `setup/pi_utils.py:245-247`, `setup/system_maintenance.py:210,305,440`
-**Status:** Open — mitigated by list-form subprocess calls
+**Status:** Fixed (this session)
 
-Username and paths from config are passed to `subprocess.run()` in list form (not shell strings), which prevents shell injection. However, there's no validation that these values contain expected characters. A malicious config could pass unexpected arguments to `sudo usermod` or `python3 -m venv`.
+Username and paths from config are passed to `subprocess.run()` in list form (not shell strings), which prevents shell injection. However, there was no validation that these values contain expected characters.
 
-**Mitigation:** List-form subprocess calls prevent command injection. Additional validation would be defense-in-depth.
-
-**Recommendation:** Add username regex validation (`^[a-z_][a-z0-9_-]*$`) before passing to system commands.
+**Fix:** Added POSIX username regex validation (`^[a-z_][a-z0-9_-]{0,31}$`) in `pi_utils.py` before passing to `sudo usermod`. The `system_maintenance.py` subprocess calls use system-determined values (`Path.home()`, git commands) and don't take user-supplied usernames.
 
 ---
 
 #### SEC-07: MQTT credentials over unencrypted connection
 
 **File:** `mqtt_client.py:237-238`
-**Status:** Open — by design for public broker
+**Status:** Fixed (this session)
 
 MQTT username/password are sent in cleartext when TLS is not enabled. The default configuration uses port 1883 (non-TLS) with the public broker `mqtt.meshtastic.org`. While the default credentials are intentionally public, users who configure private broker credentials on port 1883 would transmit them unencrypted.
 
-**Recommendation:** Log a warning when non-default credentials are used without TLS enabled.
+**Fix:** Added a warning log when non-default credentials are configured without TLS. Default public broker credentials (`meshdev`/`large4cats`) are excluded from the warning since they are intentionally public.
 
 ---
 
@@ -137,11 +135,11 @@ style-src 'self' 'unsafe-inline' https://unpkg.com;
 #### SEC-09: Rate limiter not proxy-aware
 
 **File:** `web/middleware.py:113-157`
-**Status:** Open
+**Status:** Fixed (this session)
 
-Rate limiting uses `request.client.host` as the key. Behind a reverse proxy without proper `X-Forwarded-For` configuration, all clients appear as one IP address. This can either allow distributed attacks to bypass limits or cause a single proxy IP to be rate-limited for all users.
+Rate limiting used `request.client.host` as the key. Behind a reverse proxy without proper `X-Forwarded-For` configuration, all clients appeared as one IP address.
 
-**Recommendation:** Add optional `trust_proxy` config to read `X-Forwarded-For` header, with safeguards against header spoofing.
+**Fix:** Added `trust_proxy` config option (`[web]` section in INI). When enabled, `RateLimiter.get_client_ip()` extracts the client IP from the first entry in the `X-Forwarded-For` header with fallback to `request.client.host`. Default is `False` (off) to prevent IP spoofing when not behind a proxy.
 
 ---
 
@@ -174,11 +172,11 @@ Several config values had no range validation:
 #### SEC-12: Basic auth credentials over non-HTTPS
 
 **File:** `web/app.py:361-373`
-**Status:** Open
+**Status:** Fixed (this session)
 
-Basic auth header is decoded and verified, but there's no enforcement that HTTPS is being used. Basic auth credentials are base64-encoded (not encrypted) and visible to network observers without TLS.
+Basic auth header is decoded and verified, but there was no warning that HTTPS was not being used. Basic auth credentials are base64-encoded (not encrypted) and visible to network observers without TLS.
 
-**Recommendation:** Log a warning when basic auth is used without HTTPS. The web server already defaults to localhost-only binding, which mitigates the risk for local access.
+**Fix:** Added a warning log when basic auth credentials are successfully verified over a non-HTTPS connection. The web server already defaults to localhost-only binding, which mitigates the risk for local access.
 
 ---
 
@@ -196,20 +194,22 @@ Basic auth header is decoded and verified, but there's no enforcement that HTTPS
 #### SEC-14: Weak JSON parsing error handling
 
 **File:** `mqtt_client.py:465-471`
-**Status:** Open
+**Status:** Fixed (this session)
 
-Malformed MQTT messages increment a rejection counter and log at DEBUG level. While this prevents crashes, high volumes of malformed messages could go unnoticed without monitoring the stats endpoint.
+Malformed MQTT messages incremented a rejection counter and logged at DEBUG level. High volumes of malformed messages could go unnoticed without monitoring the stats endpoint.
 
-**Recommendation:** Log at WARNING level after a threshold of rejections (e.g., >10 in 60 seconds).
+**Fix:** Added a sliding-window rejection rate tracker. Individual malformed messages still log at DEBUG level (avoiding log spam), but when >10 rejections occur within 60 seconds, a WARNING-level summary is logged. The window resets after each check.
 
 ---
 
 #### SEC-15: Broad exception handling in critical paths
 
-**Files:** `meshtastic_api.py:230,239`, `configure_bot.py:2007`, `mqtt_client.py:283`, `web/middleware.py:203`
-**Status:** Open (tracked in CODE_REVIEW.md)
+**Files:** `meshtastic_api.py:238`, `mqtt_client.py:288`
+**Status:** Fixed (this session)
 
-Several `except Exception` catches where more specific types would be appropriate. The web middleware case is intentional (catch-all for transport errors in broadcast), but others should be narrowed.
+Several `except Exception` catches where more specific types would be appropriate.
+
+**Fix:** Narrowed `meshtastic_api.py` cleanup handler to `except (OSError, ConnectionError, RuntimeError, AttributeError)` and `mqtt_client.py` loop cleanup to `except (OSError, RuntimeError)`. The `configure_bot.py` top-level catch and `web/middleware.py` broadcast catch-all are intentional and left as-is.
 
 ---
 
@@ -317,16 +317,16 @@ The codebase does not use `pickle`, `eval()`, `exec()`, or other unsafe deserial
 | SEC-03 | High | Unvalidated MQTT topics | **Fixed** |
 | SEC-04 | High | Deprecated SSL constant | **Fixed** |
 | SEC-05 | High | Missing hostname validation | **Fixed** |
-| SEC-06 | High | Unvalidated subprocess args | Open (mitigated) |
-| SEC-07 | High | MQTT creds over cleartext | Open (by design) |
+| SEC-06 | High | Unvalidated subprocess args | **Fixed** |
+| SEC-07 | High | MQTT creds over cleartext | **Fixed** |
 | SEC-08 | Medium | Permissive CSP | Open |
-| SEC-09 | Medium | Rate limiter not proxy-aware | Open |
+| SEC-09 | Medium | Rate limiter not proxy-aware | **Fixed** |
 | SEC-10 | Medium | Missing CORS config | Open |
 | SEC-11 | Medium | Missing config bounds | **Fixed** |
-| SEC-12 | Medium | Basic auth over HTTP | Open |
+| SEC-12 | Medium | Basic auth over HTTP | **Fixed** |
 | SEC-13 | Medium | Config path traversal | Open (low risk) |
-| SEC-14 | Medium | Weak JSON error handling | Open |
-| SEC-15 | Medium | Broad exception handling | Open |
+| SEC-14 | Medium | Weak JSON error handling | **Fixed** |
+| SEC-15 | Medium | Broad exception handling | **Fixed** |
 | SEC-16 | Medium | Alert text not sanitized | Open (low risk) |
 | SEC-17 | Medium | CSRF HttpOnly=false | Open (by design) |
 | SEC-18 | Low | Debug logging exposure | Open |
@@ -335,7 +335,7 @@ The codebase does not use `pickle`, `eval()`, `exec()`, or other unsafe deserial
 | SEC-21 | Low | Thread resource leak | Open |
 | SEC-22 | Low | Dict iteration safety | Open (mitigated) |
 
-**Fixed this session:** 6 of 22 findings (all Critical and 4 of 6 High)
+**Fixed across sessions:** 12 of 22 findings (all Critical, all High, 5 of 10 Medium)
 
 ---
 
@@ -347,12 +347,12 @@ The codebase does not use `pickle`, `eval()`, `exec()`, or other unsafe deserial
 4. ~~Fix deprecated SSL constant~~ (Done)
 5. ~~Validate HTTP hostnames~~ (Done)
 6. ~~Add config validation bounds~~ (Done)
-7. Add subprocess argument validation for usernames/paths
-8. Warn when non-default MQTT credentials used without TLS
+7. ~~Add subprocess argument validation for usernames~~ (Done)
+8. ~~Warn when non-default MQTT credentials used without TLS~~ (Done)
 9. Tighten CSP by removing `'unsafe-inline'`
-10. Add proxy-aware rate limiting
+10. ~~Add proxy-aware rate limiting~~ (Done)
 11. Add explicit CORS middleware configuration
-12. Narrow broad `except Exception` catches to specific types
+12. ~~Narrow broad `except Exception` catches to specific types~~ (Done)
 
 ---
 

@@ -12,11 +12,16 @@ Extracted from configure_bot.py for reusability across MeshForge.
 """
 
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+# POSIX username: starts with lowercase letter or underscore, then lowercase
+# alphanumeric, hyphens, or underscores.  Max 32 chars (Linux default).
+_USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 
 # =============================================================================
 # Data Classes
@@ -236,6 +241,10 @@ def add_user_to_dialout(username: Optional[str] = None) -> Tuple[bool, str]:
 
     if not username:
         return False, "Could not determine username"
+
+    # Validate username to prevent unexpected arguments to system commands
+    if not _USERNAME_RE.match(username):
+        return False, f"Invalid username: {username!r}"
 
     in_dialout, _ = check_user_groups()
     if in_dialout:
