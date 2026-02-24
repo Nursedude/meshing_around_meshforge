@@ -53,6 +53,12 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Testing / Coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # Backup files
 *.backup
 *.bak
