@@ -11,7 +11,7 @@ import secrets
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 try:
     from fastapi import Request, WebSocket, WebSocketDisconnect
@@ -187,14 +187,22 @@ class WebSocketManager:
     def __init__(self, max_connections: int = 100):
         self.active_connections: List[WebSocket] = []
         self._max_connections = max_connections
-        self._lock = asyncio.Lock()
+        # Lazy-init: asyncio.Lock() requires a running event loop in Python 3.9.
+        # Defer creation to the first async call so the lock is always bound to
+        # the correct loop.
+        self._lock: Optional[asyncio.Lock] = None
+
+    def _get_lock(self) -> asyncio.Lock:
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def connect(self, websocket: WebSocket) -> bool:
         """Accept and track a WebSocket connection.
 
         Returns False if the connection limit has been reached.
         """
-        async with self._lock:
+        async with self._get_lock():
             if len(self.active_connections) >= self._max_connections:
                 await websocket.close(code=1013, reason="Too many connections")
                 return False
@@ -203,13 +211,13 @@ class WebSocketManager:
             return True
 
     async def disconnect(self, websocket: WebSocket):
-        async with self._lock:
+        async with self._get_lock():
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
         """Broadcast message to all connected clients."""
-        async with self._lock:
+        async with self._get_lock():
             dead_connections = []
             for connection in self.active_connections:
                 try:
