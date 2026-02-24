@@ -261,12 +261,12 @@ class MeshtasticAPI(CallbackMixin):
                 raise
 
         except (OSError, ConnectionError, TimeoutError) as e:
-            self.connection_info.error_message = f"Connection failed: {e}"
+            self.connection_info.error_message = f"Connection failed ({type(e).__name__}): {e}"
             self.connection_info.connected = False
             self.network.connection_status = "error"
             return False
         except (ValueError, AttributeError) as e:
-            self.connection_info.error_message = f"Configuration error: {e}"
+            self.connection_info.error_message = f"Configuration error ({type(e).__name__}): {e}"
             self.connection_info.connected = False
             self.network.connection_status = "error"
             return False

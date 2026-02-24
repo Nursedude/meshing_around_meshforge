@@ -10,21 +10,38 @@ Tests:
 6. Config save/load roundtrip
 """
 
-import unittest
-import tempfile
 import os
+import sys
+import tempfile
+import unittest
 from pathlib import Path
 
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from meshing_around_clients.setup.config_schema import (
-    ConnectionType, AlertPriority, InterfaceConfig, EmergencyAlertConfig,
-    SentryConfig, AltitudeAlertConfig, WeatherAlertConfig, BatteryAlertConfig,
-    NewNodeAlertConfig, NoisyNodeAlertConfig, DisconnectAlertConfig,
-    MQTTConfig, SMTPConfig, SMSConfig, TUIConfig, WebConfig,
-    GeneralConfig, AutoUpdateConfig, UnifiedConfig, ConfigLoader,
-    _str_to_bool, _str_to_list, _str_to_int_list
+    AlertPriority,
+    AltitudeAlertConfig,
+    AutoUpdateConfig,
+    BatteryAlertConfig,
+    ConfigLoader,
+    ConnectionType,
+    DisconnectAlertConfig,
+    EmergencyAlertConfig,
+    GeneralConfig,
+    InterfaceConfig,
+    MQTTConfig,
+    NewNodeAlertConfig,
+    NoisyNodeAlertConfig,
+    SentryConfig,
+    SMSConfig,
+    SMTPConfig,
+    TUIConfig,
+    UnifiedConfig,
+    WeatherAlertConfig,
+    WebConfig,
+    _str_to_bool,
+    _str_to_int_list,
+    _str_to_list,
 )
 
 
@@ -89,30 +106,20 @@ class TestInterfaceConfig(unittest.TestCase):
 
     def test_from_dict(self):
         """Test creating from dictionary."""
-        data = {
-            'enabled': 'true',
-            'type': 'tcp',
-            'hostname': '192.168.1.100',
-            'port': '4403',
-            'baudrate': '9600'
-        }
+        data = {"enabled": "true", "type": "tcp", "hostname": "192.168.1.100", "port": "4403", "baudrate": "9600"}
         cfg = InterfaceConfig.from_dict(data)
         self.assertTrue(cfg.enabled)
         self.assertEqual(cfg.type, ConnectionType.TCP)
-        self.assertEqual(cfg.hostname, '192.168.1.100')
+        self.assertEqual(cfg.hostname, "192.168.1.100")
         self.assertEqual(cfg.baudrate, 9600)
 
     def test_to_dict(self):
         """Test conversion to dictionary."""
-        cfg = InterfaceConfig(
-            enabled=True,
-            type=ConnectionType.MQTT,
-            hostname="broker.example.com"
-        )
+        cfg = InterfaceConfig(enabled=True, type=ConnectionType.MQTT, hostname="broker.example.com")
         d = cfg.to_dict()
-        self.assertEqual(d['enabled'], 'True')
-        self.assertEqual(d['type'], 'mqtt')
-        self.assertEqual(d['hostname'], 'broker.example.com')
+        self.assertEqual(d["enabled"], "True")
+        self.assertEqual(d["type"], "mqtt")
+        self.assertEqual(d["hostname"], "broker.example.com")
 
     def test_validate_ble_mac(self):
         """Test BLE MAC address validation."""
@@ -147,11 +154,7 @@ class TestAlertConfigs(unittest.TestCase):
 
     def test_emergency_alert_from_dict(self):
         """Test emergency alert from dictionary."""
-        data = {
-            'enabled': 'false',
-            'emergency_keywords': 'help, rescue',
-            'alert_channel': '5'
-        }
+        data = {"enabled": "false", "emergency_keywords": "help, rescue", "alert_channel": "5"}
         cfg = EmergencyAlertConfig.from_dict(data)
         self.assertFalse(cfg.enabled)
         self.assertIn("help", cfg.keywords)
@@ -160,25 +163,20 @@ class TestAlertConfigs(unittest.TestCase):
     def test_sentry_from_upstream(self):
         """Test Sentry config from upstream format."""
         data = {
-            'SentryEnabled': 'true',
-            'SentryRadius': '200',
-            'SentryChannel': '3',
-            'sentryIgnoreList': '!node1, !node2'
+            "SentryEnabled": "true",
+            "SentryRadius": "200",
+            "SentryChannel": "3",
+            "sentryIgnoreList": "!node1, !node2",
         }
         cfg = SentryConfig.from_upstream(data)
         self.assertTrue(cfg.enabled)
         self.assertEqual(cfg.radius_meters, 200)
         self.assertEqual(cfg.channel, 3)
-        self.assertEqual(cfg.ignore_list, ['!node1', '!node2'])
+        self.assertEqual(cfg.ignore_list, ["!node1", "!node2"])
 
     def test_sentry_from_meshforge(self):
         """Test Sentry config from MeshForge format."""
-        data = {
-            'enabled': 'true',
-            'target_latitude': '40.7128',
-            'target_longitude': '-74.0060',
-            'radius_meters': '150'
-        }
+        data = {"enabled": "true", "target_latitude": "40.7128", "target_longitude": "-74.0060", "radius_meters": "150"}
         cfg = SentryConfig.from_meshforge(data)
         self.assertTrue(cfg.enabled)
         self.assertAlmostEqual(cfg.target_latitude, 40.7128)
@@ -186,11 +184,7 @@ class TestAlertConfigs(unittest.TestCase):
 
     def test_altitude_from_upstream(self):
         """Test altitude alert from upstream format."""
-        data = {
-            'highFlyingAlert': 'true',
-            'highFlyingAlertAltitude': '3000',
-            'highFlyingAlertChannel': '2'
-        }
+        data = {"highFlyingAlert": "true", "highFlyingAlertAltitude": "3000", "highFlyingAlertChannel": "2"}
         cfg = AltitudeAlertConfig.from_upstream(data)
         self.assertTrue(cfg.enabled)
         self.assertEqual(cfg.min_altitude, 3000)
@@ -211,15 +205,10 @@ class TestMQTTConfig(unittest.TestCase):
 
     def test_from_dict(self):
         """Test MQTT config from dictionary."""
-        data = {
-            'enabled': 'true',
-            'broker': 'custom.broker.com',
-            'port': '8883',
-            'use_tls': 'true'
-        }
+        data = {"enabled": "true", "broker": "custom.broker.com", "port": "8883", "use_tls": "true"}
         cfg = MQTTConfig.from_dict(data)
         self.assertTrue(cfg.enabled)
-        self.assertEqual(cfg.broker, 'custom.broker.com')
+        self.assertEqual(cfg.broker, "custom.broker.com")
         self.assertEqual(cfg.port, 8883)
         self.assertTrue(cfg.use_tls)
 
@@ -253,11 +242,7 @@ class TestUnifiedConfig(unittest.TestCase):
     def test_get_active_interfaces(self):
         """Test getting active interfaces."""
         cfg = UnifiedConfig()
-        cfg.interfaces = [
-            InterfaceConfig(enabled=True),
-            InterfaceConfig(enabled=False),
-            InterfaceConfig(enabled=True)
-        ]
+        cfg.interfaces = [InterfaceConfig(enabled=True), InterfaceConfig(enabled=False), InterfaceConfig(enabled=True)]
         active = cfg.get_active_interfaces()
         self.assertEqual(len(active), 2)
         self.assertEqual(active[0][0], 0)
@@ -269,7 +254,7 @@ class TestUnifiedConfig(unittest.TestCase):
         cfg.interfaces = [
             InterfaceConfig(type=ConnectionType.SERIAL, port="/dev/ttyUSB0"),
             InterfaceConfig(type=ConnectionType.TCP, hostname="192.168.1.100"),
-            InterfaceConfig(type=ConnectionType.MQTT, enabled=False)
+            InterfaceConfig(type=ConnectionType.MQTT, enabled=False),
         ]
         self.assertEqual(len(cfg.interfaces), 3)
         self.assertEqual(cfg.interfaces[0].type, ConnectionType.SERIAL)
@@ -319,7 +304,7 @@ emergency_keywords = help, rescue, sos
 
             # Check general
             self.assertEqual(cfg.general.bot_name, "UpstreamBot")
-            self.assertEqual(cfg.general.admin_nodes, ['!admin1', '!admin2'])
+            self.assertEqual(cfg.general.admin_nodes, ["!admin1", "!admin2"])
 
             # Check sentry
             self.assertTrue(cfg.sentry.enabled)
@@ -331,7 +316,7 @@ emergency_keywords = help, rescue, sos
             config_path = Path(tmpdir) / "multi.ini"
             content = "[sentry]\nSentryEnabled = false\n"
             for i in range(1, 10):
-                section = 'interface' if i == 1 else f'interface{i}'
+                section = "interface" if i == 1 else f"interface{i}"
                 content += f"\n[{section}]\nenabled = true\ntype = serial\nport = /dev/ttyUSB{i-1}\n"
             config_path.write_text(content)
 
@@ -427,7 +412,7 @@ class TestConfigLoaderSave(unittest.TestCase):
             cfg.general.bot_name = "RoundtripBot"
             cfg.interfaces = [
                 InterfaceConfig(type=ConnectionType.SERIAL, port="/dev/ttyUSB0"),
-                InterfaceConfig(type=ConnectionType.TCP, hostname="192.168.1.1")
+                InterfaceConfig(type=ConnectionType.TCP, hostname="192.168.1.1"),
             ]
             cfg.mqtt.enabled = True
             cfg.mqtt.broker = "test.broker.com"

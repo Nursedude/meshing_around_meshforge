@@ -126,6 +126,8 @@ class MQTTConfig:
     encryption_key: str = ""
     # QoS level for subscriptions (0, 1, or 2)
     qos: int = 1
+    # Connection timeout (seconds to wait for MQTT broker connection)
+    connect_timeout: int = 10
     # Reconnect settings
     reconnect_delay: int = 5
     max_reconnect_delay: int = 300  # Max backoff between reconnect attempts
@@ -340,6 +342,9 @@ class Config:
                 self.mqtt.encryption_key = self._parser.get("mqtt", "encryption_key", fallback="")
                 raw_qos = self._parser.getint("mqtt", "qos", fallback=1)
                 self.mqtt.qos = raw_qos if raw_qos in (0, 1, 2) else 1
+                self.mqtt.connect_timeout = max(
+                    1, min(self._parser.getint("mqtt", "connect_timeout", fallback=10), 300)
+                )
                 self.mqtt.reconnect_delay = max(
                     1, min(self._parser.getint("mqtt", "reconnect_delay", fallback=5), 3600)
                 )
@@ -444,6 +449,7 @@ class Config:
             self._parser.set("mqtt", "client_id", self.mqtt.client_id)
             self._parser.set("mqtt", "encryption_key", self.mqtt.encryption_key)
             self._parser.set("mqtt", "qos", str(self.mqtt.qos))
+            self._parser.set("mqtt", "connect_timeout", str(self.mqtt.connect_timeout))
             self._parser.set("mqtt", "reconnect_delay", str(self.mqtt.reconnect_delay))
             self._parser.set("mqtt", "max_reconnect_delay", str(self.mqtt.max_reconnect_delay))
             self._parser.set("mqtt", "max_reconnect_attempts", str(self.mqtt.max_reconnect_attempts))

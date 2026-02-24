@@ -328,6 +328,10 @@ class ProtobufDecoder:
             # KeyError: Missing expected fields
             # AttributeError: Protobuf structure mismatch
             return {"error": str(e)}
+        except Exception as e:
+            # google.protobuf.message.DecodeError and similar protobuf
+            # parsing errors that don't inherit from the types above.
+            return {"error": str(e)}
 
     def _decode_data_payload(self, data) -> Dict[str, Any]:
         """Decode the Data message payload based on portnum."""
@@ -676,6 +680,9 @@ class MeshPacketProcessor:
             # AttributeError: Missing protobuf fields
             # KeyError: Missing expected keys
             pass
+        except Exception:
+            # google.protobuf.message.DecodeError and similar
+            pass
 
         return None
 
@@ -692,6 +699,9 @@ class MeshPacketProcessor:
             # ValueError: Invalid protobuf data
             # TypeError: Unexpected field types
             # AttributeError: Missing protobuf fields
+            return None
+        except Exception:
+            # google.protobuf.message.DecodeError and similar
             return None
 
 

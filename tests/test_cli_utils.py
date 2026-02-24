@@ -8,9 +8,14 @@ Removed: TestColors (attribute checks), TestPrintFunctions (stdout capture).
 import pytest
 
 from meshing_around_clients.setup.cli_utils import (
-    validate_mac_address, validate_ip_address, validate_port,
-    validate_email, validate_coordinates, validate_serial_port,
-    ProgressBar, Spinner
+    ProgressBar,
+    Spinner,
+    validate_coordinates,
+    validate_email,
+    validate_ip_address,
+    validate_mac_address,
+    validate_port,
+    validate_serial_port,
 )
 
 

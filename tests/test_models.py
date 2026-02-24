@@ -2,18 +2,25 @@
 Unit tests for meshing_around_clients.core.models
 """
 
-import unittest
 import json
+import sys
 import threading
+import unittest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-import sys
-sys.path.insert(0, str(__file__).rsplit('/tests/', 1)[0])
+sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
 from meshing_around_clients.core.models import (
-    NodeRole, AlertType, MessageType,
-    Position, NodeTelemetry, Node, Message, Alert, MeshNetwork
+    Alert,
+    AlertType,
+    MeshNetwork,
+    Message,
+    MessageType,
+    Node,
+    NodeRole,
+    NodeTelemetry,
+    Position,
 )
 
 
@@ -379,16 +386,10 @@ class TestMeshNetworkPersistence(unittest.TestCase):
                     "long_name": "Node One",
                     "hardware_model": "T-Beam",
                     "is_online": True,
-                    "role": "ROUTER"
+                    "role": "ROUTER",
                 }
             },
-            "channels": {
-                "0": {
-                    "name": "Primary",
-                    "role": "PRIMARY",
-                    "message_count": 42
-                }
-            }
+            "channels": {"0": {"name": "Primary", "role": "PRIMARY", "message_count": 42}},
         }
         network = MeshNetwork.from_dict(data)
         self.assertEqual(network.my_node_id, "!test123")
@@ -431,8 +432,8 @@ class TestMeshNetworkPersistence(unittest.TestCase):
 
     def test_save_and_load_file(self):
         """Test file-based persistence."""
-        import tempfile
         import os
+        import tempfile
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmpdir:
