@@ -235,8 +235,10 @@ class DashboardScreen(Screen):
                 prefix_text = ">> "
                 prefix_style = "green"
 
-            # Check for emergency keywords
-            is_emergency = any(kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords)
+            # Check for emergency keywords (msg.text may be None for non-text messages)
+            is_emergency = msg.text and any(
+                kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords
+            )
 
             if is_emergency:
                 text_style = "bold red"

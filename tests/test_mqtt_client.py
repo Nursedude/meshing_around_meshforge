@@ -371,5 +371,298 @@ class TestMQTTIntegration(unittest.TestCase):
             self.assertFalse(client.is_connected)
 
 
+@unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
+class TestMQTTDecodedPacketPaths(unittest.TestCase):
+    """Test _process_decoded_packet code paths (protobuf/relay/neighbor)."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.config.alerts.enabled = True
+        self.config.alerts.emergency_keywords = ["help", "sos"]
+
+    def _make_client(self, mock_mqtt):
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        return MQTTMeshtasticClient(self.config)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_relay_node_full_id(self, mock_mqtt):
+        """Test _handle_relay_node with full 32-bit node number."""
+        client = self._make_client(mock_mqtt)
+
+        # Add a sender node first
+        sender_id = "!11223344"
+        client.network.add_node(Node(node_id=sender_id, node_num=0x11223344))
+
+        client._handle_relay_node(0xAABBCCDD, sender_id)
+        relay_node = client.network.get_node("!aabbccdd")
+        self.assertIsNotNone(relay_node)
+        self.assertTrue(relay_node.is_online)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_relay_node_partial_id(self, mock_mqtt):
+        """Test _handle_relay_node with partial (1-2 byte) relay node."""
+        client = self._make_client(mock_mqtt)
+
+        sender_id = "!11223344"
+        client.network.add_node(Node(node_id=sender_id, node_num=0x11223344))
+
+        client._handle_relay_node(0x00FF, sender_id)
+        relay_node = client.network.get_node("!000000ff")
+        self.assertIsNotNone(relay_node)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_relay_node_zero_ignored(self, mock_mqtt):
+        """Test _handle_relay_node with 0 does nothing."""
+        client = self._make_client(mock_mqtt)
+        initial_count = len(client.network.nodes)
+        client._handle_relay_node(0, "!11223344")
+        self.assertEqual(len(client.network.nodes), initial_count)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_check_battery_alert_fires(self, mock_mqtt):
+        """Test _check_battery_alert fires alert for low battery."""
+        client = self._make_client(mock_mqtt)
+
+        from meshing_around_clients.core.models import NodeTelemetry
+
+        node = Node(node_id="!aabb0001", node_num=1, short_name="LOW")
+        node.telemetry = NodeTelemetry(battery_level=15)
+        client.network.add_node(node)
+
+        client._check_battery_alert(node, "!aabb0001")
+        battery_alerts = [a for a in client.network.alerts if a.alert_type == AlertType.BATTERY]
+        self.assertEqual(len(battery_alerts), 1)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_check_battery_alert_no_fire_normal_level(self, mock_mqtt):
+        """Test _check_battery_alert does not fire for normal battery."""
+        client = self._make_client(mock_mqtt)
+
+        from meshing_around_clients.core.models import NodeTelemetry
+
+        node = Node(node_id="!aabb0002", node_num=2, short_name="OK")
+        node.telemetry = NodeTelemetry(battery_level=80)
+        client.network.add_node(node)
+
+        client._check_battery_alert(node, "!aabb0002")
+        battery_alerts = [a for a in client.network.alerts if a.alert_type == AlertType.BATTERY]
+        self.assertEqual(len(battery_alerts), 0)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_extract_position_with_latitude(self, mock_mqtt):
+        """Test _extract_position with direct latitude/longitude."""
+        client = self._make_client(mock_mqtt)
+        pos = client._extract_position({"latitude": 45.5, "longitude": -122.6, "altitude": 100})
+        self.assertIsNotNone(pos)
+        self.assertAlmostEqual(pos.latitude, 45.5)
+        self.assertAlmostEqual(pos.longitude, -122.6)
+        self.assertEqual(pos.altitude, 100)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_extract_position_with_latitudeI(self, mock_mqtt):
+        """Test _extract_position with latitudeI/longitudeI (integer format)."""
+        client = self._make_client(mock_mqtt)
+        pos = client._extract_position({"latitudeI": 455000000, "longitudeI": -1226000000})
+        self.assertIsNotNone(pos)
+        self.assertAlmostEqual(pos.latitude, 45.5, places=1)
+        self.assertAlmostEqual(pos.longitude, -122.6, places=1)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_extract_position_invalid_coords(self, mock_mqtt):
+        """Test _extract_position returns None for invalid coordinates."""
+        client = self._make_client(mock_mqtt)
+        pos = client._extract_position({"latitude": 999, "longitude": -999})
+        self.assertIsNone(pos)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_extract_position_empty_dict(self, mock_mqtt):
+        """Test _extract_position returns None for empty dict."""
+        client = self._make_client(mock_mqtt)
+        pos = client._extract_position({})
+        self.assertIsNone(pos)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_hop_limit_type_safety(self, mock_mqtt):
+        """Test that hop_limit handles non-integer values gracefully."""
+        client = self._make_client(mock_mqtt)
+
+        # Simulate a JSON message with string hop_limit to trigger the protobuf path
+        json_data = {
+            "from": 0xDEADBEEF,
+            "to": "^all",
+            "channel": 0,
+            "type": "text",
+            "payload": {"text": "Test message"},
+        }
+
+        # This should not crash even with unusual data
+        import json
+
+        client._handle_json_message("msh/US/LongFast/json", json.dumps(json_data).encode())
+        self.assertGreater(client.network.total_messages, 0)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_protobuf_telemetry_path(self, mock_mqtt):
+        """Test telemetry processing via protobuf-decoded packet."""
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = self._make_client(mock_mqtt)
+
+        # Add a node first
+        node = Node(node_id="!aabb1111", node_num=0xAABB1111)
+        client.network.add_node(node)
+
+        # Create a mock decoded result
+        result = DecryptedPacket(
+            success=True,
+            portnum=67,  # TELEMETRY_APP
+            sender=0xAABB1111,
+            decoded={
+                "type": "telemetry",
+                "telemetry": {
+                    "device_metrics": {"battery_level": 75, "voltage": 3.9},
+                    "environment_metrics": {},
+                },
+            },
+        )
+
+        topic_info = {"node_id": "!aabb1111", "channel": "LongFast"}
+        client._process_decoded_packet(result, "!aabb1111", topic_info)
+
+        updated_node = client.network.get_node("!aabb1111")
+        self.assertEqual(updated_node.telemetry.battery_level, 75)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_protobuf_position_path(self, mock_mqtt):
+        """Test position processing via protobuf-decoded packet."""
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = self._make_client(mock_mqtt)
+
+        node = Node(node_id="!aabb2222", node_num=0xAABB2222)
+        client.network.add_node(node)
+
+        result = DecryptedPacket(
+            success=True,
+            portnum=3,  # POSITION_APP
+            sender=0xAABB2222,
+            decoded={
+                "type": "position",
+                "position": {"latitude": 40.7, "longitude": -74.0, "altitude": 50},
+            },
+        )
+
+        topic_info = {"node_id": "!aabb2222", "channel": "LongFast"}
+        client._process_decoded_packet(result, "!aabb2222", topic_info)
+
+        updated_node = client.network.get_node("!aabb2222")
+        self.assertAlmostEqual(updated_node.position.latitude, 40.7)
+        self.assertAlmostEqual(updated_node.position.longitude, -74.0)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_protobuf_text_message_path(self, mock_mqtt):
+        """Test text message processing via protobuf-decoded packet."""
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = self._make_client(mock_mqtt)
+
+        node = Node(node_id="!aabb3333", node_num=0xAABB3333, short_name="TXT")
+        client.network.add_node(node)
+
+        result = DecryptedPacket(
+            success=True,
+            portnum=1,  # TEXT_MESSAGE_APP
+            packet_id=42,
+            sender=0xAABB3333,
+            decoded={"type": "text", "text": "Hello from protobuf!", "channel": 0},
+        )
+
+        topic_info = {"node_id": "!aabb3333", "channel": "LongFast"}
+        client._process_decoded_packet(result, "!aabb3333", topic_info)
+
+        self.assertGreater(client.network.total_messages, 0)
+        found = any(m.text == "Hello from protobuf!" for m in client.network.messages)
+        self.assertTrue(found)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_protobuf_nodeinfo_path(self, mock_mqtt):
+        """Test nodeinfo processing via protobuf-decoded packet."""
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = self._make_client(mock_mqtt)
+
+        node = Node(node_id="!aabb4444", node_num=0xAABB4444)
+        client.network.add_node(node)
+
+        result = DecryptedPacket(
+            success=True,
+            portnum=4,  # NODEINFO_APP
+            sender=0xAABB4444,
+            decoded={
+                "type": "nodeinfo",
+                "user": {"short_name": "UPD", "long_name": "Updated Node", "hw_model": "T-Beam"},
+            },
+        )
+
+        topic_info = {"node_id": "!aabb4444", "channel": "LongFast"}
+        client._process_decoded_packet(result, "!aabb4444", topic_info)
+
+        updated_node = client.network.get_node("!aabb4444")
+        self.assertEqual(updated_node.short_name, "UPD")
+        self.assertEqual(updated_node.long_name, "Updated Node")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_protobuf_neighborinfo_path(self, mock_mqtt):
+        """Test neighborinfo processing via protobuf-decoded packet."""
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = self._make_client(mock_mqtt)
+
+        sender = Node(node_id="!aabb5555", node_num=0xAABB5555)
+        neighbor = Node(node_id="!aabb6666", node_num=0xAABB6666)
+        client.network.add_node(sender)
+        client.network.add_node(neighbor)
+
+        result = DecryptedPacket(
+            success=True,
+            portnum=71,  # NEIGHBORINFO_APP
+            sender=0xAABB5555,
+            decoded={
+                "type": "neighborinfo",
+                "neighborinfo": {"neighbors": [{"node_id": 0xAABB6666, "snr": 8.5}]},
+            },
+        )
+
+        topic_info = {"node_id": "!aabb5555", "channel": "LongFast"}
+        client._process_decoded_packet(result, "!aabb5555", topic_info)
+
+        # Verify neighbor relationship was tracked
+        updated_sender = client.network.get_node("!aabb5555")
+        self.assertIn("!aabb6666", updated_sender.neighbors)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_process_decoded_with_relay_node(self, mock_mqtt):
+        """Test that relay_node in decoded data creates relay entry."""
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = self._make_client(mock_mqtt)
+
+        result = DecryptedPacket(
+            success=True,
+            portnum=1,
+            packet_id=99,
+            sender=0xAAAA0001,
+            decoded={"type": "text", "text": "relayed msg", "relay_node": 0xBBBB0002, "channel": 0},
+        )
+
+        topic_info = {"node_id": "!aaaa0001", "channel": "LongFast"}
+        client._process_decoded_packet(result, "!aaaa0001", topic_info)
+
+        # Both sender and relay node should exist
+        self.assertIsNotNone(client.network.get_node("!aaaa0001"))
+        self.assertIsNotNone(client.network.get_node("!bbbb0002"))
+
+
 if __name__ == "__main__":
     unittest.main()

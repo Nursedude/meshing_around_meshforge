@@ -544,10 +544,18 @@ def load_config() -> ConfigParser:
 
 
 def save_config(config: ConfigParser):
-    """Save configuration to file with restricted permissions."""
-    with open(CONFIG_FILE, "w") as f:
-        config.write(f)
-    os.chmod(CONFIG_FILE, 0o600)
+    """Save configuration to file with restricted permissions (atomic write)."""
+    tmp_path = str(CONFIG_FILE) + ".tmp"
+    try:
+        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            config.write(f)
+        os.replace(tmp_path, str(CONFIG_FILE))
+    except OSError:
+        # Fallback: direct write if atomic rename fails (e.g. cross-device)
+        with open(CONFIG_FILE, "w") as f:
+            config.write(f)
+        os.chmod(CONFIG_FILE, 0o600)
     log(f"Saved config to {CONFIG_FILE}", "OK")
 
 

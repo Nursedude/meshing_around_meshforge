@@ -400,7 +400,7 @@ class WebApplication:
             """Main dashboard page."""
             if templates:
                 return templates.TemplateResponse(
-                    "index.html", {"request": request, "version": VERSION, "demo_mode": self.demo_mode}
+                    request, "index.html", {"version": VERSION, "demo_mode": self.demo_mode}
                 )
             return HTMLResponse(self._get_fallback_html())
 
@@ -408,28 +408,28 @@ class WebApplication:
         async def nodes_page(request: Request):
             """Nodes list page."""
             if templates:
-                return templates.TemplateResponse("nodes.html", {"request": request, "version": VERSION})
+                return templates.TemplateResponse(request, "nodes.html", {"version": VERSION})
             return HTMLResponse(self._get_fallback_html())
 
         @app.get("/messages", response_class=HTMLResponse)
         async def messages_page(request: Request):
             """Messages page."""
             if templates:
-                return templates.TemplateResponse("messages.html", {"request": request, "version": VERSION})
+                return templates.TemplateResponse(request, "messages.html", {"version": VERSION})
             return HTMLResponse(self._get_fallback_html())
 
         @app.get("/alerts", response_class=HTMLResponse)
         async def alerts_page(request: Request):
             """Alerts page."""
             if templates:
-                return templates.TemplateResponse("alerts.html", {"request": request, "version": VERSION})
+                return templates.TemplateResponse(request, "alerts.html", {"version": VERSION})
             return HTMLResponse(self._get_fallback_html())
 
         @app.get("/topology", response_class=HTMLResponse)
         async def topology_page(request: Request):
             """Topology visualization page."""
             if templates:
-                return templates.TemplateResponse("topology.html", {"request": request, "version": VERSION})
+                return templates.TemplateResponse(request, "topology.html", {"version": VERSION})
             return HTMLResponse(self._get_fallback_html("Topology"))
 
         @app.get("/map", response_class=HTMLResponse)
@@ -437,8 +437,7 @@ class WebApplication:
             """Map visualization page with Leaflet.js."""
             if templates:
                 return templates.TemplateResponse(
-                    "map.html",
-                    {"request": request, "version": VERSION, "demo_mode": self.demo_mode},
+                    request, "map.html", {"version": VERSION, "demo_mode": self.demo_mode}
                 )
             return HTMLResponse(self._get_fallback_html("Map"))
 
