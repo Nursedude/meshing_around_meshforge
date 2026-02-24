@@ -22,6 +22,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from meshing_around_clients.core.config import Config
 from meshing_around_clients.core.models import (
     Alert,
     AlertType,
@@ -30,8 +31,6 @@ from meshing_around_clients.core.models import (
     MessageType,
     Node,
 )
-from meshing_around_clients.core.config import Config
-
 
 # =============================================================================
 # Message Persistence Tests

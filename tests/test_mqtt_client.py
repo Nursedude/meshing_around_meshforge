@@ -9,16 +9,16 @@ Run integration tests with: python -m pytest tests/test_mqtt_client.py -v -k int
 Run unit tests only with: python -m pytest tests/test_mqtt_client.py -v -k "not integration"
 """
 
-import unittest
-from unittest.mock import patch, MagicMock
 import json
-from datetime import datetime
-
 import sys
-sys.path.insert(0, str(__file__).rsplit('/tests/', 1)[0])
+import unittest
+from datetime import datetime
+from unittest.mock import MagicMock, patch
+
+sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
 from meshing_around_clients.core.config import Config
-from meshing_around_clients.core.models import Node, Message, Alert, AlertType
+from meshing_around_clients.core.models import Alert, AlertType, Message, Node
 
 
 class TestMQTTConfigDataclass(unittest.TestCase):
@@ -27,6 +27,7 @@ class TestMQTTConfigDataclass(unittest.TestCase):
     def test_mqtt_config_import(self):
         """Verify MQTTConfig can be imported."""
         from meshing_around_clients.core.config import MQTTConfig
+
         cfg = MQTTConfig()
         self.assertEqual(cfg.broker, "mqtt.meshtastic.org")
         self.assertEqual(cfg.port, 1883)
@@ -37,13 +38,9 @@ class TestMQTTConfigDataclass(unittest.TestCase):
     def test_mqtt_config_custom(self):
         """Test MQTTConfig with custom values."""
         from meshing_around_clients.core.config import MQTTConfig
+
         cfg = MQTTConfig(
-            broker="localhost",
-            port=1884,
-            use_tls=True,
-            username="custom",
-            password="secret",
-            topic_root="msh/EU"
+            broker="localhost", port=1884, use_tls=True, username="custom", password="secret", topic_root="msh/EU"
         )
         self.assertEqual(cfg.broker, "localhost")
         self.assertEqual(cfg.port, 1884)
@@ -57,13 +54,11 @@ class TestMQTTAvailability(unittest.TestCase):
     def test_mqtt_available_flag_exists(self):
         """Verify MQTT_AVAILABLE flag is set correctly."""
         from meshing_around_clients.core.mqtt_client import MQTT_AVAILABLE
+
         self.assertIsInstance(MQTT_AVAILABLE, bool)
 
 
-@unittest.skipUnless(
-    __import__('importlib.util').util.find_spec('paho'),
-    "paho-mqtt not installed"
-)
+@unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
 class TestMQTTMeshtasticClient(unittest.TestCase):
     """Test MQTTMeshtasticClient with mocked paho-mqtt."""
 
@@ -72,19 +67,17 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.config.alerts.enabled = True
         self.config.alerts.emergency_keywords = ["help", "sos", "emergency"]
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_client_initialization(self, mock_mqtt):
         """Test client initializes correctly."""
-        from meshing_around_clients.core.mqtt_client import (
-            MQTTMeshtasticClient, MQTTConfig
-        )
+        from meshing_around_clients.core.mqtt_client import MQTTConfig, MQTTMeshtasticClient
 
         client = MQTTMeshtasticClient(self.config)
         self.assertFalse(client.is_connected)
         self.assertIsNotNone(client.network)
         self.assertEqual(client.network.connection_status, "disconnected")
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_callback_registration(self, mock_mqtt):
         """Test callback registration."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -99,7 +92,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         client.register_callback("on_message", on_message)
         self.assertEqual(len(client._callbacks["on_message"]), 1)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_json_text_message_handling(self, mock_mqtt):
         """Test handling of JSON text messages."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -107,13 +100,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         client = MQTTMeshtasticClient(self.config)
 
         # Simulate JSON message
-        json_data = {
-            "from": 0x12345678,
-            "to": "^all",
-            "channel": 0,
-            "type": "text",
-            "payload": {"text": "Hello mesh!"}
-        }
+        json_data = {"from": 0x12345678, "to": "^all", "channel": 0, "type": "text", "payload": {"text": "Hello mesh!"}}
 
         client._handle_json_message("msh/US/LongFast/json", json.dumps(json_data).encode())
 
@@ -126,7 +113,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         msg = client.network.messages[0]
         self.assertEqual(msg.text, "Hello mesh!")
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_emergency_keyword_detection(self, mock_mqtt):
         """Test emergency keyword triggers alert."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -139,7 +126,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
             "to": "^all",
             "channel": 0,
             "type": "text",
-            "payload": {"text": "HELP! Need assistance!"}
+            "payload": {"text": "HELP! Need assistance!"},
         }
 
         client._handle_json_message("msh/US/LongFast/json", json.dumps(json_data).encode())
@@ -150,7 +137,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.assertEqual(alert.alert_type, AlertType.EMERGENCY)
         self.assertEqual(alert.severity, 4)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_position_handling(self, mock_mqtt):
         """Test position update handling."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -158,23 +145,14 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         client = MQTTMeshtasticClient(self.config)
 
         # First add a node
-        json_nodeinfo = {
-            "from": 0x11111111,
-            "payload": {"user": {"shortName": "TST", "longName": "Test Node"}}
-        }
+        json_nodeinfo = {"from": 0x11111111, "payload": {"user": {"shortName": "TST", "longName": "Test Node"}}}
         client._handle_json_message("msh/US/json", json.dumps(json_nodeinfo).encode())
 
         # Then send position
         json_pos = {
             "from": 0x11111111,
             "type": "position",
-            "payload": {
-                "position": {
-                    "latitudeI": 455000000,
-                    "longitudeI": -1226000000,
-                    "altitude": 100
-                }
-            }
+            "payload": {"position": {"latitudeI": 455000000, "longitudeI": -1226000000, "altitude": 100}},
         }
         client._handle_json_message("msh/US/json", json.dumps(json_pos).encode())
 
@@ -184,7 +162,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.assertAlmostEqual(node.position.latitude, 45.5, places=1)
         self.assertAlmostEqual(node.position.longitude, -122.6, places=1)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_telemetry_handling(self, mock_mqtt):
         """Test telemetry update handling."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -192,10 +170,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         client = MQTTMeshtasticClient(self.config)
 
         # First add a node
-        json_nodeinfo = {
-            "from": 0x22222222,
-            "payload": {"user": {"shortName": "TEL"}}
-        }
+        json_nodeinfo = {"from": 0x22222222, "payload": {"user": {"shortName": "TEL"}}}
         client._handle_json_message("msh/US/json", json.dumps(json_nodeinfo).encode())
 
         # Send telemetry
@@ -203,14 +178,8 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
             "from": 0x22222222,
             "type": "telemetry",
             "payload": {
-                "telemetry": {
-                    "deviceMetrics": {
-                        "batteryLevel": 85,
-                        "voltage": 4.1,
-                        "channelUtilization": 5.5
-                    }
-                }
-            }
+                "telemetry": {"deviceMetrics": {"batteryLevel": 85, "voltage": 4.1, "channelUtilization": 5.5}}
+            },
         }
         client._handle_json_message("msh/US/json", json.dumps(json_tel).encode())
 
@@ -219,7 +188,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.assertEqual(node.telemetry.battery_level, 85)
         self.assertAlmostEqual(node.telemetry.voltage, 4.1)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_low_battery_alert(self, mock_mqtt):
         """Test low battery triggers alert."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -234,7 +203,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         json_tel = {
             "from": 0x33333333,
             "type": "telemetry",
-            "payload": {"telemetry": {"deviceMetrics": {"batteryLevel": 15}}}
+            "payload": {"telemetry": {"deviceMetrics": {"batteryLevel": 15}}},
         }
         client._handle_json_message("msh/US/json", json.dumps(json_tel).encode())
 
@@ -243,7 +212,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.assertEqual(len(battery_alerts), 1)
         self.assertEqual(battery_alerts[0].severity, 2)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_get_nodes(self, mock_mqtt):
         """Test get_nodes method."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -258,7 +227,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         nodes = client.get_nodes()
         self.assertEqual(len(nodes), 5)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_get_messages_with_limit(self, mock_mqtt):
         """Test get_messages with limit."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -267,11 +236,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
 
         # Add multiple messages
         for i in range(10):
-            json_data = {
-                "from": 0x44444444,
-                "type": "text",
-                "payload": {"text": f"Message {i}"}
-            }
+            json_data = {"from": 0x44444444, "type": "text", "payload": {"text": f"Message {i}"}}
             client._handle_json_message("msh/US/json", json.dumps(json_data).encode())
 
         messages = client.get_messages(limit=5)
@@ -279,7 +244,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         # Should be last 5 messages
         self.assertEqual(messages[0].text, "Message 5")
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_get_messages_by_channel(self, mock_mqtt):
         """Test get_messages filtered by channel."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -292,14 +257,14 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
                 "from": 0x55555555,
                 "channel": ch,
                 "type": "text",
-                "payload": {"text": f"Message {i} on channel {ch}"}
+                "payload": {"text": f"Message {i} on channel {ch}"},
             }
             client._handle_json_message("msh/US/json", json.dumps(json_data).encode())
 
         ch0_messages = client.get_messages(channel=0)
         self.assertEqual(len(ch0_messages), 3)
 
-    @patch('meshing_around_clients.core.mqtt_client.mqtt')
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_get_alerts_unread_only(self, mock_mqtt):
         """Test get_alerts with unread_only filter."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
@@ -308,11 +273,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
 
         # Create alerts
         for i in range(3):
-            json_data = {
-                "from": 0x66660000 + i,
-                "type": "text",
-                "payload": {"text": "HELP emergency!"}
-            }
+            json_data = {"from": 0x66660000 + i, "type": "text", "payload": {"text": "HELP emergency!"}}
             client._handle_json_message("msh/US/json", json.dumps(json_data).encode())
 
         # Acknowledge one
@@ -360,6 +321,7 @@ class TestMQTTConnectivity(unittest.TestCase):
     def test_default_credentials_format(self):
         """Verify default MQTT credentials are properly formatted."""
         from meshing_around_clients.core.config import MQTTConfig
+
         cfg = MQTTConfig()
 
         # Credentials should be non-empty strings
@@ -374,8 +336,7 @@ class TestMQTTConnectivity(unittest.TestCase):
 
 # Integration tests - require network and paho-mqtt
 @unittest.skipUnless(
-    __import__('importlib.util').util.find_spec('paho'),
-    "paho-mqtt not installed - skipping integration tests"
+    __import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed - skipping integration tests"
 )
 class TestMQTTIntegration(unittest.TestCase):
     """
@@ -388,6 +349,7 @@ class TestMQTTIntegration(unittest.TestCase):
     def test_integration_connect_to_broker(self):
         """Integration test: connect to mqtt.meshtastic.org."""
         import socket
+
         try:
             # First check network connectivity
             socket.create_connection(("mqtt.meshtastic.org", 1883), 5)

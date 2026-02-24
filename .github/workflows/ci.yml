@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
 
     steps:
       - uses: actions/checkout@v4
@@ -66,16 +66,16 @@ jobs:
 
       - name: Check formatting with black
         run: |
-          black --check --diff meshing_around_clients/ --exclude '__pycache__|\.pyc'
+          black --check --diff meshing_around_clients/ tests/ mesh_client.py configure_bot.py --exclude '__pycache__|\.pyc'
 
       - name: Check imports with isort
         run: |
-          isort --check-only --diff meshing_around_clients/
+          isort --check-only --diff meshing_around_clients/ tests/
 
       - name: Lint with flake8
         run: |
-          flake8 meshing_around_clients/ --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 meshing_around_clients/ --count --max-complexity=15 --max-line-length=120 --statistics
+          flake8 meshing_around_clients/ tests/ mesh_client.py configure_bot.py --count --select=E9,F63,F7,F82 --show-source --statistics
+          flake8 meshing_around_clients/ tests/ mesh_client.py configure_bot.py --count --max-complexity=15 --max-line-length=120 --statistics
 
   syntax-check:
     runs-on: ubuntu-latest

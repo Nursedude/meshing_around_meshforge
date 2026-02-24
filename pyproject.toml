@@ -15,17 +15,3 @@ exclude = '''
 [tool.isort]
 profile = "black"
 line_length = 120
-
-[tool.flake8]
-max-line-length = 120
-max-complexity = 15
-exclude = [".git", "__pycache__", ".pytest_cache", ".venv", "venv"]
-# W503: line break before binary operator (conflicts with black)
-# E203: whitespace before ':' (conflicts with black)
-extend-ignore = ["W503", "E203"]
-per-file-ignores = [
-    # Complex methods: route registration, deserialization, packet processing
-    "meshing_around_clients/web/app.py:C901",
-    "meshing_around_clients/core/models.py:C901",
-    "meshing_around_clients/core/mqtt_client.py:C901",
-]

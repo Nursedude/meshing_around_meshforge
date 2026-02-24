@@ -15,5 +15,8 @@ per-file-ignores =
     meshing_around_clients/web/app.py:C901
     meshing_around_clients/core/models.py:C901
     meshing_around_clients/core/mqtt_client.py:C901
-    # Fallback pattern: intentional redefinitions when modules unavailable
+    # Entry points: complex main() functions, intentional fallback imports
+    mesh_client.py:C901,F401
     configure_bot.py:C901,F811,F401,F541,F841
+    # Tests use sys.path.insert (E402) and may have unused imports for setup (F401)
+    tests/*.py:E402,F401,F841,C901

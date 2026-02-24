@@ -253,8 +253,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                 import ssl
 
                 tls_kwargs = {"cert_reqs": ssl.CERT_REQUIRED}
-                # ssl.PROTOCOL_TLS_CLIENT is deprecated in Python 3.10+;
-                # omit tls_version to let paho-mqtt use the best available protocol.
+                # Use PROTOCOL_TLS_CLIENT (the recommended constant since Python 3.10;
+                # the generic PROTOCOL_TLS was deprecated in favor of this).
                 if hasattr(ssl, "PROTOCOL_TLS_CLIENT"):
                     tls_kwargs["tls_version"] = ssl.PROTOCOL_TLS_CLIENT
                 self._client.tls_set(**tls_kwargs)
@@ -276,7 +276,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                 atexit.register(self._atexit_cleanup)
 
                 # Wait for connection (monotonic clock avoids wall-clock jumps)
-                timeout = 10
+                timeout = self.mqtt_config.connect_timeout
                 start = time.monotonic()
                 while not self.is_connected and (time.monotonic() - start) < timeout:
                     time.sleep(0.1)
@@ -1089,8 +1089,9 @@ class MQTTMeshtasticClient(CallbackMixin):
             # Full node number
             relay_id = f"!{relay_node:08x}"
         else:
-            # Partial relay node (last 1-2 bytes) - create placeholder
-            relay_id = f"!????{relay_node:04x}"
+            # Partial relay node (last 1-2 bytes) — zero-pad as placeholder.
+            # These may be merged later when full node info arrives.
+            relay_id = f"!0000{relay_node:04x}"
 
         relay_existing = self.network.get_node(relay_id)
         if not relay_existing:

@@ -165,7 +165,7 @@ def check_dependency(package: str) -> bool:
     try:
         # Strip version specifiers (>=, <=, etc.) and extras ([...]) from package name
         base_name = package
-        for sep in ['>=', '<=', '!=', '~=', '==', '>', '<', '[']:
+        for sep in [">=", "<=", "!=", "~=", "==", ">", "<", "["]:
             base_name = base_name.split(sep)[0]
         import_name = _IMPORT_NAME_MAP.get(base_name, base_name.replace("-", "_"))
         __import__(import_name)
