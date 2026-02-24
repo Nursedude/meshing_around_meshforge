@@ -390,12 +390,6 @@ def update_meshforge(
 # =============================================================================
 
 
-def get_last_update_check(config_path: Path) -> Optional[datetime]:
-    """Get the timestamp of the last update check from config."""
-    # This would read from config - placeholder for now
-    return None
-
-
 def should_check_updates(schedule: str, last_check: Optional[datetime] = None) -> bool:
     """Determine if updates should be checked based on schedule.
 

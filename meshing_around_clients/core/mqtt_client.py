@@ -203,6 +203,46 @@ class MQTTMeshtasticClient(CallbackMixin):
     # _is_alert_cooled_down: no override needed — base CallbackMixin
     # now uses its own _cooldown_lock for thread safety.
 
+    def _check_battery_alert(self, node: "Node", sender_id: str) -> None:
+        """Fire a low-battery alert if level is critical (with per-node cooldown)."""
+        if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
+            if not self._is_alert_cooled_down(sender_id, "battery"):
+                alert = Alert(
+                    id=str(uuid.uuid4()),
+                    alert_type=AlertType.BATTERY,
+                    title="Low Battery",
+                    message=f"{node.display_name} at {node.telemetry.battery_level}%",
+                    severity=2,
+                    source_node=sender_id,
+                )
+                self.network.add_alert(alert)
+                self._trigger_callbacks("on_alert", alert)
+
+    def _extract_position(self, pos_data: dict) -> Optional["Position"]:
+        """Extract and validate a Position from a dict with latitude/latitudeI keys."""
+        lat = self._safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
+        if lat is None:
+            lat_i = pos_data.get("latitudeI", 0)
+            lat = lat_i / 1e7 if lat_i else None
+            if lat is not None:
+                lat = self._safe_float(lat, *VALID_LAT_RANGE)
+
+        lon = self._safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
+        if lon is None:
+            lon_i = pos_data.get("longitudeI", 0)
+            lon = lon_i / 1e7 if lon_i else None
+            if lon is not None:
+                lon = self._safe_float(lon, *VALID_LON_RANGE)
+
+        if lat is not None and lon is not None:
+            return Position(
+                latitude=lat,
+                longitude=lon,
+                altitude=pos_data.get("altitude", 0),
+                time=datetime.now(timezone.utc),
+            )
+        return None
+
     def _create_mqtt_client(self):
         """Create MQTT client with paho v1/v2 API compatibility."""
         if _PAHO_V2:
@@ -438,8 +478,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             # Primary channel topics
             f"{root}/{channel}/#",  # All messages on configured channel
             # JSON formatted messages (easier to parse)
-            f"{root}/2/json/#",  # JSON on default public channel
-            f"{root}/+/json/#",  # JSON on any channel
+            f"{root}/+/json/#",  # JSON on any channel (covers /2/json/# too)
             # Encrypted messages (channel 2 is often public)
             f"{root}/2/e/#",
             # Stats and service messages
@@ -711,27 +750,9 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         node = self.network.get_node(sender_id)
         if node:
-
-            # Validate coordinates (from meshforge robustness patterns)
-            lat = self._safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
-            if lat is None:
-                lat_i = pos_data.get("latitudeI", 0)
-                lat = lat_i / 1e7 if lat_i else None
-                if lat is not None:
-                    lat = self._safe_float(lat, *VALID_LAT_RANGE)
-
-            lon = self._safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
-            if lon is None:
-                lon_i = pos_data.get("longitudeI", 0)
-                lon = lon_i / 1e7 if lon_i else None
-                if lon is not None:
-                    lon = self._safe_float(lon, *VALID_LON_RANGE)
-
-            # Only update position if coordinates are valid
-            if lat is not None and lon is not None:
-                node.position = Position(
-                    latitude=lat, longitude=lon, altitude=pos_data.get("altitude", 0), time=datetime.now(timezone.utc)
-                )
+            position = self._extract_position(pos_data)
+            if position:
+                node.position = position
             node.last_heard = datetime.now(timezone.utc)
 
     def _handle_telemetry_from_json(self, data: dict, sender_id: str):
@@ -769,19 +790,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             )
             node.last_heard = datetime.now(timezone.utc)
 
-            # Battery alert (with per-node cooldown to prevent alert fatigue)
-            if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
-                if not self._is_alert_cooled_down(sender_id, "battery"):
-                    alert = Alert(
-                        id=str(uuid.uuid4()),
-                        alert_type=AlertType.BATTERY,
-                        title="Low Battery (MQTT)",
-                        message=f"{node.display_name} at {node.telemetry.battery_level}%",
-                        severity=2,
-                        source_node=sender_id,
-                    )
-                    self.network.add_alert(alert)
-                    self._trigger_callbacks("on_alert", alert)
+            self._check_battery_alert(node, sender_id)
 
             # Channel congestion alert (with per-node cooldown)
             if ch_util >= CHUTIL_CRITICAL_THRESHOLD:
@@ -947,7 +956,7 @@ class MQTTMeshtasticClient(CallbackMixin):
         if not existing_node:
             new_node = Node(
                 node_id=sender_id,
-                node_num=result.sender,
+                node_num=result.sender if result.sender is not None else 0,
                 last_heard=datetime.now(timezone.utc),
                 first_seen=datetime.now(timezone.utc),
             )
@@ -960,7 +969,10 @@ class MQTTMeshtasticClient(CallbackMixin):
         # Extract SNR/RSSI if available (use None sentinel so 0.0 dB isn't dropped)
         snr = decoded.get("rx_snr")
         rssi = decoded.get("rx_rssi")
-        hop_limit = decoded.get("hop_limit", 3)
+        try:
+            hop_limit = int(decoded.get("hop_limit", 3))
+        except (TypeError, ValueError):
+            hop_limit = 3
         hop_count = max(0, 3 - hop_limit)  # Estimate hops
 
         if snr is not None or rssi is not None:
@@ -981,16 +993,9 @@ class MQTTMeshtasticClient(CallbackMixin):
             pos_data = decoded.get("position", {})
             node = self.network.get_node(sender_id)
             if pos_data and node:
-                # Validate coordinates (consistent with JSON path)
-                lat = self._safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
-                lon = self._safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
-                if lat is not None and lon is not None:
-                    node.position = Position(
-                        latitude=lat,
-                        longitude=lon,
-                        altitude=pos_data.get("altitude", 0),
-                        time=datetime.now(timezone.utc),
-                    )
+                position = self._extract_position(pos_data)
+                if position:
+                    node.position = position
                     with self._stats_lock:
                         self._stats["position_updates"] += 1
                     self._trigger_callbacks("on_position", sender_id)
@@ -1017,19 +1022,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                     self._stats["telemetry_updates"] += 1
                 self._trigger_callbacks("on_telemetry", sender_id)
 
-                # Battery alert (with per-node cooldown to prevent alert fatigue)
-                if node.telemetry.battery_level > 0 and node.telemetry.battery_level < 20:
-                    if not self._is_alert_cooled_down(sender_id, "battery"):
-                        alert = Alert(
-                            id=str(uuid.uuid4()),
-                            alert_type=AlertType.BATTERY,
-                            title="Low Battery",
-                            message=f"{node.display_name} at {node.telemetry.battery_level}%",
-                            severity=2,
-                            source_node=sender_id,
-                        )
-                        self.network.add_alert(alert)
-                        self._trigger_callbacks("on_alert", alert)
+                self._check_battery_alert(node, sender_id)
 
         elif msg_type == "nodeinfo" or portnum == 4:
             user_data = decoded.get("user", {})
