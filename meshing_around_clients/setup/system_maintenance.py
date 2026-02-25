@@ -230,10 +230,11 @@ def get_git_remote_url(repo_path: Path, remote: str = "origin") -> Optional[str]
 
 
 def get_git_current_branch(repo_path: Path) -> Optional[str]:
-    """Get the current git branch."""
+    """Get the current git branch. Returns None on detached HEAD or error."""
     ret, stdout, _ = run_command(["git", "branch", "--show-current"], cwd=repo_path)
     if ret == 0:
-        return stdout.strip()
+        branch = stdout.strip()
+        return branch if branch else None  # Empty on detached HEAD
     return None
 
 

@@ -907,7 +907,11 @@ class WebApplication:
             msg_bytes = len(text.strip().encode("utf-8"))
             if msg_bytes > MAX_MESSAGE_BYTES:
                 await websocket.send_json(
-                    {"type": "message_status", "success": False, "error": f"Message too long ({msg_bytes}/{MAX_MESSAGE_BYTES} bytes)"}
+                    {
+                        "type": "message_status",
+                        "success": False,
+                        "error": f"Message too long ({msg_bytes}/{MAX_MESSAGE_BYTES} bytes)",
+                    }
                 )
                 return
             if not isinstance(channel, int) or channel < 0 or channel > 7:
