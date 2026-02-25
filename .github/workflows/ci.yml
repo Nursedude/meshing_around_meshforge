@@ -35,12 +35,12 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short --ignore=tests/test_tui_app.py
+          python -m pytest tests/ -v --tb=short
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.11'
         run: |
-          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=50 --ignore=tests/test_tui_app.py
+          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=50
 
       - name: Upload coverage
         if: matrix.python-version == '3.11'

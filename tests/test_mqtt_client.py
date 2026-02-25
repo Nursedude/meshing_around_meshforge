@@ -664,5 +664,53 @@ class TestMQTTDecodedPacketPaths(unittest.TestCase):
         self.assertIsNotNone(client.network.get_node("!bbbb0002"))
 
 
+class TestMQTTSendMessageValidation(unittest.TestCase):
+    """Test send_message() byte-length validation."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_send_message_rejects_oversized(self, mock_mqtt):
+        """send_message() should return False for messages exceeding 228 bytes."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        client._connected = True
+        client._client = MagicMock()
+        client.mqtt_config.node_id = "!test1234"
+
+        # 229 ASCII bytes — over the limit
+        result = client.send_message("x" * 229)
+        self.assertFalse(result)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_send_message_allows_228_bytes(self, mock_mqtt):
+        """send_message() should accept exactly 228 bytes."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        client._connected = True
+        client._client = MagicMock()
+        client.mqtt_config.node_id = "!test1234"
+
+        result = client.send_message("x" * 228)
+        self.assertTrue(result)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_send_message_rejects_multibyte_overflow(self, mock_mqtt):
+        """Emoji (4 bytes each) that fit in char count but overflow byte count."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        client._connected = True
+        client._client = MagicMock()
+        client.mqtt_config.node_id = "!test1234"
+
+        # 58 emoji = 58 * 4 = 232 bytes > 228
+        result = client.send_message("\U0001f600" * 58)
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

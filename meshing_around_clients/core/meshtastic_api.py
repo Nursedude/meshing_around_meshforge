@@ -21,9 +21,12 @@ CONNECT_TIMEOUT_SECONDS = 30.0
 # Hostname validation: alphanumeric, dots, hyphens, underscores, optional port
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 
-from .callbacks import CallbackMixin  # noqa: E402
+from .callbacks import CallbackMixin, safe_float, safe_int  # noqa: E402
 from .config import Config  # noqa: E402
 from .models import (  # noqa: E402
+    MAX_MESSAGE_BYTES,
+    VALID_LAT_RANGE,
+    VALID_LON_RANGE,
     Alert,
     AlertType,
     MeshNetwork,
@@ -482,29 +485,38 @@ class MeshtasticAPI(CallbackMixin):
                     break
 
     def _handle_position(self, packet: dict) -> None:
-        """Handle position update."""
+        """Handle position update with coordinate validation."""
         sender_id = packet.get("fromId", "")
         decoded = packet.get("decoded", {})
         position_data = decoded.get("position", {})
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
-            lat = position_data.get("latitude")
+            # Validate latitude (prefer float, fallback to latitudeI / 1e7)
+            lat = safe_float(position_data.get("latitude"), *VALID_LAT_RANGE)
             if lat is None:
                 lat_i = position_data.get("latitudeI", 0)
-                lat = lat_i / 1e7 if lat_i else 0.0
-            lon = position_data.get("longitude")
+                if lat_i:
+                    lat = safe_float(lat_i / 1e7, *VALID_LAT_RANGE)
+            # Validate longitude
+            lon = safe_float(position_data.get("longitude"), *VALID_LON_RANGE)
             if lon is None:
                 lon_i = position_data.get("longitudeI", 0)
-                lon = lon_i / 1e7 if lon_i else 0.0
-            node.position = Position(
-                latitude=lat, longitude=lon, altitude=position_data.get("altitude", 0), time=datetime.now(timezone.utc)
-            )
+                if lon_i:
+                    lon = safe_float(lon_i / 1e7, *VALID_LON_RANGE)
+            # Only update position if both coordinates are valid
+            if lat is not None and lon is not None:
+                node.position = Position(
+                    latitude=lat,
+                    longitude=lon,
+                    altitude=position_data.get("altitude", 0),
+                    time=datetime.now(timezone.utc),
+                )
             node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_position", sender_id, node.position)
 
     def _handle_telemetry(self, packet: dict) -> None:
-        """Handle telemetry update."""
+        """Handle telemetry update with input validation."""
         sender_id = packet.get("fromId", "")
         decoded = packet.get("decoded", {})
         telemetry_data = decoded.get("telemetry", {})
@@ -512,12 +524,18 @@ class MeshtasticAPI(CallbackMixin):
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
+            # Validate all numeric fields (matching MQTT client robustness)
+            battery = safe_int(device_metrics.get("batteryLevel"), 0, 101)
+            voltage = safe_float(device_metrics.get("voltage"), 0.0, 10.0)
+            ch_util = safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0)
+            air_util = safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0)
+            uptime = safe_int(device_metrics.get("uptimeSeconds"), 0, 2**31)
             node.telemetry = NodeTelemetry(
-                battery_level=device_metrics.get("batteryLevel", node.telemetry.battery_level),
-                voltage=device_metrics.get("voltage", node.telemetry.voltage),
-                channel_utilization=device_metrics.get("channelUtilization", node.telemetry.channel_utilization),
-                air_util_tx=device_metrics.get("airUtilTx", node.telemetry.air_util_tx),
-                uptime_seconds=device_metrics.get("uptimeSeconds", node.telemetry.uptime_seconds),
+                battery_level=battery if battery is not None else node.telemetry.battery_level,
+                voltage=voltage if voltage is not None else node.telemetry.voltage,
+                channel_utilization=ch_util if ch_util is not None else node.telemetry.channel_utilization,
+                air_util_tx=air_util if air_util is not None else node.telemetry.air_util_tx,
+                uptime_seconds=uptime if uptime is not None else node.telemetry.uptime_seconds,
                 last_updated=datetime.now(timezone.utc),
             )
             node.last_heard = datetime.now(timezone.utc)
@@ -580,8 +598,13 @@ class MeshtasticAPI(CallbackMixin):
             self._trigger_callbacks("on_alert", alert)
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
-        """Send a text message."""
+        """Send a text message with byte-length validation."""
         if not self.interface:
+            return False
+
+        msg_bytes = len(text.encode("utf-8"))
+        if msg_bytes > MAX_MESSAGE_BYTES:
+            logger.warning("Message too long (%d/%d bytes), rejecting", msg_bytes, MAX_MESSAGE_BYTES)
             return False
 
         try:
@@ -769,7 +792,11 @@ class MockMeshtasticAPI(MeshtasticAPI):
             self._trigger_callbacks("on_telemetry", node)
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
-        """Simulate sending a message."""
+        """Simulate sending a message with byte-length validation."""
+        msg_bytes = len(text.encode("utf-8"))
+        if msg_bytes > MAX_MESSAGE_BYTES:
+            logger.warning("Message too long (%d/%d bytes), rejecting", msg_bytes, MAX_MESSAGE_BYTES)
+            return False
         message = Message(
             id=str(uuid.uuid4()),
             sender_id=self.network.my_node_id,

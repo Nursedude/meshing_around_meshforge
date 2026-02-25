@@ -163,5 +163,149 @@ class TestMockAPINetworkState(unittest.TestCase):
         self.assertLessEqual(health["score"], 100)
 
 
+class TestMockAPIPositionValidation(unittest.TestCase):
+    """Test _handle_position() input validation."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+        # Pick the first demo node to test against
+        self.node_id = list(self.api.network.nodes.keys())[0]
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def _make_position_packet(self, lat=None, lon=None, lat_i=None, lon_i=None, alt=0):
+        position = {}
+        if lat is not None:
+            position["latitude"] = lat
+        if lon is not None:
+            position["longitude"] = lon
+        if lat_i is not None:
+            position["latitudeI"] = lat_i
+        if lon_i is not None:
+            position["longitudeI"] = lon_i
+        position["altitude"] = alt
+        return {"fromId": self.node_id, "decoded": {"position": position}}
+
+    def test_valid_coordinates_accepted(self):
+        packet = self._make_position_packet(lat=45.5, lon=-122.6)
+        self.api._handle_position(packet)
+        node = self.api.network.nodes[self.node_id]
+        self.assertIsNotNone(node.position)
+        self.assertAlmostEqual(node.position.latitude, 45.5)
+        self.assertAlmostEqual(node.position.longitude, -122.6)
+
+    def test_nan_latitude_rejected(self):
+        # Store original position
+        original_pos = self.api.network.nodes[self.node_id].position
+        packet = self._make_position_packet(lat=float("nan"), lon=-122.6)
+        self.api._handle_position(packet)
+        node = self.api.network.nodes[self.node_id]
+        # Position should not have been updated to NaN
+        self.assertEqual(node.position, original_pos)
+
+    def test_inf_longitude_rejected(self):
+        original_pos = self.api.network.nodes[self.node_id].position
+        packet = self._make_position_packet(lat=45.5, lon=float("inf"))
+        self.api._handle_position(packet)
+        node = self.api.network.nodes[self.node_id]
+        self.assertEqual(node.position, original_pos)
+
+    def test_out_of_range_latitude_rejected(self):
+        original_pos = self.api.network.nodes[self.node_id].position
+        packet = self._make_position_packet(lat=91.0, lon=-122.6)
+        self.api._handle_position(packet)
+        node = self.api.network.nodes[self.node_id]
+        self.assertEqual(node.position, original_pos)
+
+    def test_out_of_range_longitude_rejected(self):
+        original_pos = self.api.network.nodes[self.node_id].position
+        packet = self._make_position_packet(lat=45.5, lon=181.0)
+        self.api._handle_position(packet)
+        node = self.api.network.nodes[self.node_id]
+        self.assertEqual(node.position, original_pos)
+
+    def test_latitudeI_conversion_works(self):
+        packet = self._make_position_packet(lat_i=455000000, lon_i=-1226000000)
+        self.api._handle_position(packet)
+        node = self.api.network.nodes[self.node_id]
+        self.assertIsNotNone(node.position)
+        self.assertAlmostEqual(node.position.latitude, 45.5)
+        self.assertAlmostEqual(node.position.longitude, -122.6)
+
+
+class TestMockAPITelemetryValidation(unittest.TestCase):
+    """Test _handle_telemetry() input validation."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+        self.node_id = list(self.api.network.nodes.keys())[0]
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def _make_telemetry_packet(self, **metrics):
+        return {"fromId": self.node_id, "decoded": {"telemetry": {"deviceMetrics": metrics}}}
+
+    def test_valid_telemetry_accepted(self):
+        packet = self._make_telemetry_packet(batteryLevel=85, voltage=3.7, channelUtilization=15.0, airUtilTx=2.5)
+        self.api._handle_telemetry(packet)
+        node = self.api.network.nodes[self.node_id]
+        self.assertEqual(node.telemetry.battery_level, 85)
+        self.assertAlmostEqual(node.telemetry.voltage, 3.7)
+        self.assertAlmostEqual(node.telemetry.channel_utilization, 15.0)
+
+    def test_negative_battery_rejected(self):
+        node = self.api.network.nodes[self.node_id]
+        original_battery = node.telemetry.battery_level
+        packet = self._make_telemetry_packet(batteryLevel=-5)
+        self.api._handle_telemetry(packet)
+        # Should keep original value, not accept -5
+        self.assertEqual(node.telemetry.battery_level, original_battery)
+
+    def test_battery_over_101_rejected(self):
+        node = self.api.network.nodes[self.node_id]
+        original_battery = node.telemetry.battery_level
+        packet = self._make_telemetry_packet(batteryLevel=200)
+        self.api._handle_telemetry(packet)
+        self.assertEqual(node.telemetry.battery_level, original_battery)
+
+    def test_channel_utilization_over_100_rejected(self):
+        node = self.api.network.nodes[self.node_id]
+        original_util = node.telemetry.channel_utilization
+        packet = self._make_telemetry_packet(channelUtilization=150.0)
+        self.api._handle_telemetry(packet)
+        self.assertEqual(node.telemetry.channel_utilization, original_util)
+
+
+class TestMockAPISendMessageValidation(unittest.TestCase):
+    """Test send_message() byte-length validation."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_send_message_rejects_oversized(self):
+        result = self.api.send_message("x" * 229)
+        self.assertFalse(result)
+
+    def test_send_message_allows_228_bytes(self):
+        result = self.api.send_message("x" * 228)
+        self.assertTrue(result)
+
+    def test_send_message_rejects_multibyte_overflow(self):
+        # 58 emoji * 4 bytes = 232 > 228
+        result = self.api.send_message("\U0001f600" * 58)
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -65,12 +65,10 @@ except ImportError:
     Syntax = Any  # type: ignore
     Tree = Any  # type: ignore
 
+from meshing_around_clients import __version__ as VERSION  # noqa: E402
 from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
-from meshing_around_clients.core.models import DATETIME_MIN_UTC  # noqa: E402
-
-# Version
-VERSION = "0.5.0-beta"
+from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
 
 
 class Screen:
@@ -1063,16 +1061,14 @@ class MeshingAroundTUI:
         elif key == "?" or key == "h":
             self.current_screen = "help"
         elif key == "r":
-            # Refresh - just let the next render cycle handle it
+            # Refresh — the render loop re-draws within 0.5s automatically.
+            # Returning here (no-op) lets the loop iterate immediately.
             pass
         elif key == "c":
             if self.api.is_connected:
                 self.disconnect()
             else:
                 self.connect()
-
-    # Meshtastic maximum text payload length (bytes)
-    _MAX_MESSAGE_BYTES = 228
 
     def _send_message_prompt(self) -> None:
         """Prompt user to send a message."""
@@ -1083,10 +1079,10 @@ class MeshingAroundTUI:
             text = Prompt.ask("Message")
             if text:
                 msg_len = len(text.encode("utf-8"))
-                if msg_len > self._MAX_MESSAGE_BYTES:
+                if msg_len > MAX_MESSAGE_BYTES:
                     self.console.print(
-                        f"[red]Message too long: {msg_len}/{self._MAX_MESSAGE_BYTES} bytes. "
-                        f"Please shorten by {msg_len - self._MAX_MESSAGE_BYTES} bytes.[/red]"
+                        f"[red]Message too long: {msg_len}/{MAX_MESSAGE_BYTES} bytes. "
+                        f"Please shorten by {msg_len - MAX_MESSAGE_BYTES} bytes.[/red]"
                     )
                     time.sleep(2)
                     return

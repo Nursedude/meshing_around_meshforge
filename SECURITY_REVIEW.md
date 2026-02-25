@@ -21,7 +21,8 @@ This audit identified **28 findings** across 6 severity levels. The highest-risk
 | Low | 5 | Debug logging, timeouts, message size limits |
 | Informational | 6 | Good practices documented |
 
-**Fixes applied this session:** 6 targeted code changes (see [Remediation Status](#remediation-status))
+**Fixes applied prior sessions:** 6 targeted code changes (see [Remediation Status](#remediation-status))
+**Fixes applied 2026-02-25:** SEC-19 (already fixed), SEC-20 (send_message validation), MeshtasticAPI input validation for position/telemetry handlers
 
 ---
 
@@ -245,20 +246,22 @@ Malformed messages are logged at DEBUG level with exception details that may inc
 #### SEC-19: Hardcoded 10-second MQTT connection timeout
 
 **File:** `mqtt_client.py:263`
-**Status:** Open
+**Status:** Fixed (prior session)
 
-Connection wait timeout is hardcoded at 10 seconds. Too short for slow networks (satellite links, congested brokers), but making it configurable is a low-priority improvement.
+~~Connection wait timeout is hardcoded at 10 seconds.~~
+
+**Fix:** `connect_timeout` is now configurable in `config.py` (line 130) with validation bounds (1-300s) at line 345-346. The MQTT client reads from `self.mqtt_config.connect_timeout`.
 
 ---
 
 #### SEC-20: Missing input size limits on MQTT text messages
 
 **File:** `mqtt_client.py`
-**Status:** Open
+**Status:** Fixed (prior session + this session)
 
-The web API validates message length (enforced in send endpoint), but the MQTT message handler doesn't enforce a maximum text length for incoming messages. Extremely large messages could use excess memory.
+~~The MQTT message handler doesn't enforce a maximum text length for incoming messages.~~
 
-**Mitigation:** MQTT brokers typically enforce maximum packet sizes. The paho-mqtt client also has internal limits.
+**Fix:** Incoming MQTT payloads are rejected if they exceed `MAX_PAYLOAD_BYTES` (65,536 bytes) at the packet level. Outgoing `send_message()` now validates against `MAX_MESSAGE_BYTES` (228 bytes) — the Meshtastic text payload limit — in both `MeshtasticAPI` and `MQTTMeshtasticClient`.
 
 ---
 

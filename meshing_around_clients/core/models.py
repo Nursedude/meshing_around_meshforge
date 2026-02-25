@@ -34,6 +34,9 @@ VALID_RSSI_RANGE = (-200, 0)  # dBm
 # UTC-aware minimum datetime for sort sentinels
 DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
+# --- Message limits ---
+MAX_MESSAGE_BYTES = 228  # Meshtastic maximum text payload length (bytes)
+
 # --- Message/alert history bounds for deque ---
 MESSAGE_HISTORY_MAX = 1000
 ALERT_HISTORY_MAX = 500
