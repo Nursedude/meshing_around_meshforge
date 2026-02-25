@@ -17,7 +17,6 @@ import atexit
 import hashlib
 import json
 import logging
-import math
 import struct
 import threading
 import time
@@ -25,11 +24,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .callbacks import CallbackMixin
+from .callbacks import CallbackMixin, safe_float, safe_int
 from .config import Config, MQTTConfig
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
     CHUTIL_WARNING_THRESHOLD,
+    MAX_MESSAGE_BYTES,
     VALID_LAT_RANGE,
     VALID_LON_RANGE,
     VALID_RSSI_RANGE,
@@ -74,8 +74,9 @@ try:
     )
 
     MESH_CRYPTO_AVAILABLE = True
-except (ImportError, OSError, Exception) as _crypto_exc:
-    # Catch any exception including pyo3 panics from cryptography backend
+except Exception as _crypto_exc:
+    # Broad catch needed: pyo3 Rust panics from cryptography backend raise
+    # non-standard exceptions that don't inherit from ImportError/OSError.
     MESH_CRYPTO_AVAILABLE = False
     CRYPTO_AVAILABLE = False
     PROTOBUF_AVAILABLE = False
@@ -170,38 +171,8 @@ class MQTTMeshtasticClient(CallbackMixin):
         with self._stats_lock:
             return dict(self._stats)
 
-    # --- Input validation helpers (from meshforge robustness patterns) ---
-
-    @staticmethod
-    def _safe_float(value: Any, min_val: float, max_val: float) -> Optional[float]:
-        """Safely extract and validate a float value within range."""
-        if value is None:
-            return None
-        try:
-            f = float(value)
-            if math.isnan(f) or math.isinf(f):
-                return None
-            if min_val <= f <= max_val:
-                return f
-        except (TypeError, ValueError):
-            pass
-        return None
-
-    @staticmethod
-    def _safe_int(value: Any, min_val: int, max_val: int) -> Optional[int]:
-        """Safely extract and validate an int value within range."""
-        if value is None:
-            return None
-        try:
-            i = int(value)
-            if min_val <= i <= max_val:
-                return i
-        except (TypeError, ValueError):
-            pass
-        return None
-
-    # _is_alert_cooled_down: no override needed — base CallbackMixin
-    # now uses its own _cooldown_lock for thread safety.
+    # Input validation: uses shared safe_float() / safe_int() from callbacks module.
+    # Alert cooldown: uses base CallbackMixin._is_alert_cooled_down().
 
     def _check_battery_alert(self, node: "Node", sender_id: str) -> None:
         """Fire a low-battery alert if level is critical (with per-node cooldown)."""
@@ -220,19 +191,19 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def _extract_position(self, pos_data: dict) -> Optional["Position"]:
         """Extract and validate a Position from a dict with latitude/latitudeI keys."""
-        lat = self._safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
+        lat = safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
         if lat is None:
             lat_i = pos_data.get("latitudeI", 0)
             lat = lat_i / 1e7 if lat_i else None
             if lat is not None:
-                lat = self._safe_float(lat, *VALID_LAT_RANGE)
+                lat = safe_float(lat, *VALID_LAT_RANGE)
 
-        lon = self._safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
+        lon = safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
         if lon is None:
             lon_i = pos_data.get("longitudeI", 0)
             lon = lon_i / 1e7 if lon_i else None
             if lon is not None:
-                lon = self._safe_float(lon, *VALID_LON_RANGE)
+                lon = safe_float(lon, *VALID_LON_RANGE)
 
         if lat is not None and lon is not None:
             return Position(
@@ -614,10 +585,10 @@ class MQTTMeshtasticClient(CallbackMixin):
                 return  # Skip duplicate
 
             # Extract SNR/RSSI with validation (None = absent, 0.0 = valid reading)
-            snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
-            rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
-            hop_limit = self._safe_int(data.get("hopLimit"), 0, 15) or 3
-            hop_start = self._safe_int(data.get("hopStart"), 0, 15) or 3
+            snr = safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
+            rssi = safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
+            hop_limit = safe_int(data.get("hopLimit"), 0, 15) or 3
+            hop_start = safe_int(data.get("hopStart"), 0, 15) or 3
             hop_count = max(0, hop_start - hop_limit)
 
             # Update node last seen and link quality
@@ -682,10 +653,10 @@ class MQTTMeshtasticClient(CallbackMixin):
             sender_name = node.display_name
 
         # Extract signal info with validation (consistent with _handle_json_message)
-        snr = self._safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
-        rssi = self._safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
-        hop_limit = self._safe_int(data.get("hopLimit"), 0, 15) or 3
-        hop_start = self._safe_int(data.get("hopStart"), 0, 15) or 3
+        snr = safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
+        rssi = safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
+        hop_limit = safe_int(data.get("hopLimit"), 0, 15) or 3
+        hop_start = safe_int(data.get("hopStart"), 0, 15) or 3
         hop_count = max(0, hop_start - hop_limit)
 
         message = Message(
@@ -765,17 +736,17 @@ class MQTTMeshtasticClient(CallbackMixin):
         if node:
 
             # Validate device metrics (from meshforge patterns)
-            battery = self._safe_int(device_metrics.get("batteryLevel"), 0, 101) or 0
-            voltage = self._safe_float(device_metrics.get("voltage"), 0.0, 10.0) or 0.0
-            ch_util = self._safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0) or 0.0
-            air_util = self._safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0) or 0.0
+            battery = safe_int(device_metrics.get("batteryLevel"), 0, 101) or 0
+            voltage = safe_float(device_metrics.get("voltage"), 0.0, 10.0) or 0.0
+            ch_util = safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0) or 0.0
+            air_util = safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0) or 0.0
 
             # Environment metrics (BME280, BME680, BMP280)
             env_metrics = telemetry.get("environmentMetrics", {})
-            temperature = self._safe_float(env_metrics.get("temperature"), -50.0, 100.0)
-            humidity = self._safe_float(env_metrics.get("relativeHumidity"), 0.0, 100.0)
-            pressure = self._safe_float(env_metrics.get("barometricPressure"), 300.0, 1200.0)
-            gas_resistance = self._safe_float(env_metrics.get("gasResistance"), 0.0, 1000000.0)
+            temperature = safe_float(env_metrics.get("temperature"), -50.0, 100.0)
+            humidity = safe_float(env_metrics.get("relativeHumidity"), 0.0, 100.0)
+            pressure = safe_float(env_metrics.get("barometricPressure"), 300.0, 1200.0)
+            gas_resistance = safe_float(env_metrics.get("gasResistance"), 0.0, 1000000.0)
 
             node.telemetry = NodeTelemetry(
                 battery_level=battery,
@@ -1156,12 +1127,17 @@ class MQTTMeshtasticClient(CallbackMixin):
                 break
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
-        """Send a message via MQTT."""
+        """Send a message via MQTT with byte-length validation."""
         if not self.is_connected or not self._client:
             return False
 
         if not self.mqtt_config.node_id:
             logger.warning("Cannot send: no node_id configured for MQTT")
+            return False
+
+        msg_bytes = len(text.encode("utf-8"))
+        if msg_bytes > MAX_MESSAGE_BYTES:
+            logger.warning("Message too long (%d/%d bytes), rejecting", msg_bytes, MAX_MESSAGE_BYTES)
             return False
 
         try:

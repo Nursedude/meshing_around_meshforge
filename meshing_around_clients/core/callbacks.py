@@ -2,12 +2,16 @@
 
 Extracted from MeshtasticAPI and MQTTMeshtasticClient which both
 implemented identical copies of these patterns.
+
+Also provides shared input validation helpers (_safe_float, _safe_int)
+used by both API classes to validate data from mesh network packets.
 """
 
 import logging
+import math
 import threading
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,44 @@ _CALLBACK_EVENTS = (
 )
 _DEFAULT_COOLDOWN_SECONDS = 300
 _MAX_COOLDOWN_ENTRIES = 1000
+
+
+def safe_float(value: Any, min_val: float, max_val: float) -> Optional[float]:
+    """Safely extract and validate a float value within range.
+
+    Rejects None, NaN, Inf, and values outside [min_val, max_val].
+    Used by both MeshtasticAPI and MQTTMeshtasticClient to validate
+    incoming position/telemetry data from mesh network packets.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        if min_val <= f <= max_val:
+            return f
+    except (TypeError, ValueError):
+        pass
+    return None
+
+
+def safe_int(value: Any, min_val: int, max_val: int) -> Optional[int]:
+    """Safely extract and validate an int value within range.
+
+    Rejects None and values outside [min_val, max_val].
+    Used by both MeshtasticAPI and MQTTMeshtasticClient to validate
+    incoming telemetry data from mesh network packets.
+    """
+    if value is None:
+        return None
+    try:
+        i = int(value)
+        if min_val <= i <= max_val:
+            return i
+    except (TypeError, ValueError):
+        pass
+    return None
 
 
 class CallbackMixin:

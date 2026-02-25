@@ -14,6 +14,8 @@ from meshing_around_clients.core.callbacks import (
     _DEFAULT_COOLDOWN_SECONDS,
     _MAX_COOLDOWN_ENTRIES,
     CallbackMixin,
+    safe_float,
+    safe_int,
 )
 
 
@@ -170,6 +172,77 @@ class TestAlertCooldown(unittest.TestCase):
         for t in threads:
             t.join()
         self.assertEqual(len(errors), 0, f"Thread safety errors: {errors}")
+
+
+class TestSafeFloat(unittest.TestCase):
+    """Test safe_float() shared validation function."""
+
+    def test_valid_float_in_range(self):
+        self.assertEqual(safe_float(45.5, -90.0, 90.0), 45.5)
+
+    def test_none_returns_none(self):
+        self.assertIsNone(safe_float(None, -90.0, 90.0))
+
+    def test_nan_returns_none(self):
+        self.assertIsNone(safe_float(float("nan"), -90.0, 90.0))
+
+    def test_inf_returns_none(self):
+        self.assertIsNone(safe_float(float("inf"), -90.0, 90.0))
+
+    def test_negative_inf_returns_none(self):
+        self.assertIsNone(safe_float(float("-inf"), -90.0, 90.0))
+
+    def test_below_range_returns_none(self):
+        self.assertIsNone(safe_float(-91.0, -90.0, 90.0))
+
+    def test_above_range_returns_none(self):
+        self.assertIsNone(safe_float(91.0, -90.0, 90.0))
+
+    def test_boundary_min_accepted(self):
+        self.assertEqual(safe_float(-90.0, -90.0, 90.0), -90.0)
+
+    def test_boundary_max_accepted(self):
+        self.assertEqual(safe_float(90.0, -90.0, 90.0), 90.0)
+
+    def test_string_number_converted(self):
+        self.assertEqual(safe_float("3.14", 0.0, 10.0), 3.14)
+
+    def test_non_numeric_string_returns_none(self):
+        self.assertIsNone(safe_float("abc", 0.0, 10.0))
+
+    def test_zero_in_range(self):
+        self.assertEqual(safe_float(0.0, -1.0, 1.0), 0.0)
+
+
+class TestSafeInt(unittest.TestCase):
+    """Test safe_int() shared validation function."""
+
+    def test_valid_int_in_range(self):
+        self.assertEqual(safe_int(85, 0, 101), 85)
+
+    def test_none_returns_none(self):
+        self.assertIsNone(safe_int(None, 0, 101))
+
+    def test_below_range_returns_none(self):
+        self.assertIsNone(safe_int(-5, 0, 101))
+
+    def test_above_range_returns_none(self):
+        self.assertIsNone(safe_int(200, 0, 101))
+
+    def test_boundary_min_accepted(self):
+        self.assertEqual(safe_int(0, 0, 101), 0)
+
+    def test_boundary_max_accepted(self):
+        self.assertEqual(safe_int(101, 0, 101), 101)
+
+    def test_float_truncated_to_int(self):
+        self.assertEqual(safe_int(3.7, 0, 10), 3)
+
+    def test_string_number_converted(self):
+        self.assertEqual(safe_int("42", 0, 100), 42)
+
+    def test_non_numeric_string_returns_none(self):
+        self.assertIsNone(safe_int("abc", 0, 100))
 
 
 if __name__ == "__main__":

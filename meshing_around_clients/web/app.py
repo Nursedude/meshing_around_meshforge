@@ -74,7 +74,7 @@ MAX_REQUEST_BODY_SIZE = 1_048_576
 _PBKDF2_ITERATIONS = 260_000  # OWASP 2023 recommendation for SHA-256
 
 
-def _hash_password(password: str, salt: bytes = None) -> str:
+def _hash_password(password: str, salt: Optional[bytes] = None) -> str:
     """Hash a password with PBKDF2-HMAC-SHA256 and random salt."""
     if salt is None:
         salt = os.urandom(16)
@@ -98,16 +98,15 @@ def _verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(legacy, stored)
 
 
+from meshing_around_clients import __version__ as VERSION  # noqa: E402
 from meshing_around_clients.core import Alert, Config, MeshtasticAPI, Message  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
+from meshing_around_clients.core.models import MAX_MESSAGE_BYTES  # noqa: E402
 from meshing_around_clients.web.middleware import (  # noqa: E402
     CSRFProtection,
     RateLimiter,
     WebSocketManager,
 )
-
-# Version
-VERSION = "0.5.0-beta"
 
 # Get paths
 BASE_DIR = Path(__file__).parent
@@ -600,12 +599,12 @@ class WebApplication:
             # Validate message text
             if not request.text or not request.text.strip():
                 raise HTTPException(status_code=400, detail="Message text cannot be empty")
-            # Meshtastic limit is 228 bytes, not characters
+            # Meshtastic limit is MAX_MESSAGE_BYTES (228 bytes), not characters
             msg_bytes = len(request.text.strip().encode("utf-8"))
-            if msg_bytes > 228:
+            if msg_bytes > MAX_MESSAGE_BYTES:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Message too long ({msg_bytes}/228 bytes)",
+                    detail=f"Message too long ({msg_bytes}/{MAX_MESSAGE_BYTES} bytes)",
                 )
             # Validate channel range
             if request.channel < 0 or request.channel > 7:
@@ -906,9 +905,9 @@ class WebApplication:
                 await websocket.send_json({"type": "message_status", "success": False, "error": "Empty message"})
                 return
             msg_bytes = len(text.strip().encode("utf-8"))
-            if msg_bytes > 228:
+            if msg_bytes > MAX_MESSAGE_BYTES:
                 await websocket.send_json(
-                    {"type": "message_status", "success": False, "error": f"Message too long ({msg_bytes}/228 bytes)"}
+                    {"type": "message_status", "success": False, "error": f"Message too long ({msg_bytes}/{MAX_MESSAGE_BYTES} bytes)"}
                 )
                 return
             if not isinstance(channel, int) or channel < 0 or channel > 7:
