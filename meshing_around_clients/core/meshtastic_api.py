@@ -401,15 +401,21 @@ class MeshtasticAPI(CallbackMixin):
 
     def _worker_loop(self) -> None:
         """Worker thread to process incoming messages."""
-        while self._running:
-            try:
-                event_type, data = self._message_queue.get(timeout=0.5)
-                if event_type == "receive":
-                    self._process_packet(data)
-            except queue.Empty:
-                continue
-            except (KeyError, TypeError, ValueError, AttributeError) as e:
-                logger.warning("Worker error (%s): %s", type(e).__name__, e)
+        try:
+            while self._running:
+                try:
+                    event_type, data = self._message_queue.get(timeout=0.5)
+                    if event_type == "receive":
+                        self._process_packet(data)
+                except queue.Empty:
+                    continue
+                except (KeyError, TypeError, ValueError, AttributeError) as e:
+                    logger.warning("Worker error (%s): %s", type(e).__name__, e)
+        except Exception as e:
+            logger.error("Worker thread crashed: %s", e)
+            self._running = False
+            self.connection_info.connected = False
+            self.network.connection_status = "disconnected"
 
     def _process_packet(self, packet: dict) -> None:
         """Process a received packet."""
