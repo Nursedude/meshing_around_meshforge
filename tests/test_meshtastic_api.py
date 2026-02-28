@@ -4,9 +4,11 @@ Unit tests for meshing_around_clients.core.meshtastic_api
 Tests MockMeshtasticAPI — the hardware-free mock used in demo mode.
 """
 
+import queue
 import sys
 import time
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
@@ -305,6 +307,62 @@ class TestMockAPISendMessageValidation(unittest.TestCase):
         # 58 emoji * 4 bytes = 232 > 228
         result = self.api.send_message("\U0001f600" * 58)
         self.assertFalse(result)
+
+
+class TestWorkerThreadCrashResilience(unittest.TestCase):
+    """Test that worker thread crash sets disconnected state."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+
+    def tearDown(self):
+        self.api._running = False
+        self.api.disconnect()
+
+    def test_worker_crash_sets_disconnected(self):
+        """If _process_packet raises an unexpected exception, worker should set disconnected."""
+        self.api._running = True
+        self.api.connection_info.connected = True
+        self.api.network.connection_status = "connected"
+
+        # Put a poison pill that will cause _process_packet to raise RuntimeError
+        self.api._message_queue.put(("receive", None))
+
+        # Patch _process_packet to raise an unexpected exception
+        with patch.object(self.api, "_process_packet", side_effect=RuntimeError("boom")):
+            self.api._worker_loop()
+
+        # After crash, state should reflect disconnection
+        self.assertFalse(self.api._running)
+        self.assertFalse(self.api.connection_info.connected)
+        self.assertEqual(self.api.network.connection_status, "disconnected")
+
+    def test_worker_handles_known_exceptions_without_crash(self):
+        """Known exceptions (KeyError, TypeError, etc.) should not crash the worker."""
+        self.api._running = True
+        self.api.connection_info.connected = True
+
+        # Put a bad packet and then stop the worker
+        self.api._message_queue.put(("receive", "not-a-dict"))
+
+        # Set _running to False after the first packet so the loop exits
+        original_get = self.api._message_queue.get
+
+        call_count = [0]
+
+        def get_then_stop(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] > 1:
+                self.api._running = False
+                raise queue.Empty()
+            return original_get(*args, **kwargs)
+
+        with patch.object(self.api._message_queue, "get", side_effect=get_then_stop):
+            self.api._worker_loop()
+
+        # Worker should exit cleanly — connection state preserved
+        self.assertTrue(self.api.connection_info.connected)
 
 
 if __name__ == "__main__":

@@ -476,5 +476,82 @@ class TestMeshNetworkPersistence(unittest.TestCase):
         self.assertIn("!good", network.nodes)
 
 
+class TestMeshNetworkSnapshots(unittest.TestCase):
+    """Tests for thread-safe snapshot methods."""
+
+    def setUp(self):
+        self.network = MeshNetwork()
+
+    def test_get_nodes_snapshot_returns_copy(self):
+        """Modifying the snapshot list does not affect the network."""
+        node = Node(node_id="!snap1", node_num=1, short_name="S1", long_name="Snap1")
+        self.network.add_node(node)
+
+        snapshot = self.network.get_nodes_snapshot()
+        self.assertEqual(len(snapshot), 1)
+
+        # Mutate the snapshot — network should be unaffected
+        snapshot.clear()
+        self.assertEqual(len(self.network.get_nodes_snapshot()), 1)
+
+    def test_get_messages_snapshot_returns_copy(self):
+        """Modifying the snapshot list does not affect the network."""
+        msg = Message(id="m1", sender_id="!a", text="hi", message_type=MessageType.TEXT)
+        self.network.add_message(msg)
+
+        snapshot = self.network.get_messages_snapshot()
+        self.assertEqual(len(snapshot), 1)
+
+        snapshot.clear()
+        self.assertEqual(len(self.network.get_messages_snapshot()), 1)
+
+    def test_get_alerts_snapshot_returns_copy(self):
+        """Modifying the snapshot list does not affect the network."""
+        alert = Alert(id="a1", alert_type=AlertType.EMERGENCY, title="Test", message="Test alert")
+        self.network.add_alert(alert)
+
+        snapshot = self.network.get_alerts_snapshot()
+        self.assertEqual(len(snapshot), 1)
+
+        snapshot.clear()
+        self.assertEqual(len(self.network.get_alerts_snapshot()), 1)
+
+    def test_snapshot_thread_safety(self):
+        """Concurrent add_node + get_nodes_snapshot should not crash."""
+        import concurrent.futures
+
+        errors = []
+
+        def add_nodes():
+            for i in range(100):
+                try:
+                    self.network.add_node(
+                        Node(node_id=f"!thread{i}", node_num=i, short_name=f"T{i}", long_name=f"Thread{i}")
+                    )
+                except Exception as e:
+                    errors.append(e)
+
+        def read_nodes():
+            for _ in range(100):
+                try:
+                    snapshot = self.network.get_nodes_snapshot()
+                    # Force iteration to exercise the copy
+                    _ = [n.node_id for n in snapshot]
+                except Exception as e:
+                    errors.append(e)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(add_nodes), pool.submit(read_nodes), pool.submit(read_nodes)]
+            concurrent.futures.wait(futures)
+
+        self.assertEqual(errors, [], f"Thread safety errors: {errors}")
+
+    def test_snapshots_empty_network(self):
+        """Snapshots on empty network return empty lists."""
+        self.assertEqual(self.network.get_nodes_snapshot(), [])
+        self.assertEqual(self.network.get_messages_snapshot(), [])
+        self.assertEqual(self.network.get_alerts_snapshot(), [])
+
+
 if __name__ == "__main__":
     unittest.main()

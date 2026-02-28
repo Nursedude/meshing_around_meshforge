@@ -619,7 +619,24 @@ class MeshNetwork:
         with self._lock:
             return self.nodes.get(node_id)
 
+    def get_nodes_snapshot(self) -> List[Node]:
+        """Return a snapshot copy of all nodes, safe for iteration outside the lock."""
+        with self._lock:
+            return list(self.nodes.values())
+
+    def get_messages_snapshot(self) -> List[Message]:
+        """Return a snapshot copy of messages, safe for iteration outside the lock."""
+        with self._lock:
+            return list(self.messages)
+
+    def get_alerts_snapshot(self) -> List[Alert]:
+        """Return a snapshot copy of alerts, safe for iteration outside the lock."""
+        with self._lock:
+            return list(self.alerts)
+
     def add_node(self, node: Node) -> None:
+        # NOTE: Do not trigger callbacks while holding _lock to avoid deadlock.
+        # Callbacks are triggered by the API layer after this method returns.
         with self._lock:
             self.nodes[node.node_id] = node
             # Auto-prune when node count exceeds limit to prevent unbounded growth

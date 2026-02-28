@@ -9,11 +9,14 @@ Based on MeshForge foundation principles:
 - Graceful fallbacks for missing dependencies
 """
 
+import logging
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -182,7 +185,7 @@ class DashboardScreen(Screen):
     def _create_nodes_panel(self) -> Panel:
         """Create the nodes list panel."""
         nodes = sorted(
-            self.app.api.network.nodes.values(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
+            self.app.api.network.get_nodes_snapshot(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
         )[:10]
 
         table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
@@ -219,12 +222,12 @@ class DashboardScreen(Screen):
 
     def _create_messages_panel(self) -> Panel:
         """Create the messages panel."""
-        messages = list(self.app.api.network.messages)[-15:]
+        messages = self.app.api.network.get_messages_snapshot()[-15:]
 
         content = []
         for msg in reversed(messages):
             time_str = msg.time_formatted
-            sender = msg.sender_name or msg.sender_id[-6:]
+            sender = msg.sender_name or (msg.sender_id or "unknown")[-6:]
 
             if msg.is_incoming:
                 prefix_text = "<< "
@@ -243,12 +246,13 @@ class DashboardScreen(Screen):
             else:
                 text_style = "white"
 
+            text = msg.text or ""
             line = Text()
             line.append(f"{time_str} ", style="dim")
             line.append(prefix_text, style=prefix_style)
             line.append(f"{sender}: ", style="cyan")
-            line.append(msg.text[:60], style=text_style)
-            if len(msg.text) > 60:
+            line.append(text[:60], style=text_style)
+            if len(text) > 60:
                 line.append("...", style="dim")
 
             content.append(line)
@@ -260,7 +264,7 @@ class DashboardScreen(Screen):
 
     def _create_alerts_panel(self) -> Panel:
         """Create the alerts panel."""
-        alerts = list(self.app.api.network.alerts)[-5:]
+        alerts = self.app.api.network.get_alerts_snapshot()[-5:]
 
         content = []
         for alert in reversed(alerts):
@@ -289,7 +293,7 @@ class NodesScreen(Screen):
 
     def render(self) -> Panel:
         nodes = sorted(
-            self.app.api.network.nodes.values(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
+            self.app.api.network.get_nodes_snapshot(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
         )
 
         # Pagination
@@ -372,7 +376,7 @@ class NodesScreen(Screen):
     def handle_input(self, key: str) -> bool:
         if key == "j":
             # Clamp to last page so 'k' stays responsive after over-scrolling
-            total_nodes = len(self.app.api.network.nodes)
+            total_nodes = len(self.app.api.network.get_nodes_snapshot())
             total_pages = max(1, (total_nodes + self.page_size - 1) // self.page_size)
             self.page = min(self.page + 1, total_pages - 1)
             return True
@@ -390,7 +394,7 @@ class MessagesScreen(Screen):
         self.channel_filter: Optional[int] = None
 
     def render(self) -> Panel:
-        all_messages = list(self.app.api.network.messages)
+        all_messages = self.app.api.network.get_messages_snapshot()
         if self.channel_filter is not None:
             all_messages = [m for m in all_messages if m.channel == self.channel_filter]
 
@@ -409,12 +413,12 @@ class MessagesScreen(Screen):
         for msg in reversed(messages):
             direction = "[green]>>[/green]" if not msg.is_incoming else "[cyan]<<[/cyan]"
 
-            to_str = "broadcast" if msg.is_broadcast else msg.recipient_id[-6:]
-            from_str = msg.sender_name or msg.sender_id[-6:]
+            to_str = "broadcast" if msg.is_broadcast else (msg.recipient_id or "?")[-6:]
+            from_str = msg.sender_name or (msg.sender_id or "?")[-6:]
 
             # Truncate message
-            text = msg.text[:50]
-            if len(msg.text) > 50:
+            text = (msg.text or "")[:50]
+            if len(msg.text or "") > 50:
                 text += "..."
 
             snr_str = format_snr(msg.snr)
@@ -448,7 +452,7 @@ class AlertsScreen(Screen):
         self.severity_filter: Optional[int] = None
 
     def render(self) -> Panel:
-        all_alerts = list(self.app.api.network.alerts)
+        all_alerts = self.app.api.network.get_alerts_snapshot()
         if self.severity_filter is not None:
             all_alerts = [a for a in all_alerts if a.severity == self.severity_filter]
 
@@ -506,8 +510,8 @@ class AlertsScreen(Screen):
             self.severity_filter = None
             return True
         elif key == "x":
-            # Acknowledge all unread alerts
-            for alert in self.app.api.network.alerts:
+            # Acknowledge all unread alerts (snapshot for safe iteration)
+            for alert in self.app.api.network.get_alerts_snapshot():
                 alert.acknowledged = True
             return True
         return False
@@ -592,7 +596,7 @@ class TopologyScreen(Screen):
         one_hop = []
         multi_hop = []
 
-        for node in network.nodes.values():
+        for node in network.get_nodes_snapshot():
             if node.hop_count == 0:
                 direct_nodes.append(node)
             elif node.hop_count == 1:
@@ -831,6 +835,9 @@ class MeshingAroundTUI:
         if self.demo_mode:
             title.append(" [DEMO MODE]", style="yellow")
 
+        if not self.api.is_connected:
+            title.append(" [DISCONNECTED]", style="bold red")
+
         return Panel(Align.center(title), box=box.DOUBLE, border_style="cyan", padding=(0, 2))
 
     def _get_footer(self) -> Panel:
@@ -888,7 +895,13 @@ class MeshingAroundTUI:
                 layout["body"].update(screen.render())
             except (AttributeError, KeyError, TypeError) as e:
                 # Guard against stale/missing API data during reconnection
-                layout["body"].update(Panel(f"[yellow]Waiting for connection... ({e})[/yellow]", border_style="yellow"))
+                logger.debug("Render error on %s: %s", self.current_screen, e)
+                msg = (
+                    "[red]DISCONNECTED - press 'c' to reconnect[/red]"
+                    if not self.api.is_connected
+                    else f"[yellow]Waiting for data... ({e})[/yellow]"
+                )
+                layout["body"].update(Panel(msg, border_style="yellow"))
 
         return layout
 
@@ -945,9 +958,9 @@ class MeshingAroundTUI:
                     try:
                         # Update display — match Rich.Live refresh rate (2Hz = 0.5s)
                         live.update(self._render())
-                    except (AttributeError, KeyError, TypeError, IndexError):
+                    except (AttributeError, KeyError, TypeError, IndexError) as e:
                         # Guard against transient data issues during updates
-                        pass
+                        logger.debug("Display-mode render error: %s", e)
                     time.sleep(0.5)
 
         except KeyboardInterrupt:
@@ -1010,8 +1023,9 @@ class MeshingAroundTUI:
                 try:
                     self.console.clear()
                     self.console.print(self._render())
-                except (AttributeError, KeyError, TypeError, IndexError):
+                except (AttributeError, KeyError, TypeError, IndexError) as e:
                     # Transient data issue during render - show minimal output
+                    logger.debug("Interactive render error: %s", e)
                     self.console.clear()
                     self.console.print("[yellow]Updating...[/yellow]")
 
