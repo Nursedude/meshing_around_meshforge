@@ -106,6 +106,6 @@ class CallbackMixin:
             self._alert_cooldowns[key] = now
             # Prune stale cooldown entries to prevent unbounded growth
             if len(self._alert_cooldowns) > _MAX_COOLDOWN_ENTRIES:
-                cutoff = now - (self._alert_cooldown_seconds * 2)
+                cutoff = now - (self._alert_cooldown_seconds * 3)
                 self._alert_cooldowns = {k: v for k, v in self._alert_cooldowns.items() if v > cutoff}
         return False  # Cooldown expired — allow alert

@@ -4,6 +4,7 @@ Defines the core data structures used across TUI and Web clients.
 """
 
 import json
+import logging
 import os
 import threading
 from collections import OrderedDict, deque
@@ -12,6 +13,8 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Deque, Dict, List, Optional, Union
+
+logger = logging.getLogger(__name__)
 
 # --- Mesh congestion thresholds (from Meshtastic ROUTER_LATE documentation) ---
 # See: https://meshtastic.org/blog/demystifying-router-late/
@@ -24,7 +27,6 @@ AIRUTILTX_CRITICAL_THRESHOLD = 10.0  # TX airtime critical at 10%
 STALE_NODE_HOURS = 72  # Nodes not seen in 72h considered stale
 MAX_NODES = 10000  # Maximum tracked nodes before pruning
 MAX_ROUTES = 5000  # Maximum tracked routes before pruning
-MAX_CHANNEL_UTIL_HISTORY = 1000  # Maximum channel utilization history entries
 MAX_NEIGHBORS_PER_NODE = 200  # Maximum neighbor/heard_by entries per node
 VALID_LAT_RANGE = (-90.0, 90.0)
 VALID_LON_RANGE = (-180.0, 180.0)
@@ -582,8 +584,6 @@ class MeshNetwork:
     _seen_messages: OrderedDict = field(default_factory=OrderedDict)
     # Known routes in the mesh
     routes: Dict[str, MeshRoute] = field(default_factory=dict)
-    # Channel utilization history (for mesh health) — bounded to prevent unbounded growth
-    channel_utilization_history: Deque[float] = field(default_factory=lambda: deque(maxlen=MAX_CHANNEL_UTIL_HISTORY))
     # Timestamp when network state was last updated
     last_update: Optional[datetime] = None
 
@@ -1001,8 +1001,8 @@ class MeshNetwork:
                 # Clean up temp file on failure
                 try:
                     os.unlink(tmp_path)
-                except OSError:
-                    pass
+                except OSError as cleanup_err:
+                    logger.warning("Failed to clean up temp file %s: %s", tmp_path, cleanup_err)
                 return False
         except OSError:
             return False

@@ -323,8 +323,8 @@ class MQTTMeshtasticClient(CallbackMixin):
         """Ensure clean disconnect on process exit."""
         try:
             self.disconnect()
-        except (OSError, RuntimeError):
-            pass
+        except (OSError, RuntimeError) as e:
+            logger.debug("atexit cleanup error: %s", e)
 
     def _start_cleanup_thread(self) -> None:
         """Start background thread for periodic stale node cleanup.
@@ -409,6 +409,8 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         if rc == 0 or intentional:
             logger.info("Disconnected from MQTT broker (clean)")
+            with self._stats_lock:
+                self._reconnect_count = 0
         else:
             logger.warning("Unexpected MQTT disconnect (rc=%d), paho will auto-reconnect", rc)
             # paho's built-in reconnect (enabled via reconnect_delay_set) handles this
@@ -485,9 +487,9 @@ class MQTTMeshtasticClient(CallbackMixin):
                     self._stats["messages_rejected"] += 1
                 return
 
-            # Update message stats
-            self._last_message_time = datetime.now(timezone.utc)
+            # Update message stats (all under lock for consistent reads)
             with self._stats_lock:
+                self._last_message_time = datetime.now(timezone.utc)
                 self._message_count += 1
                 self._stats["messages_received"] += 1
             self.network.last_update = datetime.now(timezone.utc)

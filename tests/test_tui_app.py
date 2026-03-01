@@ -18,7 +18,7 @@ except ImportError:
 
 from meshing_around_clients.core.config import Config
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
-from meshing_around_clients.core.models import Message, MessageType
+from meshing_around_clients.core.models import MeshRoute, Message, MessageType, Node, RouteHop
 
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
@@ -183,6 +183,99 @@ class TestSnapshotUsageInScreens(unittest.TestCase):
         """Topology screen render should complete without errors."""
         screen = self.tui.screens["topology"]
         panel = screen.render()
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestTopologyRouteNoneGuards(unittest.TestCase):
+    """Test that TopologyScreen handles missing nodes and empty hops."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, TopologyScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = TopologyScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_route_with_missing_destination_node(self):
+        """Route whose destination_id is not in nodes dict should not crash."""
+        route = MeshRoute(destination_id="!unknown99")
+        self.tui.api.network.routes["!unknown99"] = route
+
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_route_with_empty_hops_list(self):
+        """Route with empty hops list should render without crash."""
+        route = MeshRoute(destination_id="!abc12345", hops=[])
+        self.tui.api.network.routes["!abc12345"] = route
+
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_route_with_valid_hops(self):
+        """Route with valid hops should render hop info."""
+        hop = RouteHop(node_id="!hop11111")
+        route = MeshRoute(destination_id="!dest2222", hops=[hop])
+        self.tui.api.network.routes["!dest2222"] = route
+
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestNodesScreenNoneRoleGuard(unittest.TestCase):
+    """Test that NodesScreen handles nodes with None role."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, NodesScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = NodesScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_node_with_none_role_renders(self):
+        """A node whose role is None should render as UNKNOWN, not crash."""
+        node = Node(node_id="!nullrole1", node_num=0)
+        node.role = None
+        self.tui.api.network.nodes["!nullrole1"] = node
+
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestChannelsNoneRoleGuard(unittest.TestCase):
+    """Test that TopologyScreen channels panel handles None role."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, TopologyScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = TopologyScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_channel_with_none_role_skipped(self):
+        """A channel with None role should be skipped (treated as DISABLED)."""
+        from meshing_around_clients.core.models import Channel
+
+        ch = Channel(index=5, name="nullrole")
+        ch.role = None
+        self.tui.api.network.channels[5] = ch
+
+        panel = self.screen.render()
         self.assertIsNotNone(panel)
 
 

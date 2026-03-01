@@ -553,5 +553,26 @@ class TestMeshNetworkSnapshots(unittest.TestCase):
         self.assertEqual(self.network.get_alerts_snapshot(), [])
 
 
+class TestMeshNetworkDeadCodeRemoval(unittest.TestCase):
+    """Verify dead code was removed from MeshNetwork."""
+
+    def test_no_channel_utilization_history_attr(self):
+        """MeshNetwork should not have unused channel_utilization_history."""
+        network = MeshNetwork()
+        self.assertFalse(hasattr(network, "channel_utilization_history"))
+
+
+class TestSaveToFileEdgeCases(unittest.TestCase):
+    """Test save_to_file error handling."""
+
+    def test_save_to_readonly_path_returns_false(self):
+        """save_to_file to an inaccessible path should return False."""
+        network = MeshNetwork()
+        network.my_node_id = "!savetest"
+        # /proc is read-only on Linux
+        result = network.save_to_file("/proc/meshforge_test_state.json")
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

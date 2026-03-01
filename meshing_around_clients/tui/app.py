@@ -344,7 +344,7 @@ class NodesScreen(Screen):
                 node.node_id[-8:],
                 node.display_name,
                 node.hardware_model,
-                node.role.value,
+                node.role.value if node.role else "UNKNOWN",
                 node.time_since_heard,
                 batt_str,
                 snr_str,
@@ -671,8 +671,9 @@ class TopologyScreen(Screen):
 
         for route in routes:
             dest_name = route.destination_id[-8:]
-            if route.destination_id in network.nodes:
-                dest_name = network.nodes[route.destination_id].display_name[:15]
+            dest_node = network.nodes.get(route.destination_id)
+            if dest_node:
+                dest_name = dest_node.display_name[:15]
 
             hop_count = route.hop_count
             hop_style = "green" if hop_count <= 1 else "yellow" if hop_count <= 3 else "orange1"
@@ -680,7 +681,7 @@ class TopologyScreen(Screen):
             avg_snr = route.avg_snr
 
             via = ""
-            if route.hops:
+            if route.hops and hasattr(route.hops[0], "node_id"):
                 first_hop = route.hops[0].node_id[-6:]
                 via = f"via {first_hop}"
                 if len(route.hops) > 1:
@@ -709,7 +710,7 @@ class TopologyScreen(Screen):
         table.add_column("Downlink", justify="center")
 
         for idx, channel in sorted(network.channels.items()):
-            if channel.role.value == "DISABLED":
+            if not channel.role or channel.role.value == "DISABLED":
                 continue
 
             role_style = "green" if channel.role.value == "PRIMARY" else "blue"
@@ -731,7 +732,7 @@ class TopologyScreen(Screen):
             table.add_row(
                 str(idx),
                 channel.display_name,
-                f"[{role_style}]{channel.role.value}[/{role_style}]",
+                f"[{role_style}]{channel.role.value if channel.role else 'UNKNOWN'}[/{role_style}]",
                 encrypted,
                 str(channel.message_count),
                 last_activity,
