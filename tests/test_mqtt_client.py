@@ -721,18 +721,22 @@ class TestMQTTStatsLockConsistency(unittest.TestCase):
 
     def test_last_message_time_updated_under_lock(self, mock_mqtt):
         """_last_message_time should be set inside the stats lock."""
+        from unittest.mock import MagicMock
+
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
         client = MQTTMeshtasticClient(self.config)
-        json_data = {
-            "from": 0xAABB0001,
-            "type": "text",
-            "payload": {"text": "lock test"},
-        }
-        client._handle_json_message(
-            "msh/US/2/json/LongFast/!aabb0001",
-            json.dumps(json_data).encode(),
-        )
+        mock_msg = MagicMock()
+        mock_msg.topic = "msh/US/2/json/LongFast/!aabb0001"
+        mock_msg.payload = json.dumps(
+            {
+                "from": 0xAABB0001,
+                "type": "text",
+                "payload": {"text": "lock test"},
+            }
+        ).encode()
+
+        client._on_message(None, None, mock_msg)
 
         with client._stats_lock:
             msg_time = client._last_message_time

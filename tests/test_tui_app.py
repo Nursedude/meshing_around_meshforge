@@ -244,7 +244,7 @@ class TestNodesScreenNoneRoleGuard(unittest.TestCase):
 
     def test_node_with_none_role_renders(self):
         """A node whose role is None should render as UNKNOWN, not crash."""
-        node = Node(node_id="!nullrole1")
+        node = Node(node_id="!nullrole1", node_num=0)
         node.role = None
         self.tui.api.network.nodes["!nullrole1"] = node
 
