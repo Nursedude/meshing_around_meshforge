@@ -712,5 +712,69 @@ class TestMQTTSendMessageValidation(unittest.TestCase):
         self.assertFalse(result)
 
 
+@patch("meshing_around_clients.core.mqtt_client.mqtt")
+class TestMQTTStatsLockConsistency(unittest.TestCase):
+    """Test that stats fields are consistently protected by lock."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+
+    def test_last_message_time_updated_under_lock(self, mock_mqtt):
+        """_last_message_time should be set inside the stats lock."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        json_data = {
+            "from": 0xAABB0001,
+            "type": "text",
+            "payload": {"text": "lock test"},
+        }
+        client._handle_json_message(
+            "msh/US/2/json/LongFast/!aabb0001",
+            json.dumps(json_data).encode(),
+        )
+
+        with client._stats_lock:
+            msg_time = client._last_message_time
+            msg_count = client._message_count
+        self.assertIsNotNone(msg_time)
+        self.assertGreater(msg_count, 0)
+
+    def test_reconnect_count_reset_on_clean_disconnect(self, mock_mqtt):
+        """_reconnect_count should be 0 after clean disconnect."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with client._stats_lock:
+            client._reconnect_count = 5
+        client._on_disconnect(None, None, 0)
+        with client._stats_lock:
+            self.assertEqual(client._reconnect_count, 0)
+
+    def test_reconnect_count_reset_on_intentional_disconnect(self, mock_mqtt):
+        """_reconnect_count should reset on intentional disconnect."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with client._stats_lock:
+            client._reconnect_count = 3
+            client._intentional_disconnect = True
+        client._on_disconnect(None, None, 1)
+        with client._stats_lock:
+            self.assertEqual(client._reconnect_count, 0)
+
+    def test_reconnect_count_increments_on_unexpected_disconnect(self, mock_mqtt):
+        """_reconnect_count should increment on unexpected disconnect."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with client._stats_lock:
+            client._reconnect_count = 0
+            client._intentional_disconnect = False
+        client._on_disconnect(None, None, 7)
+        with client._stats_lock:
+            self.assertEqual(client._reconnect_count, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
