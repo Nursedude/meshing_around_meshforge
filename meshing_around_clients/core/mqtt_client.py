@@ -400,6 +400,24 @@ class MQTTMeshtasticClient(CallbackMixin):
             reason = rc_messages.get(rc, f"unknown code {rc}")
             logger.error("MQTT connection refused: %s", reason)
 
+            # Permanent auth failures: stop reconnecting to avoid hammering broker
+            if rc in (4, 5):
+                logger.error(
+                    "Authentication failure (rc=%d) — stopping reconnection. "
+                    "Check MQTT username/password in config.",
+                    rc,
+                )
+                with self._stats_lock:
+                    self._intentional_disconnect = True
+                    self._connected = False
+                self.network.connection_status = f"auth_error: {reason}"
+                if self._client:
+                    try:
+                        self._client.loop_stop()
+                    except (OSError, RuntimeError):
+                        pass
+                self._trigger_callbacks("on_disconnect")
+
     def _on_disconnect(self, client, userdata, rc):
         """Handle MQTT disconnection."""
         with self._stats_lock:
@@ -412,11 +430,38 @@ class MQTTMeshtasticClient(CallbackMixin):
             with self._stats_lock:
                 self._reconnect_count = 0
         else:
-            logger.warning("Unexpected MQTT disconnect (rc=%d), paho will auto-reconnect", rc)
             # paho's built-in reconnect (enabled via reconnect_delay_set) handles this
             # We track the count for health reporting
             with self._stats_lock:
                 self._reconnect_count += 1
+                count = self._reconnect_count
+
+            # Log every 5th attempt at WARNING for visibility
+            if count % 5 == 0:
+                logger.warning(
+                    "MQTT reconnect attempt %d (rc=%d), still trying...",
+                    count,
+                    rc,
+                )
+            else:
+                logger.info("Unexpected MQTT disconnect (rc=%d), paho will auto-reconnect (attempt %d)", rc, count)
+
+            # Enforce max reconnect attempts if configured
+            max_attempts = getattr(self.mqtt_config, "max_reconnect_attempts", 0)
+            if max_attempts > 0 and count >= max_attempts:
+                logger.error(
+                    "Max reconnect attempts (%d) reached — giving up. "
+                    "Check broker availability and network connection.",
+                    max_attempts,
+                )
+                with self._stats_lock:
+                    self._intentional_disconnect = True
+                self.network.connection_status = "max_reconnects_exceeded"
+                if self._client:
+                    try:
+                        self._client.loop_stop()
+                    except (OSError, RuntimeError):
+                        pass
 
         self._trigger_callbacks("on_disconnect")
 
@@ -514,17 +559,18 @@ class MQTTMeshtasticClient(CallbackMixin):
             logger.debug("Malformed MQTT message on %s: %s", topic, e)
             with self._stats_lock:
                 self._stats["messages_rejected"] += 1
-            # SEC-14: Escalate to WARNING if rejection rate is high
-            self._rejection_window_count += 1
-            now = time.monotonic()
-            if now - self._rejection_window_start > 60:
-                if self._rejection_window_count > 10:
-                    logger.warning(
-                        "High malformed message rate: %d rejected in last 60s",
-                        self._rejection_window_count,
-                    )
-                self._rejection_window_start = now
-                self._rejection_window_count = 0
+            # SEC-14: Escalate to WARNING if rejection rate is high (thread-safe)
+            with self._stats_lock:
+                self._rejection_window_count += 1
+                now = time.monotonic()
+                if now - self._rejection_window_start > 60:
+                    if self._rejection_window_count > 10:
+                        logger.warning(
+                            "High malformed message rate: %d rejected in last 60s",
+                            self._rejection_window_count,
+                        )
+                    self._rejection_window_start = now
+                    self._rejection_window_count = 0
         except (KeyError, ValueError, TypeError, struct.error) as e:
             logger.warning("Error parsing MQTT message (%s): %s", type(e).__name__, e)
 

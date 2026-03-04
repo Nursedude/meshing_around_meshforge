@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # Check for required libraries - do NOT auto-install (PEP 668 compliance)
 try:
     import uvicorn
-    from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+    from fastapi import Depends, FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
     from fastapi.responses import HTMLResponse, JSONResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
@@ -613,6 +613,37 @@ class WebApplication:
             if success:
                 return {"status": "sent", "message": request.text.strip()}
             raise HTTPException(status_code=500, detail="Failed to send message")
+
+        @app.get("/api/messages/export")
+        async def api_export_messages(
+            fmt: str = "json",
+            channel: Optional[int] = None,
+        ):
+            """Export messages as JSON or CSV file download."""
+            if fmt not in ("json", "csv"):
+                raise HTTPException(status_code=400, detail="Format must be 'json' or 'csv'")
+            if channel is not None and (channel < 0 or channel > 7):
+                raise HTTPException(status_code=400, detail="Channel must be 0-7")
+            content = self.api.network.export_messages(fmt=fmt, channel=channel)
+            media_type = "text/csv" if fmt == "csv" else "application/json"
+            return Response(
+                content=content,
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename=messages.{fmt}"},
+            )
+
+        @app.get("/api/nodes/export")
+        async def api_export_nodes(fmt: str = "json"):
+            """Export node data as JSON or CSV file download."""
+            if fmt not in ("json", "csv"):
+                raise HTTPException(status_code=400, detail="Format must be 'json' or 'csv'")
+            content = self.api.network.export_nodes(fmt=fmt)
+            media_type = "text/csv" if fmt == "csv" else "application/json"
+            return Response(
+                content=content,
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename=nodes.{fmt}"},
+            )
 
         @app.get("/api/alerts")
         async def api_alerts(unread_only: bool = False):

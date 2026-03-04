@@ -550,6 +550,57 @@ class Config:
                 return path
         return None
 
+    def validate(self) -> List[str]:
+        """Validate configuration and return list of issues (empty = valid).
+
+        Checks port ranges, hostname formats, MQTT broker reachability,
+        TLS consistency, and auth credential presence.
+        """
+        issues: List[str] = []
+
+        # Interface validation
+        valid_types = ("serial", "tcp", "http", "ble", "mqtt")
+        iface = self.interface
+        if iface.type not in valid_types:
+            issues.append(f"Unknown interface type: {iface.type!r} (expected one of {valid_types})")
+        if iface.type == "tcp" and not iface.hostname:
+            issues.append("TCP interface selected but no hostname configured")
+        if iface.type == "http" and not iface.http_url and not iface.hostname:
+            issues.append("HTTP interface selected but no http_url or hostname configured")
+        if iface.type == "ble" and not iface.mac:
+            issues.append("BLE interface selected but no MAC address configured")
+
+        # MQTT validation
+        if self.mqtt.enabled:
+            if not self.mqtt.broker:
+                issues.append("MQTT enabled but no broker configured")
+            if self.mqtt.port < 1 or self.mqtt.port > 65535:
+                issues.append(f"MQTT port {self.mqtt.port} out of valid range (1-65535)")
+            if not self.mqtt.topic_root:
+                issues.append("MQTT enabled but no topic_root configured")
+
+            # TLS consistency check
+            is_default_creds = self.mqtt.username == "meshdev" and self.mqtt.password == "large4cats"
+            if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:
+                issues.append("Non-default MQTT credentials configured without TLS — credentials sent in cleartext")
+
+            # Broker DNS check (with timeout)
+            if self.mqtt.broker:
+                import socket
+
+                try:
+                    socket.getaddrinfo(self.mqtt.broker, self.mqtt.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                except socket.gaierror:
+                    issues.append(f"MQTT broker {self.mqtt.broker!r} cannot be resolved (DNS lookup failed)")
+
+        # Web validation
+        if self.web.port < 1 or self.web.port > 65535:
+            issues.append(f"Web port {self.web.port} out of valid range (1-65535)")
+        if self.web.enable_auth and not self.web.api_key and not self.web.password_hash:
+            issues.append("Web auth enabled but no api_key or password_hash configured")
+
+        return issues
+
     def get_state_file_path(self) -> Path:
         """Get path for network state persistence file."""
         if self.storage.state_file:

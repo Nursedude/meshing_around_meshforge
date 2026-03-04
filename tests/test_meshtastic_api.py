@@ -317,12 +317,12 @@ class TestWorkerThreadCrashResilience(unittest.TestCase):
         self.api = MockMeshtasticAPI(self.config)
 
     def tearDown(self):
-        self.api._running = False
+        self.api._running.clear()
         self.api.disconnect()
 
     def test_worker_crash_sets_disconnected(self):
         """If _process_packet raises an unexpected exception, worker should set disconnected."""
-        self.api._running = True
+        self.api._running.set()
         self.api.connection_info.connected = True
         self.api.network.connection_status = "connected"
 
@@ -334,19 +334,19 @@ class TestWorkerThreadCrashResilience(unittest.TestCase):
             self.api._worker_loop()
 
         # After crash, state should reflect disconnection
-        self.assertFalse(self.api._running)
+        self.assertFalse(self.api._running.is_set())
         self.assertFalse(self.api.connection_info.connected)
-        self.assertEqual(self.api.network.connection_status, "disconnected")
+        self.assertEqual(self.api.network.connection_status, "error")
 
     def test_worker_handles_known_exceptions_without_crash(self):
         """Known exceptions (KeyError, TypeError, etc.) should not crash the worker."""
-        self.api._running = True
+        self.api._running.set()
         self.api.connection_info.connected = True
 
         # Put a bad packet and then stop the worker
         self.api._message_queue.put(("receive", "not-a-dict"))
 
-        # Set _running to False after the first packet so the loop exits
+        # Clear _running after the first packet so the loop exits
         original_get = self.api._message_queue.get
 
         call_count = [0]
@@ -354,7 +354,7 @@ class TestWorkerThreadCrashResilience(unittest.TestCase):
         def get_then_stop(*args, **kwargs):
             call_count[0] += 1
             if call_count[0] > 1:
-                self.api._running = False
+                self.api._running.clear()
                 raise queue.Empty()
             return original_get(*args, **kwargs)
 

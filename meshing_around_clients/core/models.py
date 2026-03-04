@@ -863,6 +863,120 @@ class MeshNetwork:
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), indent=2)
 
+    def export_messages(
+        self,
+        fmt: str = "json",
+        channel: Optional[int] = None,
+    ) -> str:
+        """Export message history as JSON or CSV string.
+
+        Args:
+            fmt: Output format, "json" or "csv".
+            channel: Optional channel filter (0-7). None = all channels.
+
+        Returns:
+            Formatted string of message data.
+        """
+        with self._lock:
+            msgs = list(self.messages)
+
+        if channel is not None:
+            msgs = [m for m in msgs if m.channel == channel]
+
+        if fmt == "csv":
+            import csv
+            import io
+
+            output = io.StringIO()
+            fieldnames = [
+                "timestamp",
+                "sender_id",
+                "sender_name",
+                "text",
+                "channel",
+                "hop_count",
+                "snr",
+                "rssi",
+                "is_incoming",
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            for msg in msgs:
+                writer.writerow(
+                    {
+                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else "",
+                        "sender_id": msg.sender_id,
+                        "sender_name": msg.sender_name,
+                        "text": msg.text,
+                        "channel": msg.channel,
+                        "hop_count": msg.hop_count,
+                        "snr": msg.snr if msg.snr is not None else "",
+                        "rssi": msg.rssi if msg.rssi is not None else "",
+                        "is_incoming": msg.is_incoming,
+                    }
+                )
+            return output.getvalue()
+        else:
+            return json.dumps([m.to_dict() for m in msgs], indent=2)
+
+    def export_nodes(self, fmt: str = "json") -> str:
+        """Export node data as JSON or CSV string.
+
+        Args:
+            fmt: Output format, "json" or "csv".
+
+        Returns:
+            Formatted string of node data.
+        """
+        with self._lock:
+            nodes = list(self.nodes.values())
+
+        if fmt == "csv":
+            import csv
+            import io
+
+            output = io.StringIO()
+            fieldnames = [
+                "node_id",
+                "short_name",
+                "long_name",
+                "hardware_model",
+                "role",
+                "battery_level",
+                "voltage",
+                "channel_utilization",
+                "snr",
+                "rssi",
+                "latitude",
+                "longitude",
+                "last_heard",
+                "is_online",
+            ]
+            writer = csv.DictWriter(output, fieldnames=fieldnames)
+            writer.writeheader()
+            for node in nodes:
+                writer.writerow(
+                    {
+                        "node_id": node.node_id,
+                        "short_name": node.short_name,
+                        "long_name": node.long_name,
+                        "hardware_model": node.hardware_model,
+                        "role": node.role.name if node.role else "",
+                        "battery_level": node.telemetry.battery_level,
+                        "voltage": node.telemetry.voltage,
+                        "channel_utilization": node.telemetry.channel_utilization,
+                        "snr": node.telemetry.snr if node.telemetry.snr is not None else "",
+                        "rssi": node.telemetry.rssi if node.telemetry.rssi is not None else "",
+                        "latitude": node.position.latitude if node.position else "",
+                        "longitude": node.position.longitude if node.position else "",
+                        "last_heard": node.last_heard.isoformat() if node.last_heard else "",
+                        "is_online": node.is_online,
+                    }
+                )
+            return output.getvalue()
+        else:
+            return json.dumps([n.to_dict() for n in nodes], indent=2)
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MeshNetwork":
         """Create MeshNetwork from dictionary (restore state).

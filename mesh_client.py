@@ -958,6 +958,7 @@ Examples:
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
     parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
+    parser.add_argument("--check-config", action="store_true", help="Validate config file and exit")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     args = parser.parse_args()
@@ -986,6 +987,25 @@ Examples:
 
     # Load config
     config = load_config()
+
+    # Config validation (--check-config)
+    if args.check_config:
+        try:
+            from meshing_around_clients.core.config import Config as TypedConfig
+
+            typed_config = TypedConfig(config_path=config.get("advanced", "config_path", fallback=None))
+            issues = typed_config.validate()
+            if issues:
+                log("Config validation found issues:", "WARN")
+                for issue in issues:
+                    log(f"  - {issue}", "WARN")
+                sys.exit(1)
+            else:
+                log("Config validation passed — no issues found", "OK")
+                sys.exit(0)
+        except (ImportError, Exception) as e:
+            log(f"Config validation error: {e}", "ERROR")
+            sys.exit(1)
 
     # Virtual environment handling
     use_venv = config.getboolean("advanced", "use_venv", fallback=True) and not args.no_venv

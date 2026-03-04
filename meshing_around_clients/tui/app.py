@@ -430,7 +430,7 @@ class MessagesScreen(Screen):
         return Panel(
             table,
             title=f"[bold cyan]Messages[/bold cyan] - {filter_text}",
-            subtitle="[dim]Press 0-7 to filter by channel, 'a' for all, 'q' to return[/dim]",
+            subtitle="[dim]0-7: filter channel | a: all | e: export JSON | q: return[/dim]",
             border_style="magenta",
         )
 
@@ -441,7 +441,27 @@ class MessagesScreen(Screen):
         elif key == "a":
             self.channel_filter = None
             return True
+        elif key == "e":
+            self._export_messages()
+            return True
         return False
+
+    def _export_messages(self) -> None:
+        """Export current message view to a JSON file."""
+        try:
+            from datetime import datetime as dt
+
+            timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"meshforge_messages_{timestamp}.json"
+            data = self.app.api.network.export_messages(
+                fmt="json",
+                channel=self.channel_filter,
+            )
+            with open(filename, "w", encoding="utf-8") as f:
+                f.write(data)
+            logger.info("Messages exported to %s", filename)
+        except (OSError, ValueError) as e:
+            logger.error("Failed to export messages: %s", e)
 
 
 class AlertsScreen(Screen):
