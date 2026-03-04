@@ -31,8 +31,8 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ### MQTT Mode
 - [ ] Test full message flow with mqtt.meshtastic.org
 - [ ] Verify topic subscription/parsing
-- [ ] Test reconnection after broker disconnect
-- [ ] Handle broker authentication properly
+- [x] Test reconnection after broker disconnect — auth failure stops retries, max reconnect enforcement
+- [x] Handle broker authentication properly — auth failures (rc=4/5) stop infinite retry
 - [ ] Test with custom MQTT brokers
 
 ### BLE Mode
@@ -150,7 +150,7 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ### Unit Tests
 - [x] Add tests for models.py (Node, Message, Alert) - 45+ tests
 - [x] Add tests for config.py - 18+ tests
-- [ ] Target 80% code coverage
+- [ ] Target 80% code coverage (currently 490 passing, 11 skipped)
 
 ### Integration Tests
 - [ ] Test TUI screen rendering
@@ -191,12 +191,17 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 - [x] Deprecated SSL constant for Python 3.10+ — fixed
 - [x] Hostname validation for TCP/HTTP interfaces — fixed
 - [x] Config validation bounds (port, intervals, delays) — fixed
-- [ ] Subprocess argument validation for usernames/paths
-- [ ] Warn when non-default MQTT credentials used without TLS
+- [x] Subprocess argument validation for usernames/paths — fixed (prior session)
+- [x] Warn when non-default MQTT credentials used without TLS — fixed (prior session)
 - [ ] Tighten CSP (remove `'unsafe-inline'`)
-- [ ] Proxy-aware rate limiting
+- [x] Proxy-aware rate limiting — fixed (prior session)
 - [ ] Explicit CORS middleware configuration
-- [ ] Narrow remaining `except Exception` to specific types
+- [x] Narrow remaining `except Exception` to specific types — fixed (prior session)
+- [x] MQTT auth failure stops infinite reconnection — new
+- [x] Thread-safe _connected and rejection window stats — new
+- [x] Max reconnect attempt enforcement — new
+- [x] Worker thread crash detection with on_disconnect callback — new
+- [x] Config validation dry-run (--check-config) — new
 
 ---
 
@@ -249,8 +254,8 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Upstream | 0 | 0 | 3 | 0 | 0% |
 
 **Total Items:** 36 (P0: 0, P1: 12, P2: 18, P3: 4)
-**Unit Tests:** 147 passing, 44 skipped (MQTT integration, web/fastapi)
+**Unit Tests:** 490 passing, 11 skipped
 
 ---
 
-*Last updated: 2026-02-21*
+*Last updated: 2026-03-04*

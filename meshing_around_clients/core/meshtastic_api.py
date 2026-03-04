@@ -77,9 +77,10 @@ class MeshtasticAPI(CallbackMixin):
         self.connection_info = ConnectionInfo()
         self._message_queue: queue.Queue = queue.Queue(maxsize=5000)
         self._init_callbacks()
-        self._running = False
+        self._running = threading.Event()
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
+        self._leaked_thread_count = 0
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
         self._save_lock = threading.Lock()  # Guard against overlapping saves
@@ -184,12 +185,26 @@ class MeshtasticAPI(CallbackMixin):
 
     def _start_worker_thread(self) -> None:
         """Stop any previous worker thread and start a fresh one."""
+        # Signal old thread to stop BEFORE joining
+        self._stop_event.set()
+        self._running.clear()
+
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=5)
             if self._worker_thread.is_alive():
+                self._leaked_thread_count += 1
                 logger.warning(
-                    "Previous worker thread did not stop within 5s — " "it may continue running in the background"
+                    "Previous worker thread did not stop within 5s " "(leaked threads: %d)",
+                    self._leaked_thread_count,
                 )
+                if self._leaked_thread_count > 2:
+                    logger.error(
+                        "Too many leaked worker threads (%d), refusing new connection", self._leaked_thread_count
+                    )
+                    return
+            else:
+                self._leaked_thread_count = 0
+
         # Drain stale messages from previous session
         while not self._message_queue.empty():
             try:
@@ -198,9 +213,21 @@ class MeshtasticAPI(CallbackMixin):
                 break
 
         self._stop_event.clear()
-        self._running = True
+        self._running.set()
         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
         self._worker_thread.start()
+
+    def is_healthy(self) -> bool:
+        """Check if the API worker thread is alive and running.
+
+        Returns True if the worker is active and processing messages.
+        TUI/Web layers can poll this to detect connection degradation.
+        """
+        if not self._running.is_set():
+            return False
+        if self._worker_thread and not self._worker_thread.is_alive():
+            return False
+        return self.connection_info.connected
 
     def connect(self) -> bool:
         """Connect to the Meshtastic device."""
@@ -280,7 +307,7 @@ class MeshtasticAPI(CallbackMixin):
         if self.connection_info.connected:
             self._save_state()
 
-        self._running = False
+        self._running.clear()
         self._stop_event.set()
 
         # Wait for worker threads to finish (with timeout to avoid hangs)
@@ -402,7 +429,7 @@ class MeshtasticAPI(CallbackMixin):
     def _worker_loop(self) -> None:
         """Worker thread to process incoming messages."""
         try:
-            while self._running:
+            while self._running.is_set():
                 try:
                     event_type, data = self._message_queue.get(timeout=0.5)
                     if event_type == "receive":
@@ -413,9 +440,12 @@ class MeshtasticAPI(CallbackMixin):
                     logger.warning("Worker error (%s): %s", type(e).__name__, e)
         except Exception as e:
             logger.error("Worker thread crashed: %s", e)
-            self._running = False
+            self._running.clear()
             self.connection_info.connected = False
-            self.network.connection_status = "disconnected"
+            self.connection_info.error_message = f"Worker crashed: {e}"
+            self.network.connection_status = "error"
+            # Notify UI layer about the crash
+            self._trigger_callbacks("on_disconnect")
 
     def _process_packet(self, packet: dict) -> None:
         """Process a received packet."""
@@ -730,7 +760,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
             node.telemetry.snr = 5.0 + (node_num % 10)
             self.network.add_node(node)
 
-        self._running = True
+        self._running.set()
         self._trigger_callbacks("on_connect", self.connection_info)
 
         # Start background demo traffic
@@ -741,7 +771,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
 
     def disconnect(self) -> None:
         """Stop demo traffic and simulate disconnect."""
-        self._running = False
+        self._running.clear()
         self._stop_event.set()
         if self._demo_thread and self._demo_thread.is_alive():
             self._demo_thread.join(timeout=2)

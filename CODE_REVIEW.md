@@ -25,13 +25,13 @@ The TUI `sys.exit(1)`s when Rich is not installed. CLAUDE.md requires: *"Rich Li
 
 **File:** `callbacks.py:50-65`
 
-~~`_is_alert_cooled_down()` read and wrote `_alert_cooldowns` dict without a lock.~~ **Fixed** — Added `threading.Lock` (`_cooldown_lock`) to the base `CallbackMixin` class. The MQTT client no longer needs its override.
+~~`_is_alert_cooled_down()` read and wrote `_alert_cooldowns` dict without a lock.~~ **Fixed** — Added `threading.Lock` (`_cooldown_lock`) to the base `CallbackMixin` class. The MQTT client no longer needs its override. Cooldown key separator changed from `:` to `|` to prevent collision with BLE MAC addresses. Added `unregister_callback()` and `clear_callbacks()` methods.
 
 #### Thread resource leak in worker thread restart
 
-**File:** `meshtastic_api.py:174-188`
+**File:** `meshtastic_api.py:185-217`
 
-~~`_start_worker_thread()` joined the previous thread with a 5-second timeout with no indication if it failed.~~ **Fixed** — Added a warning log when the previous worker thread doesn't stop within the timeout.
+~~`_start_worker_thread()` joined the previous thread with a 5-second timeout with no indication if it failed.~~ **Fixed** — Now signals `_stop_event` before joining, tracks leaked thread count, and refuses to start new threads if >2 leaked. Worker crashes trigger `on_disconnect` callback.
 
 ---
 

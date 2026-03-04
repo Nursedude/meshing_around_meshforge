@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-02-21 (Security Review Session)
+**Last Updated:** 2026-03-04 (Session 1: MQTT Reliability + Message Export)
 **Version:** 0.5.0-beta
 
 ---
@@ -28,7 +28,7 @@ python3 -m isort --check-only --diff meshing_around_clients/
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 147 tests passing, 44 skipped (MQTT integration, web/fastapi)
+- **Test Status:** 490 tests passing, 11 skipped
 
 ### Directory Structure (Current)
 
@@ -127,7 +127,9 @@ except ImportError:
   Position/telemetry/nodeinfo update Node fields directly. Other enum values exist for future use.
   Not a bug — leave as-is unless requirements change.
 - [ ] TUI Rich fallback: CLAUDE.md requires plain-text fallback but TUI exits without Rich (see CODE_REVIEW.md)
-- [ ] Remaining broad `except Exception` in configure_bot.py, meshtastic_api.py, mqtt_client.py
+- [ ] Remaining broad `except Exception` in configure_bot.py
+- **Session 2 plan:** TUI message search, connection health indicator, log rotation, env var config overrides, CORS middleware
+- **Session 3 plan:** Test coverage push (65%+), DRY refactors, sound alert stub, dynamic demo nodes, doc updates
 
 ---
 
@@ -149,6 +151,15 @@ except ImportError:
 ---
 
 ## Work History
+
+### 2026-03-04 (Session 1: MQTT Reliability + Message Export)
+- **MQTT reconnection hardening:** Auth failures (rc=4/5) stop infinite retry, thread-safe `_connected` and rejection window stats, max reconnect attempt enforcement with periodic WARNING logging
+- **Worker thread crash detection:** `_running` now uses `threading.Event` for thread-safe reads, worker crash triggers `on_disconnect` callback, `is_healthy()` method for TUI/Web polling, SEC-21 leak mitigation (signal stop before join, track/limit leaked threads)
+- **Callback fixes:** Cooldown key separator changed from `:` to `|` (prevents BLE MAC collision), added `unregister_callback()` and `clear_callbacks()` methods
+- **Message export feature:** `MeshNetwork.export_messages()` and `export_nodes()` (JSON/CSV), TUI 'e' key on MessagesScreen, Web `/api/messages/export` and `/api/nodes/export` endpoints
+- **Config validation dry-run:** `Config.validate()` method checks ports, hostnames, MQTT broker DNS, TLS consistency, auth credential presence; `--check-config` CLI flag
+- Updated existing worker thread crash tests for `threading.Event` pattern
+- 490 tests passing, 11 skipped. All lint checks pass.
 
 ### 2026-02-21 (Security Review Session)
 - Created SECURITY_REVIEW.md — full security audit (22 findings, 6 fixed, 6 positive)

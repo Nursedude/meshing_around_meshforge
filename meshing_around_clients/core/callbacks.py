@@ -83,6 +83,25 @@ class CallbackMixin:
         if event in self._callbacks:
             self._callbacks[event].append(callback)
 
+    def unregister_callback(self, event: str, callback: Callable) -> bool:
+        """Unregister a callback for an event. Returns True if found and removed."""
+        if event in self._callbacks:
+            try:
+                self._callbacks[event].remove(callback)
+                return True
+            except ValueError:
+                return False
+        return False
+
+    def clear_callbacks(self, event: Optional[str] = None) -> None:
+        """Clear all callbacks, or callbacks for a specific event."""
+        if event:
+            if event in self._callbacks:
+                self._callbacks[event].clear()
+        else:
+            for e in self._callbacks:
+                self._callbacks[e].clear()
+
     def _trigger_callbacks(self, event: str, *args: Any, **kwargs: Any) -> None:
         """Trigger all callbacks for an event."""
         for cb in self._callbacks.get(event, []):
@@ -97,7 +116,7 @@ class CallbackMixin:
         Thread-safe: protected by ``_cooldown_lock``.
         Returns True if suppressed, False if the alert should fire.
         """
-        key = f"{node_id}:{alert_type}"
+        key = f"{node_id}|{alert_type}"
         now = time.monotonic()
         with self._cooldown_lock:
             last = self._alert_cooldowns.get(key)
