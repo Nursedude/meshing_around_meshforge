@@ -15,12 +15,14 @@ from meshing_around_clients.core.models import (
     Alert,
     AlertType,
     MeshNetwork,
+    MeshRoute,
     Message,
     MessageType,
     Node,
     NodeRole,
     NodeTelemetry,
     Position,
+    RouteHop,
 )
 
 
@@ -572,6 +574,177 @@ class TestSaveToFileEdgeCases(unittest.TestCase):
         # /proc is read-only on Linux
         result = network.save_to_file("/proc/meshforge_test_state.json")
         self.assertFalse(result)
+
+
+class TestMeshNetworkExport(unittest.TestCase):
+    """Test export_messages() and export_nodes()."""
+
+    def setUp(self):
+        self.network = MeshNetwork()
+        self.network.add_node(Node(node_id="!aabb0011", node_num=0xAABB0011, short_name="TST"))
+        self.network.add_message(
+            Message(
+                id="msg-export-1",
+                sender_id="!aabb0011",
+                sender_name="TST",
+                text="Export test message",
+                message_type=MessageType.TEXT,
+                channel=0,
+            )
+        )
+
+    def test_export_messages_json(self):
+        result = self.network.export_messages(fmt="json")
+        self.assertIn("Export test message", result)
+        self.assertIn("msg-export-1", result)
+
+    def test_export_messages_csv(self):
+        result = self.network.export_messages(fmt="csv")
+        self.assertIn("Export test message", result)
+        self.assertIn("sender_id", result)  # CSV header
+
+    def test_export_messages_channel_filter(self):
+        self.network.add_message(
+            Message(
+                id="msg-export-2",
+                sender_id="!aabb0011",
+                sender_name="TST",
+                text="Channel 1 message",
+                message_type=MessageType.TEXT,
+                channel=1,
+            )
+        )
+        result = self.network.export_messages(fmt="json", channel=0)
+        self.assertIn("Export test message", result)
+        self.assertNotIn("Channel 1 message", result)
+
+    def test_export_nodes_json(self):
+        result = self.network.export_nodes(fmt="json")
+        self.assertIn("!aabb0011", result)
+        self.assertIn("TST", result)
+
+    def test_export_nodes_csv(self):
+        result = self.network.export_nodes(fmt="csv")
+        self.assertIn("!aabb0011", result)
+        self.assertIn("node_id", result)  # CSV header
+
+    def test_export_messages_empty(self):
+        network = MeshNetwork()
+        result = network.export_messages(fmt="json")
+        self.assertEqual(result, "[]")
+
+    def test_export_nodes_empty(self):
+        network = MeshNetwork()
+        result = network.export_nodes(fmt="json")
+        self.assertEqual(result, "[]")
+
+
+class TestMeshNetworkFromDict(unittest.TestCase):
+    """Test MeshNetwork.from_dict() and to_dict() roundtrip."""
+
+    def test_roundtrip_with_nodes(self):
+        network = MeshNetwork()
+        network.my_node_id = "!roundtrip"
+        network.add_node(Node(node_id="!aabb0011", node_num=0xAABB0011, short_name="RT"))
+        data = network.to_dict()
+        restored = MeshNetwork.from_dict(data)
+        self.assertEqual(restored.my_node_id, "!roundtrip")
+        self.assertIn("!aabb0011", restored.nodes)
+
+    def test_roundtrip_with_messages(self):
+        network = MeshNetwork()
+        network.add_message(
+            Message(
+                id="msg-rt-1",
+                sender_id="!aabb0011",
+                sender_name="RT",
+                text="Roundtrip message",
+                message_type=MessageType.TEXT,
+            )
+        )
+        data = network.to_dict()
+        restored = MeshNetwork.from_dict(data)
+        msgs = list(restored.messages)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0].text, "Roundtrip message")
+
+    def test_from_dict_empty(self):
+        restored = MeshNetwork.from_dict({})
+        self.assertEqual(len(restored.nodes), 0)
+
+
+class TestMeshNetworkAdvanced(unittest.TestCase):
+    """Test advanced MeshNetwork operations."""
+
+    def setUp(self):
+        self.network = MeshNetwork()
+        self.network.add_node(Node(node_id="!aabb", node_num=0xAABB, short_name="A"))
+        self.network.add_node(Node(node_id="!ccdd", node_num=0xCCDD, short_name="B"))
+
+    def test_update_route(self):
+        route = MeshRoute(
+            destination_id="!aabb",
+            hops=[RouteHop(node_id="!ccdd", snr=5.0)],
+            discovered=datetime.now(timezone.utc),
+        )
+        self.network.update_route("!aabb", route)
+        self.assertIn("!aabb", self.network.routes)
+
+    def test_update_link_quality(self):
+        self.network.update_link_quality("!aabb", 7.5, -85, 1)
+        node = self.network.get_node("!aabb")
+        self.assertEqual(node.link_quality.snr, 7.5)
+        self.assertEqual(node.link_quality.rssi, -85)
+
+    def test_update_neighbor_relationship(self):
+        self.network.update_neighbor_relationship("!aabb", "!ccdd")
+        node_a = self.network.get_node("!aabb")
+        self.assertIn("!ccdd", node_a.neighbors)
+
+    def test_cleanup_stale_nodes(self):
+        old_time = datetime.now(timezone.utc) - timedelta(hours=100)
+        self.network.nodes["!aabb"].last_heard = old_time
+        removed = self.network.cleanup_stale_nodes(stale_hours=72)
+        self.assertEqual(removed, 1)
+        self.assertNotIn("!aabb", self.network.nodes)
+
+    def test_cleanup_stale_preserves_recent(self):
+        removed = self.network.cleanup_stale_nodes(stale_hours=72)
+        self.assertEqual(removed, 0)
+        self.assertIn("!aabb", self.network.nodes)
+
+    def test_network_health(self):
+        health = self.network.mesh_health
+        self.assertIn("status", health)
+        self.assertIn("score", health)
+        self.assertIn("online_nodes", health)
+        self.assertIn("total_nodes", health)
+
+    def test_network_health_with_telemetry(self):
+        self.network.nodes["!aabb"].telemetry.snr = 8.0
+        self.network.nodes["!aabb"].telemetry.channel_utilization = 10.0
+        self.network.nodes["!aabb"].is_online = True
+        self.network.nodes["!ccdd"].is_online = True
+        health = self.network.mesh_health
+        self.assertGreater(health["score"], 0)
+
+    def test_get_node_nonexistent(self):
+        node = self.network.get_node("!nonexistent")
+        self.assertIsNone(node)
+
+    def test_cleanup_prune_to_max(self):
+        # Add lots of nodes, then cleanup with small max
+        for i in range(20):
+            self.network.add_node(
+                Node(
+                    node_id=f"!bulk{i:04x}",
+                    node_num=i,
+                    last_heard=datetime.now(timezone.utc),
+                )
+            )
+        removed = self.network.cleanup_stale_nodes(stale_hours=72, max_nodes=5)
+        self.assertGreater(removed, 0)
+        self.assertLessEqual(len(self.network.nodes), 5)
 
 
 if __name__ == "__main__":

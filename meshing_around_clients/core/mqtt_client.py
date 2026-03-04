@@ -24,14 +24,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from .callbacks import CallbackMixin, safe_float, safe_int
+from .callbacks import CallbackMixin, extract_position, safe_float, safe_int
 from .config import Config, MQTTConfig
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
     CHUTIL_WARNING_THRESHOLD,
     MAX_MESSAGE_BYTES,
-    VALID_LAT_RANGE,
-    VALID_LON_RANGE,
     VALID_RSSI_RANGE,
     VALID_SNR_RANGE,
     Alert,
@@ -191,28 +189,7 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def _extract_position(self, pos_data: dict) -> Optional["Position"]:
         """Extract and validate a Position from a dict with latitude/latitudeI keys."""
-        lat = safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
-        if lat is None:
-            lat_i = pos_data.get("latitudeI", 0)
-            lat = lat_i / 1e7 if lat_i else None
-            if lat is not None:
-                lat = safe_float(lat, *VALID_LAT_RANGE)
-
-        lon = safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
-        if lon is None:
-            lon_i = pos_data.get("longitudeI", 0)
-            lon = lon_i / 1e7 if lon_i else None
-            if lon is not None:
-                lon = safe_float(lon, *VALID_LON_RANGE)
-
-        if lat is not None and lon is not None:
-            return Position(
-                latitude=lat,
-                longitude=lon,
-                altitude=pos_data.get("altitude", 0),
-                time=datetime.now(timezone.utc),
-            )
-        return None
+        return extract_position(pos_data)
 
     def _create_mqtt_client(self):
         """Create MQTT client with paho v1/v2 API compatibility."""
@@ -640,23 +617,10 @@ class MQTTMeshtasticClient(CallbackMixin):
             hop_count = max(0, hop_start - hop_limit)
 
             # Update node last seen and link quality
-            is_new_node = sender_id not in self.network.nodes
+            node, is_new_node = self._ensure_node(sender_id, sender if isinstance(sender, int) else 0)
             if is_new_node:
-                node = Node(
-                    node_id=sender_id,
-                    node_num=sender if isinstance(sender, int) else 0,
-                    last_heard=datetime.now(timezone.utc),
-                    first_seen=datetime.now(timezone.utc),
-                )
-                self.network.add_node(node)
                 with self._stats_lock:
                     self._stats["nodes_discovered"] += 1
-                self._trigger_callbacks("on_node_update", sender_id, True)
-            else:
-                node = self.network.get_node(sender_id)
-                if node:
-                    node.last_heard = datetime.now(timezone.utc)
-                    node.is_online = True
 
             # Update link quality (use is not None to preserve valid 0.0 dB readings)
             if snr is not None or rssi is not None:
@@ -877,25 +841,11 @@ class MQTTMeshtasticClient(CallbackMixin):
 
             # Fallback: Extract metadata from topic and header
             if node_id and node_id.startswith("!"):
-                # Update that we've seen this node
-                existing = self.network.get_node(node_id)
-                if existing:
-                    existing.last_heard = datetime.now(timezone.utc)
-                    existing.is_online = True
-                else:
-                    # Create minimal node entry
-                    try:
-                        node_num = int(node_id[1:], 16)
-                    except ValueError:
-                        node_num = 0
-                    node = Node(
-                        node_id=node_id,
-                        node_num=node_num,
-                        last_heard=datetime.now(timezone.utc),
-                        first_seen=datetime.now(timezone.utc),
-                    )
-                    self.network.add_node(node)
-                    self._trigger_callbacks("on_node_update", node_id, True)
+                try:
+                    node_num = int(node_id[1:], 16)
+                except ValueError:
+                    node_num = 0
+                self._ensure_node(node_id, node_num)
 
             # Try to extract basic packet info from protobuf header
             if len(payload) >= 16:
@@ -940,24 +890,11 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         # Fallback: update node last seen
         if node_id and node_id.startswith("!"):
-            existing = self.network.get_node(node_id)
-            if existing:
-                existing.last_heard = datetime.now(timezone.utc)
-                existing.is_online = True
-            else:
-                # Create minimal node entry
-                try:
-                    node_num = int(node_id[1:], 16)
-                except ValueError:
-                    node_num = 0
-                node = Node(
-                    node_id=node_id,
-                    node_num=node_num,
-                    last_heard=datetime.now(timezone.utc),
-                    first_seen=datetime.now(timezone.utc),
-                )
-                self.network.add_node(node)
-                self._trigger_callbacks("on_node_update", node_id, True)
+            try:
+                node_num = int(node_id[1:], 16)
+            except ValueError:
+                node_num = 0
+            self._ensure_node(node_id, node_num)
 
     def _process_decoded_packet(self, result, sender_id: str, topic_info: Dict[str, Any]):
         """Process a fully decoded packet from the packet processor."""
@@ -971,19 +908,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             return  # Skip duplicate
 
         # Update/create node
-        existing_node = self.network.get_node(sender_id)
-        if not existing_node:
-            new_node = Node(
-                node_id=sender_id,
-                node_num=result.sender if result.sender is not None else 0,
-                last_heard=datetime.now(timezone.utc),
-                first_seen=datetime.now(timezone.utc),
-            )
-            self.network.add_node(new_node)
-            self._trigger_callbacks("on_node_update", sender_id, True)
-        else:
-            existing_node.last_heard = datetime.now(timezone.utc)
-            existing_node.is_online = True
+        self._ensure_node(sender_id, result.sender if result.sender is not None else 0)
 
         # Extract SNR/RSSI if available (use None sentinel so 0.0 dB isn't dropped)
         snr = decoded.get("rx_snr")

@@ -9,11 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Shared CallbackMixin for callback/cooldown logic (`core/callbacks.py`)
+- `extract_position()` shared helper in `callbacks.py` — validates lat/lon from position data
+- `_ensure_node()` DRY helper in `CallbackMixin` — get-or-create node pattern
+- `play_alert_sound()` stub in `callbacks.py` — platform audio playback (paplay/aplay/afplay)
+- Dynamic demo node discovery in `MockMeshtasticAPI` — 5% chance per event, up to 10 nodes
 - TUI helper utilities module (`tui/helpers.py`)
 - Web security middleware — CSRF, rate limiting (`web/middleware.py`)
 - HTTP connection type support in meshtastic_api.py
 
 ### Changed
+- DRY refactored position extraction — replaced duplicate logic in mqtt_client.py and meshtastic_api.py
+- DRY refactored node creation — replaced ~8 duplicate get-or-create patterns with `_ensure_node()`
+- Raised CI coverage threshold from 50% to 65% (`ci.yml`)
 - Deleted dead modules: message_handler.py, connection_manager.py (~3,300 LOC removed)
 - Refactored alert config fallbacks to data-driven approach
 - Simplified models.py with parse helpers

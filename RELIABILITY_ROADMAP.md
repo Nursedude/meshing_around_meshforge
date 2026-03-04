@@ -150,17 +150,18 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ### Unit Tests
 - [x] Add tests for models.py (Node, Message, Alert) - 45+ tests
 - [x] Add tests for config.py - 18+ tests
-- [ ] Target 80% code coverage (currently 490 passing, 11 skipped)
+- [x] Test coverage push to 67% (665 passing, 11 skipped) — Session 3
+- [ ] Target 80% code coverage
 
 ### Integration Tests
 - [ ] Test TUI screen rendering
 - [ ] Test Web API endpoints
-- [ ] Mock Meshtastic device for testing
+- [x] Mock Meshtastic device for testing — MockMeshtasticAPI with dynamic demo nodes
 
 ### CI/CD
-- [ ] Set up GitHub Actions workflow
-- [ ] Run tests on PR
-- [ ] Lint with flake8/black
+- [x] Set up GitHub Actions workflow — ci.yml with test, lint, syntax-check jobs
+- [x] Run tests on PR — pytest runs on all PRs to main
+- [x] Lint with flake8/black — black, isort, flake8 in CI
 - [ ] Type check with mypy
 
 ---
@@ -249,12 +250,12 @@ Before releasing v1.0.0-stable, the following must be complete:
 | Notifications | 0 | 0 | 0 | 2 | 0% |
 | Config | 0 | 0 | 2 | 0 | **75%** |
 | Security | 0 | 6 | 6 | 0 | **50%** |
-| Testing | 0 | 2 | 0 | 0 | **40%** |
+| Testing | 0 | 2 | 0 | 0 | **80%** |
 | Docs | 0 | 0 | 0 | 2 | 0% |
 | Upstream | 0 | 0 | 3 | 0 | 0% |
 
 **Total Items:** 36 (P0: 0, P1: 12, P2: 18, P3: 4)
-**Unit Tests:** 490 passing, 11 skipped
+**Unit Tests:** 665 passing, 11 skipped (67% coverage)
 
 ---
 

@@ -3,15 +3,18 @@
 Extracted from MeshtasticAPI and MQTTMeshtasticClient which both
 implemented identical copies of these patterns.
 
-Also provides shared input validation helpers (_safe_float, _safe_int)
-used by both API classes to validate data from mesh network packets.
+Also provides shared input validation helpers (safe_float, safe_int)
+and shared data extraction (extract_position) used by both API classes
+to validate data from mesh network packets.
 """
 
 import logging
 import math
+import os
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,69 @@ def safe_int(value: Any, min_val: int, max_val: int) -> Optional[int]:
     return None
 
 
+def extract_position(pos_data: dict) -> Optional[Any]:
+    """Extract and validate a Position from a dict with latitude/latitudeI keys.
+
+    Shared by MeshtasticAPI and MQTTMeshtasticClient to avoid duplicating
+    the latitude/longitude parsing and validation logic.
+
+    Returns a Position object if both coordinates are valid, else None.
+    """
+    from meshing_around_clients.core.models import VALID_LAT_RANGE, VALID_LON_RANGE, Position
+
+    lat = safe_float(pos_data.get("latitude"), *VALID_LAT_RANGE)
+    if lat is None:
+        lat_i = pos_data.get("latitudeI", 0)
+        lat = lat_i / 1e7 if lat_i else None
+        if lat is not None:
+            lat = safe_float(lat, *VALID_LAT_RANGE)
+
+    lon = safe_float(pos_data.get("longitude"), *VALID_LON_RANGE)
+    if lon is None:
+        lon_i = pos_data.get("longitudeI", 0)
+        lon = lon_i / 1e7 if lon_i else None
+        if lon is not None:
+            lon = safe_float(lon, *VALID_LON_RANGE)
+
+    if lat is not None and lon is not None:
+        return Position(
+            latitude=lat,
+            longitude=lon,
+            altitude=pos_data.get("altitude", 0),
+            time=datetime.now(timezone.utc),
+        )
+    return None
+
+
+def play_alert_sound(sound_file: str) -> bool:
+    """Play an alert sound file. Returns True if playback was attempted.
+
+    Uses platform-available CLI tools (paplay, aplay, afplay).
+    No additional dependencies required — stdlib only.
+    """
+    import shutil
+    import subprocess
+
+    if not os.path.isfile(sound_file):
+        logger.warning("Sound file not found: %s", sound_file)
+        return False
+
+    for player in ("paplay", "aplay", "afplay"):
+        if shutil.which(player):
+            try:
+                subprocess.Popen(
+                    [player, sound_file],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                return True
+            except OSError as e:
+                logger.debug("Sound player %s failed: %s", player, e)
+
+    logger.debug("No sound player available")
+    return False
+
+
 class CallbackMixin:
     """Mixin providing event callback registration, dispatch, and alert cooldown.
 
@@ -77,6 +143,32 @@ class CallbackMixin:
         self._alert_cooldowns: Dict[str, float] = {}
         self._alert_cooldown_seconds: int = _DEFAULT_COOLDOWN_SECONDS
         self._cooldown_lock = threading.Lock()
+
+    def _ensure_node(self, node_id: str, node_num: int = 0, **kwargs: Any) -> Tuple[Any, bool]:
+        """Get existing node or create a new one with timestamps.
+
+        Returns (node, is_new). Fires on_node_update callback for new nodes.
+        Requires ``self.network`` (a MeshNetwork instance) on the host class.
+        """
+        from meshing_around_clients.core.models import Node
+
+        is_new = node_id not in self.network.nodes
+        if is_new:
+            node = Node(
+                node_id=node_id,
+                node_num=node_num,
+                last_heard=datetime.now(timezone.utc),
+                first_seen=datetime.now(timezone.utc),
+                **kwargs,
+            )
+            self.network.add_node(node)
+            self._trigger_callbacks("on_node_update", node_id, True)
+        else:
+            node = self.network.get_node(node_id)
+            if node:
+                node.last_heard = datetime.now(timezone.utc)
+                node.is_online = True
+        return node, is_new
 
     def register_callback(self, event: str, callback: Callable) -> None:
         """Register a callback for an event."""

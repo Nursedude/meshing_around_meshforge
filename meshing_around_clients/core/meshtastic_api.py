@@ -21,12 +21,10 @@ CONNECT_TIMEOUT_SECONDS = 30.0
 # Hostname validation: alphanumeric, dots, hyphens, underscores, optional port
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 
-from .callbacks import CallbackMixin, safe_float, safe_int  # noqa: E402
+from .callbacks import CallbackMixin, extract_position, safe_float, safe_int  # noqa: E402
 from .config import Config  # noqa: E402
 from .models import (  # noqa: E402
     MAX_MESSAGE_BYTES,
-    VALID_LAT_RANGE,
-    VALID_LON_RANGE,
     Alert,
     AlertType,
     MeshNetwork,
@@ -552,26 +550,9 @@ class MeshtasticAPI(CallbackMixin):
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
-            # Validate latitude (prefer float, fallback to latitudeI / 1e7)
-            lat = safe_float(position_data.get("latitude"), *VALID_LAT_RANGE)
-            if lat is None:
-                lat_i = position_data.get("latitudeI", 0)
-                if lat_i:
-                    lat = safe_float(lat_i / 1e7, *VALID_LAT_RANGE)
-            # Validate longitude
-            lon = safe_float(position_data.get("longitude"), *VALID_LON_RANGE)
-            if lon is None:
-                lon_i = position_data.get("longitudeI", 0)
-                if lon_i:
-                    lon = safe_float(lon_i / 1e7, *VALID_LON_RANGE)
-            # Only update position if both coordinates are valid
-            if lat is not None and lon is not None:
-                node.position = Position(
-                    latitude=lat,
-                    longitude=lon,
-                    altitude=position_data.get("altitude", 0),
-                    time=datetime.now(timezone.utc),
-                )
+            pos = extract_position(position_data)
+            if pos is not None:
+                node.position = pos
             node.last_heard = datetime.now(timezone.utc)
             self._trigger_callbacks("on_position", sender_id, node.position)
 
@@ -621,28 +602,19 @@ class MeshtasticAPI(CallbackMixin):
         decoded = packet.get("decoded", {})
         user = decoded.get("user", {})
 
-        is_new = sender_id not in self.network.nodes
-
-        if sender_id in self.network.nodes:
-            node = self.network.nodes[sender_id]
+        node, is_new = self._ensure_node(
+            sender_id,
+            packet.get("from", 0),
+            short_name=user.get("shortName", ""),
+            long_name=user.get("longName", ""),
+            hardware_model=user.get("hwModel", "UNKNOWN"),
+        )
+        if not is_new and node:
+            # Update existing node fields from nodeinfo
             node.short_name = user.get("shortName", node.short_name)
             node.long_name = user.get("longName", node.long_name)
             node.hardware_model = user.get("hwModel", node.hardware_model)
-            node.last_heard = datetime.now(timezone.utc)
-        else:
-            # New node
-            node_num = packet.get("from", 0)
-            node = Node(
-                node_id=sender_id,
-                node_num=node_num,
-                short_name=user.get("shortName", ""),
-                long_name=user.get("longName", ""),
-                hardware_model=user.get("hwModel", "UNKNOWN"),
-                last_heard=datetime.now(timezone.utc),
-            )
-            self.network.add_node(node)
-
-        self._trigger_callbacks("on_node_update", sender_id, is_new)
+            self._trigger_callbacks("on_node_update", sender_id, False)
 
         # New node alert
         if is_new and self.config.alerts.enabled:
@@ -745,6 +717,16 @@ class MockMeshtasticAPI(MeshtasticAPI):
         "Anyone else seeing packet loss?",
     ]
 
+    # Additional demo nodes that can be "discovered" during demo mode
+    _EXTRA_DEMO_NODES = [
+        ("!77aa1122", 0x77AA1122, "Hiker1", "Backcountry Hiker", "TBEAM"),
+        ("!88bb3344", 0x88BB3344, "SAR", "Search & Rescue", "RAK4631"),
+        ("!99cc5566", 0x99CC5566, "Sensor", "Weather Station", "HELTEC"),
+        ("!aaddee77", 0xAADDEE77, "Drone1", "Survey Drone", "TLORA"),
+        ("!bbff0088", 0xBBFF0088, "Marina", "Harbor Master", "TBEAM"),
+    ]
+    _MAX_DEMO_NODES = 10
+
     def __init__(self, config: Config):
         super().__init__(config)
         self._demo_mode = True
@@ -815,13 +797,46 @@ class MockMeshtasticAPI(MeshtasticAPI):
                 logger.debug("Demo traffic error", exc_info=True)
 
     def _generate_demo_event(self) -> None:
-        """Generate a single random demo event (message or telemetry update)."""
+        """Generate a single random demo event (message, telemetry, or node discovery)."""
         nodes = list(self.network.nodes.values())
         if not nodes:
             return
 
-        node = random.choice(nodes)
         now = datetime.now(timezone.utc)
+
+        # 5% chance: discover a new node (if under cap)
+        if random.random() < 0.05 and len(self.network.nodes) < self._MAX_DEMO_NODES:
+            available = [n for n in self._EXTRA_DEMO_NODES if n[0] not in self.network.nodes]
+            if available:
+                node_id, node_num, short, long, hw = random.choice(available)
+                new_node = Node(
+                    node_id=node_id,
+                    node_num=node_num,
+                    short_name=short,
+                    long_name=long,
+                    hardware_model=hw,
+                    role=NodeRole.CLIENT,
+                    last_heard=now,
+                    is_online=True,
+                )
+                new_node.telemetry.battery_level = 50 + random.randint(0, 50)
+                new_node.telemetry.snr = round(random.uniform(-2.0, 8.0), 1)
+                self.network.add_node(new_node)
+                self._trigger_callbacks("on_node_update", node_id, True)
+
+                alert = Alert(
+                    id=str(uuid.uuid4()),
+                    alert_type=AlertType.NEW_NODE,
+                    title="New Node Discovered",
+                    message=f"{long} ({short}) joined the mesh",
+                    severity=1,
+                    source_node=node_id,
+                )
+                self.network.add_alert(alert)
+                self._trigger_callbacks("on_alert", alert)
+                return
+
+        node = random.choice(nodes)
 
         # 60% chance: incoming text message, 40% chance: telemetry update
         if random.random() < 0.6:
