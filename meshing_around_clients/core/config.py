@@ -657,6 +657,32 @@ class Config:
                 return path
         return None
 
+    def _validate_mqtt(self, issues: List[str]) -> None:
+        """Validate MQTT configuration, appending any issues found."""
+        if not self.mqtt.enabled:
+            return
+
+        if not self.mqtt.broker:
+            issues.append("MQTT enabled but no broker configured")
+        if self.mqtt.port < 1 or self.mqtt.port > 65535:
+            issues.append(f"MQTT port {self.mqtt.port} out of valid range (1-65535)")
+        if not self.mqtt.topic_root:
+            issues.append("MQTT enabled but no topic_root configured")
+
+        # TLS consistency check
+        is_default_creds = self.mqtt.username == "meshdev" and self.mqtt.password == "large4cats"
+        if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:
+            issues.append("Non-default MQTT credentials configured without TLS — credentials sent in cleartext")
+
+        # Broker DNS check (with timeout)
+        if self.mqtt.broker:
+            import socket
+
+            try:
+                socket.getaddrinfo(self.mqtt.broker, self.mqtt.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            except socket.gaierror:
+                issues.append(f"MQTT broker {self.mqtt.broker!r} cannot be resolved (DNS lookup failed)")
+
     def validate(self) -> List[str]:
         """Validate configuration and return list of issues (empty = valid).
 
@@ -678,27 +704,7 @@ class Config:
             issues.append("BLE interface selected but no MAC address configured")
 
         # MQTT validation
-        if self.mqtt.enabled:
-            if not self.mqtt.broker:
-                issues.append("MQTT enabled but no broker configured")
-            if self.mqtt.port < 1 or self.mqtt.port > 65535:
-                issues.append(f"MQTT port {self.mqtt.port} out of valid range (1-65535)")
-            if not self.mqtt.topic_root:
-                issues.append("MQTT enabled but no topic_root configured")
-
-            # TLS consistency check
-            is_default_creds = self.mqtt.username == "meshdev" and self.mqtt.password == "large4cats"
-            if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:
-                issues.append("Non-default MQTT credentials configured without TLS — credentials sent in cleartext")
-
-            # Broker DNS check (with timeout)
-            if self.mqtt.broker:
-                import socket
-
-                try:
-                    socket.getaddrinfo(self.mqtt.broker, self.mqtt.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                except socket.gaierror:
-                    issues.append(f"MQTT broker {self.mqtt.broker!r} cannot be resolved (DNS lookup failed)")
+        self._validate_mqtt(issues)
 
         # Web validation
         if self.web.port < 1 or self.web.port > 65535:
