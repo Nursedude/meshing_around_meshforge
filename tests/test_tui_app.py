@@ -405,10 +405,18 @@ class TestMessagesScreenSearch(unittest.TestCase):
             id="msg1", sender_id="!aabb1111", sender_name="AlphaNode", text="Hello world", message_type=MessageType.TEXT
         )
         msg2 = Message(
-            id="msg2", sender_id="!ccdd2222", sender_name="BetaNode", text="Emergency SOS", message_type=MessageType.TEXT
+            id="msg2",
+            sender_id="!ccdd2222",
+            sender_name="BetaNode",
+            text="Emergency SOS",
+            message_type=MessageType.TEXT,
         )
         msg3 = Message(
-            id="msg3", sender_id="!aabb1111", sender_name="AlphaNode", text="Weather update", message_type=MessageType.TEXT
+            id="msg3",
+            sender_id="!aabb1111",
+            sender_name="AlphaNode",
+            text="Weather update",
+            message_type=MessageType.TEXT,
         )
         self.tui.api.network.add_message(msg1)
         self.tui.api.network.add_message(msg2)

@@ -1,7 +1,7 @@
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
-**Last Updated:** 2026-03-04 (Session 1: MQTT Reliability + Message Export)
+**Last Updated:** 2026-03-04 (Session 3: Test Coverage + Code Quality + Polish)
 **Version:** 0.5.0-beta
 
 ---
@@ -28,7 +28,8 @@ python3 -m isort --check-only --diff meshing_around_clients/
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 490 tests passing, 11 skipped
+- **Test Status:** 665 tests passing, 11 skipped
+- **Code Coverage:** 67% (CI threshold: 65%)
 
 ### Directory Structure (Current)
 
@@ -44,7 +45,7 @@ meshing_around_meshforge/
 │   │   ├── mqtt_client.py      # MQTT connection (1321 lines)
 │   │   ├── meshtastic_api.py   # Device API (678 lines)
 │   │   ├── mesh_crypto.py      # Encryption (713 lines) — upgrade path
-│   │   └── callbacks.py        # Shared callback/cooldown mixin (65 lines)
+│   │   └── callbacks.py        # Shared callback/cooldown mixin + helpers (223 lines)
 │   ├── setup/                  # SETUP-ONLY modules (configure_bot.py)
 │   │   ├── __init__.py         # Docstring only
 │   │   ├── cli_utils.py        # Terminal colors, input helpers
@@ -129,7 +130,7 @@ except ImportError:
 - [ ] TUI Rich fallback: CLAUDE.md requires plain-text fallback but TUI exits without Rich (see CODE_REVIEW.md)
 - [ ] Remaining broad `except Exception` in configure_bot.py
 - **Session 2 plan:** TUI message search, connection health indicator, log rotation, env var config overrides, CORS middleware
-- **Session 3 plan:** Test coverage push (65%+), DRY refactors, sound alert stub, dynamic demo nodes, doc updates
+- ~~**Session 3 plan:** Test coverage push (65%+), DRY refactors, sound alert stub, dynamic demo nodes, doc updates~~ **Done**
 
 ---
 
@@ -151,6 +152,15 @@ except ImportError:
 ---
 
 ## Work History
+
+### 2026-03-04 (Session 3: Test Coverage + Code Quality + Polish)
+- **DRY refactors:** Extracted `extract_position()` shared helper to `callbacks.py` (replaced duplicate in `mqtt_client.py` and `meshtastic_api.py`). Added `_ensure_node()` to `CallbackMixin` (replaced ~8 duplicate get-or-create patterns).
+- **Sound alert stub:** Added `play_alert_sound()` to `callbacks.py` — uses platform CLI tools (paplay/aplay/afplay). No new dependencies.
+- **Dynamic demo nodes:** `MockMeshtasticAPI._generate_demo_event()` now has 5% chance to discover new nodes (up to 10 total) during demo mode, with alert callbacks.
+- **Test coverage push:** 490 → 665 tests passing. Coverage 61% → 67%. Expanded: `test_callbacks.py` (extract_position, _ensure_node, play_alert_sound), `test_models.py` (export, mesh_health, routes), `test_meshtastic_api.py` (dynamic nodes, send_message), `test_cli_utils.py` (print functions), `test_system_maintenance.py` (system_update, install_python_dependencies, manage_service, clone, etc.)
+- **CI threshold raised:** `--cov-fail-under=50` → `--cov-fail-under=65`
+- **Flake8 cleanup:** Removed unused VALID_LAT_RANGE/VALID_LON_RANGE imports from `mqtt_client.py` and `meshtastic_api.py` (leftover from DRY refactor)
+- 665 tests passing, 11 skipped. All lint checks pass (except pre-existing C901 in config.py).
 
 ### 2026-03-04 (Session 1: MQTT Reliability + Message Export)
 - **MQTT reconnection hardening:** Auth failures (rc=4/5) stop infinite retry, thread-safe `_connected` and rejection window stats, max reconnect attempt enforcement with periodic WARNING logging

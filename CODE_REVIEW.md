@@ -70,6 +70,10 @@ The public Meshtastic broker credentials (`meshdev`/`large4cats`) are hardcoded 
 - Duplicated battery/SNR rendering logic between DashboardScreen and NodesScreen
 - Duplicated severity-to-color mappings between DashboardScreen and AlertsScreen
 
+#### ~~DRY violations in position extraction and node creation~~
+
+~~Position extraction duplicated in `mqtt_client.py` and `meshtastic_api.py`. Node get-or-create pattern duplicated ~8 times across both files.~~ **Fixed** — Extracted `extract_position()` shared helper and `_ensure_node()` method in `CallbackMixin` (`callbacks.py`).
+
 #### TUI render loop inefficiency
 
 **File:** `tui/app.py`

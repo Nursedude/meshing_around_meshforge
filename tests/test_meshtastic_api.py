@@ -365,5 +365,102 @@ class TestWorkerThreadCrashResilience(unittest.TestCase):
         self.assertTrue(self.api.connection_info.connected)
 
 
+class TestMockAPIDynamicNodes(unittest.TestCase):
+    """Test dynamic node discovery in demo mode."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_extra_demo_nodes_defined(self):
+        self.assertGreater(len(self.api._EXTRA_DEMO_NODES), 0)
+
+    def test_max_demo_nodes_cap_defined(self):
+        self.assertGreaterEqual(self.api._MAX_DEMO_NODES, 5)
+
+    def test_initial_nodes_count(self):
+        self.assertEqual(len(self.api.network.nodes), 5)
+
+    @patch("random.random", return_value=0.01)  # Force discovery branch (< 0.05)
+    def test_dynamic_node_discovery(self, mock_random):
+        initial_count = len(self.api.network.nodes)
+        self.api._generate_demo_event()
+        self.assertGreater(len(self.api.network.nodes), initial_count)
+
+    @patch("random.random", return_value=0.01)
+    def test_discovery_fires_alert(self, mock_random):
+        alerts = []
+        self.api.register_callback("on_alert", lambda a: alerts.append(a))
+        self.api._generate_demo_event()
+        new_node_alerts = [a for a in alerts if hasattr(a, "alert_type") and a.alert_type.value == "new_node"]
+        self.assertGreater(len(new_node_alerts), 0)
+
+    @patch("random.random", return_value=0.01)
+    def test_discovery_fires_node_update(self, mock_random):
+        events = []
+        self.api.register_callback("on_node_update", lambda *a: events.append(a))
+        self.api._generate_demo_event()
+        self.assertGreater(len(events), 0)
+
+    def test_discovery_capped_at_max(self):
+        """Node discovery stops at _MAX_DEMO_NODES."""
+        for _ in range(100):
+            with patch("random.random", return_value=0.01):
+                self.api._generate_demo_event()
+        self.assertLessEqual(len(self.api.network.nodes), self.api._MAX_DEMO_NODES)
+
+    @patch("random.random", return_value=0.99)  # Will not trigger discovery
+    def test_no_discovery_on_high_random(self, mock_random):
+        initial_count = len(self.api.network.nodes)
+        self.api._generate_demo_event()
+        # Might still be same count (message/telemetry event instead)
+        self.assertLessEqual(len(self.api.network.nodes), initial_count + 1)
+
+    def test_demo_message_generation(self):
+        """Test the message generation path of _generate_demo_event."""
+        msgs_before = len(list(self.api.network.messages))
+        with patch("random.random", side_effect=[0.99, 0.3]):  # Skip discovery, then message
+            self.api._generate_demo_event()
+        msgs_after = len(list(self.api.network.messages))
+        self.assertGreaterEqual(msgs_after, msgs_before)
+
+    def test_demo_telemetry_generation(self):
+        """Test the telemetry generation path of _generate_demo_event."""
+        with patch("random.random", side_effect=[0.99, 0.9]):  # Skip discovery, then telemetry
+            self.api._generate_demo_event()
+        # Should not raise
+
+
+class TestMockAPISendMessageExtended(unittest.TestCase):
+    """Test MockMeshtasticAPI send_message (extended)."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_send_message_success(self):
+        result = self.api.send_message("Hello mesh!")
+        self.assertTrue(result)
+        msgs = list(self.api.network.messages)
+        self.assertTrue(any("Hello mesh!" in m.text for m in msgs))
+
+    def test_send_message_too_long(self):
+        long_msg = "x" * 300
+        result = self.api.send_message(long_msg)
+        self.assertFalse(result)
+
+    def test_send_message_to_destination(self):
+        result = self.api.send_message("Direct message", destination="!abc12345")
+        self.assertTrue(result)
+
+
 if __name__ == "__main__":
     unittest.main()

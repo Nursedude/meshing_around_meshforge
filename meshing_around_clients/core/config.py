@@ -385,12 +385,8 @@ class Config:
                 self.logging.enabled = self._parser.getboolean("logging", "enabled", fallback=True)
                 self.logging.level = self._parser.get("logging", "level", fallback="INFO").upper()
                 self.logging.file = self._parser.get("logging", "file", fallback="mesh_client.log")
-                self.logging.max_size_mb = max(
-                    1, min(self._parser.getint("logging", "max_size_mb", fallback=10), 1000)
-                )
-                self.logging.backup_count = max(
-                    0, min(self._parser.getint("logging", "backup_count", fallback=3), 100)
-                )
+                self.logging.max_size_mb = max(1, min(self._parser.getint("logging", "max_size_mb", fallback=10), 1000))
+                self.logging.backup_count = max(0, min(self._parser.getint("logging", "backup_count", fallback=3), 100))
 
             # Apply environment variable overrides (highest priority)
             self._apply_env_overrides()
@@ -661,6 +657,32 @@ class Config:
                 return path
         return None
 
+    def _validate_mqtt(self, issues: List[str]) -> None:
+        """Validate MQTT configuration, appending any issues found."""
+        if not self.mqtt.enabled:
+            return
+
+        if not self.mqtt.broker:
+            issues.append("MQTT enabled but no broker configured")
+        if self.mqtt.port < 1 or self.mqtt.port > 65535:
+            issues.append(f"MQTT port {self.mqtt.port} out of valid range (1-65535)")
+        if not self.mqtt.topic_root:
+            issues.append("MQTT enabled but no topic_root configured")
+
+        # TLS consistency check
+        is_default_creds = self.mqtt.username == "meshdev" and self.mqtt.password == "large4cats"
+        if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:
+            issues.append("Non-default MQTT credentials configured without TLS — credentials sent in cleartext")
+
+        # Broker DNS check (with timeout)
+        if self.mqtt.broker:
+            import socket
+
+            try:
+                socket.getaddrinfo(self.mqtt.broker, self.mqtt.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            except socket.gaierror:
+                issues.append(f"MQTT broker {self.mqtt.broker!r} cannot be resolved (DNS lookup failed)")
+
     def validate(self) -> List[str]:
         """Validate configuration and return list of issues (empty = valid).
 
@@ -682,27 +704,7 @@ class Config:
             issues.append("BLE interface selected but no MAC address configured")
 
         # MQTT validation
-        if self.mqtt.enabled:
-            if not self.mqtt.broker:
-                issues.append("MQTT enabled but no broker configured")
-            if self.mqtt.port < 1 or self.mqtt.port > 65535:
-                issues.append(f"MQTT port {self.mqtt.port} out of valid range (1-65535)")
-            if not self.mqtt.topic_root:
-                issues.append("MQTT enabled but no topic_root configured")
-
-            # TLS consistency check
-            is_default_creds = self.mqtt.username == "meshdev" and self.mqtt.password == "large4cats"
-            if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:
-                issues.append("Non-default MQTT credentials configured without TLS — credentials sent in cleartext")
-
-            # Broker DNS check (with timeout)
-            if self.mqtt.broker:
-                import socket
-
-                try:
-                    socket.getaddrinfo(self.mqtt.broker, self.mqtt.port, socket.AF_UNSPEC, socket.SOCK_STREAM)
-                except socket.gaierror:
-                    issues.append(f"MQTT broker {self.mqtt.broker!r} cannot be resolved (DNS lookup failed)")
+        self._validate_mqtt(issues)
 
         # Web validation
         if self.web.port < 1 or self.web.port > 65535:
@@ -711,8 +713,7 @@ class Config:
             issues.append("Web auth enabled but no api_key or password_hash configured")
         if self.web.cors_origins == "*" and not self.web.enable_auth:
             issues.append(
-                "CORS allows all origins (*) without authentication — "
-                "consider restricting origins or enabling auth"
+                "CORS allows all origins (*) without authentication — " "consider restricting origins or enabling auth"
             )
 
         return issues
