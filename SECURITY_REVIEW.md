@@ -147,11 +147,9 @@ Rate limiting used `request.client.host` as the key. Behind a reverse proxy with
 #### SEC-10: Missing explicit CORS configuration
 
 **File:** `web/app.py`
-**Status:** Open
+**Status:** Fixed (Session 2)
 
-No CORS middleware is configured. The CSP header allows `connect-src 'self' ws: wss:` which permits WebSocket connections from any origin. While FastAPI doesn't allow cross-origin requests by default, explicit CORS configuration would be clearer.
-
-**Recommendation:** Add `CORSMiddleware` with explicit `allow_origins` if the web UI is intended to be accessed from other origins.
+Configurable CORS middleware added via `[web] cors_origins` setting (comma-separated allow list). When configured, `CORSMiddleware` is applied with explicit `allow_origins`, credentials support, and standard methods/headers. Empty value (default) keeps same-origin-only behavior. Cross-origin clients should use `X-API-Key` header auth (which bypasses CSRF).
 
 ---
 
@@ -324,7 +322,7 @@ The codebase does not use `pickle`, `eval()`, `exec()`, or other unsafe deserial
 | SEC-07 | High | MQTT creds over cleartext | **Fixed** |
 | SEC-08 | Medium | Permissive CSP | Open |
 | SEC-09 | Medium | Rate limiter not proxy-aware | **Fixed** |
-| SEC-10 | Medium | Missing CORS config | Open |
+| SEC-10 | Medium | Missing CORS config | **Fixed** |
 | SEC-11 | Medium | Missing config bounds | **Fixed** |
 | SEC-12 | Medium | Basic auth over HTTP | **Fixed** |
 | SEC-13 | Medium | Config path traversal | Open (low risk) |

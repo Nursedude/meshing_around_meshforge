@@ -82,6 +82,7 @@ class WebConfig:
     username: str = "admin"
     password_hash: str = ""
     trust_proxy: bool = False  # Trust X-Forwarded-For for client IP (behind reverse proxy)
+    cors_origins: str = ""  # Comma-separated allowed origins, empty = same-origin only
 
 
 @dataclass
@@ -104,6 +105,17 @@ class StorageConfig:
     auto_save_interval: int = 300  # Save every 5 minutes (0 = disable)
     max_message_history: int = 1000
     max_node_history_days: int = 30  # Keep nodes not seen for this many days
+
+
+@dataclass
+class LoggingConfig:
+    """Logging configuration with rotation support."""
+
+    enabled: bool = True
+    level: str = "INFO"
+    file: str = "mesh_client.log"
+    max_size_mb: int = 10
+    backup_count: int = 3
 
 
 @dataclass
@@ -169,6 +181,7 @@ class Config:
         self.tui = TuiConfig()
         self.mqtt = MQTTConfig()
         self.storage = StorageConfig()
+        self.logging = LoggingConfig()
 
         # Bot connection info
         self.bot_name = "MeshBot"
@@ -316,6 +329,7 @@ class Config:
                 self.web.enable_auth = self._parser.getboolean("web", "enable_auth", fallback=False)
                 self.web.username = self._parser.get("web", "username", fallback="admin")
                 self.web.trust_proxy = self._parser.getboolean("web", "trust_proxy", fallback=False)
+                self.web.cors_origins = self._parser.get("web", "cors_origins", fallback="")
 
             # TUI
             if self._parser.has_section("tui"):
@@ -366,10 +380,89 @@ class Config:
                     "storage", "max_node_history_days", fallback=30
                 )
 
+            # Logging
+            if self._parser.has_section("logging"):
+                self.logging.enabled = self._parser.getboolean("logging", "enabled", fallback=True)
+                self.logging.level = self._parser.get("logging", "level", fallback="INFO").upper()
+                self.logging.file = self._parser.get("logging", "file", fallback="mesh_client.log")
+                self.logging.max_size_mb = max(
+                    1, min(self._parser.getint("logging", "max_size_mb", fallback=10), 1000)
+                )
+                self.logging.backup_count = max(
+                    0, min(self._parser.getint("logging", "backup_count", fallback=3), 100)
+                )
+
+            # Apply environment variable overrides (highest priority)
+            self._apply_env_overrides()
+
             return True
         except (configparser.Error, OSError) as e:
             print(f"Error loading config: {e}")
             return False
+
+    # Explicit allowlist of environment variable overrides.
+    # Convention: MESHFORGE_SECTION_KEY -> dataclass attribute.
+    _ENV_OVERRIDE_MAP: Dict[str, tuple] = {
+        # [interface]
+        "MESHFORGE_INTERFACE_TYPE": ("interface", "type"),
+        "MESHFORGE_INTERFACE_PORT": ("interface", "port"),
+        "MESHFORGE_INTERFACE_HOSTNAME": ("interface", "hostname"),
+        # [mqtt]
+        "MESHFORGE_MQTT_ENABLED": ("mqtt", "enabled"),
+        "MESHFORGE_MQTT_BROKER": ("mqtt", "broker"),
+        "MESHFORGE_MQTT_PORT": ("mqtt", "port"),
+        "MESHFORGE_MQTT_USERNAME": ("mqtt", "username"),
+        "MESHFORGE_MQTT_PASSWORD": ("mqtt", "password"),
+        "MESHFORGE_MQTT_TOPIC_ROOT": ("mqtt", "topic_root"),
+        "MESHFORGE_MQTT_CHANNEL": ("mqtt", "channel"),
+        "MESHFORGE_MQTT_ENCRYPTION_KEY": ("mqtt", "encryption_key"),
+        # [web]
+        "MESHFORGE_WEB_HOST": ("web", "host"),
+        "MESHFORGE_WEB_PORT": ("web", "port"),
+        "MESHFORGE_WEB_API_KEY": ("web", "api_key"),
+        "MESHFORGE_WEB_CORS_ORIGINS": ("web", "cors_origins"),
+        # [tui]
+        "MESHFORGE_TUI_REFRESH_RATE": ("tui", "refresh_rate"),
+        # [logging]
+        "MESHFORGE_LOGGING_LEVEL": ("logging", "level"),
+        "MESHFORGE_LOGGING_FILE": ("logging", "file"),
+    }
+
+    def _apply_env_overrides(self) -> None:
+        """Apply MESHFORGE_* environment variable overrides to config.
+
+        Env vars take highest priority, overriding both INI file values and defaults.
+        Uses an explicit allowlist for safety and predictability.
+        """
+        section_map = {
+            "interface": self.interface,
+            "mqtt": self.mqtt,
+            "web": self.web,
+            "tui": self.tui,
+            "storage": self.storage,
+            "logging": self.logging,
+        }
+        for env_var, (section_name, field_name) in self._ENV_OVERRIDE_MAP.items():
+            value = os.environ.get(env_var)
+            if value is None:
+                continue
+
+            target = section_map.get(section_name)
+            if target is None or not hasattr(target, field_name):
+                continue
+
+            current = getattr(target, field_name)
+            try:
+                if isinstance(current, bool):
+                    setattr(target, field_name, _str_to_bool(value))
+                elif isinstance(current, int):
+                    setattr(target, field_name, int(value))
+                elif isinstance(current, float):
+                    setattr(target, field_name, float(value))
+                else:
+                    setattr(target, field_name, value)
+            except (ValueError, TypeError):
+                pass  # Skip invalid env var values silently
 
     def save(self) -> bool:
         """Save configuration to file.
@@ -424,6 +517,7 @@ class Config:
             self._parser.set("web", "enable_auth", str(self.web.enable_auth))
             self._parser.set("web", "username", self.web.username)
             self._parser.set("web", "trust_proxy", str(self.web.trust_proxy))
+            self._parser.set("web", "cors_origins", self.web.cors_origins)
 
             # TUI
             if not self._parser.has_section("tui"):
@@ -462,6 +556,15 @@ class Config:
             self._parser.set("storage", "auto_save_interval", str(self.storage.auto_save_interval))
             self._parser.set("storage", "max_message_history", str(self.storage.max_message_history))
             self._parser.set("storage", "max_node_history_days", str(self.storage.max_node_history_days))
+
+            # Logging
+            if not self._parser.has_section("logging"):
+                self._parser.add_section("logging")
+            self._parser.set("logging", "enabled", str(self.logging.enabled))
+            self._parser.set("logging", "level", self.logging.level)
+            self._parser.set("logging", "file", self.logging.file)
+            self._parser.set("logging", "max_size_mb", str(self.logging.max_size_mb))
+            self._parser.set("logging", "backup_count", str(self.logging.backup_count))
 
             if self.config_path:
                 with open(self.config_path, "w") as f:
@@ -516,6 +619,7 @@ class Config:
                 "port": self.web.port,
                 "debug": self.web.debug,
                 "enable_auth": self.web.enable_auth,
+                "cors_origins": self.web.cors_origins,
             },
             "tui": {
                 "refresh_rate": self.tui.refresh_rate,
@@ -533,6 +637,13 @@ class Config:
                 "channel": self.mqtt.channel,
                 "node_id": self.mqtt.node_id,
                 "qos": self.mqtt.qos,
+            },
+            "logging": {
+                "enabled": self.logging.enabled,
+                "level": self.logging.level,
+                "file": self.logging.file,
+                "max_size_mb": self.logging.max_size_mb,
+                "backup_count": self.logging.backup_count,
             },
         }
 
@@ -598,6 +709,11 @@ class Config:
             issues.append(f"Web port {self.web.port} out of valid range (1-65535)")
         if self.web.enable_auth and not self.web.api_key and not self.web.password_hash:
             issues.append("Web auth enabled but no api_key or password_hash configured")
+        if self.web.cors_origins == "*" and not self.web.enable_auth:
+            issues.append(
+                "CORS allows all origins (*) without authentication — "
+                "consider restricting origins or enabling auth"
+            )
 
         return issues
 

@@ -11,7 +11,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,30 @@ class MeshtasticAPI(CallbackMixin):
         if self._worker_thread and not self._worker_thread.is_alive():
             return False
         return self.connection_info.connected
+
+    @property
+    def connection_health(self) -> Dict[str, Any]:
+        """Get connection health metrics.
+
+        Returns a dict compatible with MQTTMeshtasticClient.connection_health,
+        allowing the TUI to use a single code path regardless of connection mode.
+        """
+        connected = self.is_connected
+        healthy = self.is_healthy()
+
+        if not connected:
+            status = "disconnected"
+        elif not healthy:
+            status = "degraded"
+        else:
+            status = "healthy"
+
+        return {
+            "status": status,
+            "connected": connected,
+            "interface_type": self.connection_info.interface_type,
+            "device_path": self.connection_info.device_path,
+        }
 
     def connect(self) -> bool:
         """Connect to the Meshtastic device."""

@@ -27,6 +27,7 @@ Configuration:
     Edit mesh_client.ini for all options
 """
 
+import logging as _logging
 import os
 import socket
 import subprocess
@@ -68,24 +69,104 @@ class Colors:
             setattr(cls, attr, "")
 
 
+_bootstrap_logger = _logging.getLogger("meshforge.bootstrap")
+
+# True once setup_logging() has been called
+_logging_configured = False
+
+
 def log(msg: str, level: str = "INFO"):
-    """Simple logging to file and stdout."""
+    """Log a message — delegates to standard logging when configured, falls back to direct I/O."""
+    if _logging_configured:
+        level_map = {"INFO": "info", "OK": "info", "WARN": "warning", "ERROR": "error"}
+        getattr(_bootstrap_logger, level_map.get(level, "info"))(msg)
+        return
+
+    # Bootstrap fallback — direct file append + colored stdout
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     log_msg = f"[{timestamp}] [{level}] {msg}"
-
-    # Write to log file
     try:
         with open(LOG_FILE, "a") as f:
             f.write(log_msg + "\n")
     except OSError:
         pass
 
-    # Print to stdout with colors
     color = {"INFO": Colors.CYAN, "OK": Colors.GREEN, "WARN": Colors.YELLOW, "ERROR": Colors.RED}.get(
         level, Colors.RESET
     )
-
     print(f"{color}[{level}]{Colors.RESET} {msg}")
+
+
+def setup_logging(config: ConfigParser) -> None:
+    """Configure centralized logging with rotation.
+
+    Reads [logging] section from config and sets up RotatingFileHandler
+    plus colored console output. All modules using logging.getLogger(__name__)
+    will automatically get file rotation.
+    """
+    global _logging_configured
+    from logging.handlers import RotatingFileHandler
+
+    enabled = config.getboolean("logging", "enabled", fallback=True)
+    level_str = config.get("logging", "level", fallback="INFO").upper()
+    log_file = config.get("logging", "file", fallback="mesh_client.log")
+    max_size_mb = config.getint("logging", "max_size_mb", fallback=10)
+    backup_count = config.getint("logging", "backup_count", fallback=3)
+
+    # Resolve relative paths against script directory
+    log_path = Path(log_file)
+    if not log_path.is_absolute():
+        log_path = SCRIPT_DIR / log_path
+
+    level = getattr(_logging, level_str, _logging.INFO)
+
+    root_logger = _logging.getLogger()
+    root_logger.setLevel(level)
+    # Clear existing handlers to prevent duplicates on re-init
+    root_logger.handlers.clear()
+
+    # Rotating file handler
+    if enabled:
+        try:
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            file_handler = RotatingFileHandler(
+                str(log_path),
+                maxBytes=max_size_mb * 1024 * 1024,
+                backupCount=backup_count,
+                encoding="utf-8",
+            )
+            file_handler.setLevel(level)
+            file_formatter = _logging.Formatter(
+                "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            file_handler.setFormatter(file_formatter)
+            root_logger.addHandler(file_handler)
+        except OSError as e:
+            print(f"{Colors.YELLOW}[WARN]{Colors.RESET} Could not set up log file: {e}")
+
+    # Colored console handler (only if TTY)
+    if sys.stdout.isatty():
+
+        class _ColoredFormatter(_logging.Formatter):
+            _LEVEL_COLORS = {
+                "DEBUG": Colors.BLUE,
+                "INFO": Colors.CYAN,
+                "WARNING": Colors.YELLOW,
+                "ERROR": Colors.RED,
+                "CRITICAL": Colors.RED,
+            }
+
+            def format(self, record: _logging.LogRecord) -> str:
+                color = self._LEVEL_COLORS.get(record.levelname, Colors.RESET)
+                return f"{color}[{record.levelname}]{Colors.RESET} {record.getMessage()}"
+
+        console_handler = _logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(level)
+        console_handler.setFormatter(_ColoredFormatter())
+        root_logger.addHandler(console_handler)
+
+    _logging_configured = True
 
 
 def print_banner():
@@ -414,6 +495,13 @@ time_format = 24h
 
 # Node name display: short, long, both
 node_name_style = long
+
+[web]
+# Web server configuration (overrides [features] web settings when present)
+# CORS allowed origins (comma-separated, empty = same-origin only)
+# Example: http://localhost:3000,https://dashboard.example.com
+# Cross-origin clients should use X-API-Key header for authentication
+cors_origins =
 
 [logging]
 # Logging configuration
@@ -987,6 +1075,9 @@ Examples:
 
     # Load config
     config = load_config()
+
+    # Set up centralized logging with rotation
+    setup_logging(config)
 
     # Config validation (--check-config)
     if args.check_config:

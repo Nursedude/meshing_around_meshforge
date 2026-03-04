@@ -279,5 +279,229 @@ class TestChannelsNoneRoleGuard(unittest.TestCase):
         self.assertIsNotNone(panel)
 
 
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestNodesScreenSearch(unittest.TestCase):
+    """Test NodesScreen text search functionality."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, NodesScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = NodesScreen(self.tui)
+
+        # Add test nodes
+        from meshing_around_clients.core.models import NodeRole
+
+        node1 = Node(node_id="!aabb1111", node_num=1, long_name="AlphaNode", hardware_model="TBEAM")
+        node1.role = NodeRole.CLIENT
+        node2 = Node(node_id="!ccdd2222", node_num=2, long_name="BetaRouter", hardware_model="HELTEC")
+        node2.role = NodeRole.ROUTER
+        node3 = Node(node_id="!eeff3333", node_num=3, long_name="GammaNode", hardware_model="TBEAM")
+        node3.role = NodeRole.CLIENT
+        self.tui.api.network.nodes["!aabb1111"] = node1
+        self.tui.api.network.nodes["!ccdd2222"] = node2
+        self.tui.api.network.nodes["!eeff3333"] = node3
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_search_filters_by_name(self):
+        """Search should filter nodes by display name."""
+        self.screen.search_query = "alphanode"
+        filtered = self.screen._filter_nodes(self.tui.api.network.get_nodes_snapshot())
+        self.assertTrue(any(n.long_name == "AlphaNode" for n in filtered))
+        # Every result should match the query
+        for n in filtered:
+            self.assertIn("alphanode", (n.display_name or "").lower())
+
+    def test_search_filters_by_hardware(self):
+        """Search should filter nodes by hardware model."""
+        self.screen.search_query = "heltec"
+        filtered = self.screen._filter_nodes(self.tui.api.network.get_nodes_snapshot())
+        self.assertTrue(len(filtered) >= 1)
+        for n in filtered:
+            self.assertIn("heltec", (n.hardware_model or "").lower())
+
+    def test_search_filters_by_node_id(self):
+        """Search should filter nodes by node ID."""
+        self.screen.search_query = "ccdd"
+        filtered = self.screen._filter_nodes(self.tui.api.network.get_nodes_snapshot())
+        self.assertEqual(len(filtered), 1)
+
+    def test_empty_search_returns_all(self):
+        """Empty search query should return all nodes."""
+        self.screen.search_query = ""
+        filtered = self.screen._filter_nodes(self.tui.api.network.get_nodes_snapshot())
+        self.assertGreaterEqual(len(filtered), 3)  # 3 test nodes + any demo nodes
+
+    def test_search_mode_activation(self):
+        """Pressing / should activate search mode."""
+        self.assertFalse(self.screen.search_active)
+        result = self.screen.handle_input("/")
+        self.assertTrue(result)
+        self.assertTrue(self.screen.search_active)
+
+    def test_search_mode_key_buffering(self):
+        """Keys in search mode should be buffered into search_query."""
+        self.screen.search_active = True
+        self.screen.handle_input("a")
+        self.screen.handle_input("l")
+        self.screen.handle_input("p")
+        self.assertEqual(self.screen.search_query, "alp")
+
+    def test_search_mode_escape_cancels(self):
+        """Escape should cancel search and clear query."""
+        self.screen.search_active = True
+        self.screen.search_query = "test"
+        self.screen.handle_input("\x1b")
+        self.assertFalse(self.screen.search_active)
+        self.assertEqual(self.screen.search_query, "")
+
+    def test_search_mode_enter_confirms(self):
+        """Enter should confirm search and keep query."""
+        self.screen.search_active = True
+        self.screen.search_query = "alpha"
+        self.screen.handle_input("\n")
+        self.assertFalse(self.screen.search_active)
+        self.assertEqual(self.screen.search_query, "alpha")
+
+    def test_search_mode_backspace(self):
+        """Backspace should delete last character."""
+        self.screen.search_active = True
+        self.screen.search_query = "test"
+        self.screen.handle_input("\x7f")
+        self.assertEqual(self.screen.search_query, "tes")
+
+    def test_render_with_active_search(self):
+        """Render should succeed with active search."""
+        self.screen.search_active = True
+        self.screen.search_query = "alpha"
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_render_with_confirmed_search(self):
+        """Render should succeed with confirmed search filter."""
+        self.screen.search_query = "tbeam"
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestMessagesScreenSearch(unittest.TestCase):
+    """Test MessagesScreen text search functionality."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, MessagesScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = MessagesScreen(self.tui)
+
+        # Add test messages
+        msg1 = Message(
+            id="msg1", sender_id="!aabb1111", sender_name="AlphaNode", text="Hello world", message_type=MessageType.TEXT
+        )
+        msg2 = Message(
+            id="msg2", sender_id="!ccdd2222", sender_name="BetaNode", text="Emergency SOS", message_type=MessageType.TEXT
+        )
+        msg3 = Message(
+            id="msg3", sender_id="!aabb1111", sender_name="AlphaNode", text="Weather update", message_type=MessageType.TEXT
+        )
+        self.tui.api.network.add_message(msg1)
+        self.tui.api.network.add_message(msg2)
+        self.tui.api.network.add_message(msg3)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_search_filters_by_text(self):
+        """Search should filter messages by text content."""
+        self.screen.search_query = "emergency"
+        all_msgs = self.tui.api.network.get_messages_snapshot()
+        filtered = self.screen._filter_messages(all_msgs)
+        self.assertTrue(any("Emergency" in (m.text or "") for m in filtered))
+
+    def test_search_filters_by_sender(self):
+        """Search should filter messages by sender name."""
+        self.screen.search_query = "beta"
+        all_msgs = self.tui.api.network.get_messages_snapshot()
+        filtered = self.screen._filter_messages(all_msgs)
+        self.assertTrue(all((m.sender_name or "").lower().find("beta") >= 0 for m in filtered))
+
+    def test_search_combined_with_channel_filter(self):
+        """Search should work alongside channel filter."""
+        self.screen.channel_filter = 0
+        self.screen.search_query = "hello"
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_search_mode_does_not_intercept_channel_keys(self):
+        """In search mode, digit keys should be buffered, not change channel."""
+        self.screen.search_active = True
+        self.screen.handle_input("3")
+        self.assertEqual(self.screen.search_query, "3")
+        self.assertIsNone(self.screen.channel_filter)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestConnectionHealthInHeader(unittest.TestCase):
+    """Test connection health indicator in TUI header."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_header_shows_healthy_when_connected(self):
+        """Header should show HEALTHY when connection is healthy."""
+        self.tui.api.connection_info.connected = True
+        header = self.tui._get_header()
+        rendered = str(header.renderable)
+        self.assertIn("HEALTHY", rendered)
+
+    def test_header_shows_disconnected(self):
+        """Header should show DISCONNECTED when not connected."""
+        self.tui.api.connection_info.connected = False
+        header = self.tui._get_header()
+        rendered = str(header.renderable)
+        self.assertIn("DISCONNECTED", rendered)
+
+    def test_dashboard_stats_use_connection_health(self):
+        """Dashboard stats panel should render connection health."""
+        from meshing_around_clients.tui.app import DashboardScreen
+
+        screen = DashboardScreen(self.tui)
+        panel = screen._create_stats_panel()
+        self.assertIsNotNone(panel)
+
+
+class TestMeshtasticAPIConnectionHealth(unittest.TestCase):
+    """Test connection_health property on MeshtasticAPI."""
+
+    def test_healthy_when_connected(self):
+        config = Config()
+        api = MockMeshtasticAPI(config)
+        api.connect()
+        health = api.connection_health
+        self.assertEqual(health["status"], "healthy")
+        self.assertTrue(health["connected"])
+        api.disconnect()
+
+    def test_disconnected_when_not_connected(self):
+        config = Config()
+        api = MockMeshtasticAPI(config)
+        health = api.connection_health
+        self.assertEqual(health["status"], "disconnected")
+        self.assertFalse(health["connected"])
+
+
 if __name__ == "__main__":
     unittest.main()

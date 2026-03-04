@@ -126,11 +126,19 @@ class DashboardScreen(Screen):
         network = self.app.api.network
         conn = self.app.api.connection_info
 
-        # Connection status
-        if conn.connected:
-            status = Text("CONNECTED", style="bold green")
-        else:
-            status = Text("DISCONNECTED", style="bold red")
+        # Connection health status
+        conn_health = self.app.api.connection_health
+        conn_status = conn_health.get("status", "unknown")
+        conn_status_map = {
+            "healthy": ("CONNECTED", "bold green"),
+            "slow": ("SLOW", "bold yellow"),
+            "stale": ("STALE", "bold yellow"),
+            "degraded": ("DEGRADED", "bold yellow"),
+            "connected_no_traffic": ("NO TRAFFIC", "dim yellow"),
+            "disconnected": ("DISCONNECTED", "bold red"),
+        }
+        label, style = conn_status_map.get(conn_status, (conn_status.upper(), "white"))
+        status = Text(label, style=style)
 
         # Mesh health
         health = network.mesh_health
@@ -284,17 +292,35 @@ class DashboardScreen(Screen):
 
 
 class NodesScreen(Screen):
-    """Detailed nodes view screen with pagination and environment telemetry."""
+    """Detailed nodes view screen with pagination, search, and environment telemetry."""
 
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self.page = 0
         self.page_size = 20
+        self.search_query = ""
+        self.search_active = False
+
+    def _filter_nodes(self, nodes):
+        """Apply search filter to node list."""
+        if not self.search_query:
+            return nodes
+        query = self.search_query.lower()
+        return [
+            n
+            for n in nodes
+            if query in (n.display_name or "").lower()
+            or query in (n.node_id or "").lower()
+            or query in (n.hardware_model or "").lower()
+            or query in (n.short_name or "").lower()
+        ]
 
     def render(self) -> Panel:
-        nodes = sorted(
+        all_nodes = sorted(
             self.app.api.network.get_nodes_snapshot(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
         )
+        total_all = len(all_nodes)
+        nodes = self._filter_nodes(all_nodes)
 
         # Pagination
         total_pages = max(1, (len(nodes) + self.page_size - 1) // self.page_size)
@@ -364,19 +390,49 @@ class NodesScreen(Screen):
 
             table.add_row(*row)
 
-        page_info = f"Page {self.page + 1}/{total_pages} ({len(nodes)} nodes)"
+        # Build subtitle with search state
+        if self.search_active:
+            subtitle = f"[bold yellow]Search: {self.search_query}_[/bold yellow] | Esc: cancel | Enter: confirm"
+        elif self.search_query:
+            page_info = f"Page {self.page + 1}/{total_pages} ({len(nodes)}/{total_all} match)"
+            subtitle = f"[dim]{page_info} | /: search | Esc: clear | j/k: page | q: return[/dim]"
+        else:
+            page_info = f"Page {self.page + 1}/{total_pages} ({total_all} nodes)"
+            subtitle = f"[dim]{page_info} | /: search | j/k: page down/up | q: return[/dim]"
 
         return Panel(
             table,
             title="[bold cyan]Nodes[/bold cyan]",
-            subtitle=f"[dim]{page_info} | j/k: page down/up | q: return[/dim]",
+            subtitle=subtitle,
             border_style="cyan",
         )
 
     def handle_input(self, key: str) -> bool:
-        if key == "j":
-            # Clamp to last page so 'k' stays responsive after over-scrolling
-            total_nodes = len(self.app.api.network.get_nodes_snapshot())
+        # Search mode: consume all keys
+        if self.search_active:
+            if key == "\x1b":  # Escape — cancel search
+                self.search_query = ""
+                self.search_active = False
+            elif key in ("\n", "\r"):  # Enter — confirm search
+                self.search_active = False
+            elif key in ("\x7f", "\x08"):  # Backspace
+                self.search_query = self.search_query[:-1]
+            elif key.isprintable() and len(key) == 1:
+                self.search_query += key
+            return True
+
+        if key == "/":
+            self.search_active = True
+            self.search_query = ""
+            self.page = 0
+            return True
+        elif key == "\x1b" and self.search_query:
+            # Escape clears confirmed search filter
+            self.search_query = ""
+            self.page = 0
+            return True
+        elif key == "j":
+            total_nodes = len(self._filter_nodes(self.app.api.network.get_nodes_snapshot()))
             total_pages = max(1, (total_nodes + self.page_size - 1) // self.page_size)
             self.page = min(self.page + 1, total_pages - 1)
             return True
@@ -387,18 +443,35 @@ class NodesScreen(Screen):
 
 
 class MessagesScreen(Screen):
-    """Detailed messages view screen."""
+    """Detailed messages view screen with channel filtering and text search."""
 
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self.channel_filter: Optional[int] = None
+        self.search_query = ""
+        self.search_active = False
+
+    def _filter_messages(self, messages):
+        """Apply search filter to message list."""
+        if not self.search_query:
+            return messages
+        query = self.search_query.lower()
+        return [
+            m
+            for m in messages
+            if query in (m.text or "").lower()
+            or query in (m.sender_name or "").lower()
+            or query in (m.sender_id or "").lower()
+        ]
 
     def render(self) -> Panel:
         all_messages = self.app.api.network.get_messages_snapshot()
         if self.channel_filter is not None:
             all_messages = [m for m in all_messages if m.channel == self.channel_filter]
 
-        messages = all_messages[-30:]  # Last 30 messages
+        total_all = len(all_messages)
+        filtered = self._filter_messages(all_messages)
+        messages = filtered[-30:]  # Last 30 messages
 
         table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
 
@@ -427,15 +500,47 @@ class MessagesScreen(Screen):
 
         filter_text = f"Channel {self.channel_filter}" if self.channel_filter is not None else "All channels"
 
+        # Build subtitle with search state
+        if self.search_active:
+            subtitle = f"[bold yellow]Search: {self.search_query}_[/bold yellow] | Esc: cancel | Enter: confirm"
+        elif self.search_query:
+            subtitle = (
+                f"[dim]{len(filtered)}/{total_all} match | "
+                "/: search | Esc: clear | 0-7: channel | a: all | e: export | q: return[/dim]"
+            )
+        else:
+            subtitle = "[dim]/: search | 0-7: filter channel | a: all | e: export JSON | q: return[/dim]"
+
         return Panel(
             table,
             title=f"[bold cyan]Messages[/bold cyan] - {filter_text}",
-            subtitle="[dim]0-7: filter channel | a: all | e: export JSON | q: return[/dim]",
+            subtitle=subtitle,
             border_style="magenta",
         )
 
     def handle_input(self, key: str) -> bool:
-        if key.isdigit() and int(key) < 8:
+        # Search mode: consume all keys
+        if self.search_active:
+            if key == "\x1b":  # Escape — cancel search
+                self.search_query = ""
+                self.search_active = False
+            elif key in ("\n", "\r"):  # Enter — confirm search
+                self.search_active = False
+            elif key in ("\x7f", "\x08"):  # Backspace
+                self.search_query = self.search_query[:-1]
+            elif key.isprintable() and len(key) == 1:
+                self.search_query += key
+            return True
+
+        if key == "/":
+            self.search_active = True
+            self.search_query = ""
+            return True
+        elif key == "\x1b" and self.search_query:
+            # Escape clears confirmed search filter
+            self.search_query = ""
+            return True
+        elif key.isdigit() and int(key) < 8:
             self.channel_filter = int(key)
             return True
         elif key == "a":
@@ -784,12 +889,20 @@ class HelpScreen(Screen):
 - **c** - Connect/Disconnect
 - **?** / **h** - This help
 
+## Search (Nodes & Messages)
+- **/** - Start search (type query, results filter live)
+- **Enter** - Confirm search filter
+- **Esc** - Clear search / cancel
+- **Backspace** - Delete character
+
 ## Nodes View
 - **j** - Next page
 - **k** - Previous page
+- **/** - Search by name, ID, or hardware
 - Environment telemetry (temp/humidity) shown when available
 
 ## Message View
+- **/** - Search by text, sender name, or sender ID
 - **0-7** - Filter by channel
 - **a** - Show all channels
 
@@ -848,7 +961,7 @@ class MeshingAroundTUI:
         self._last_refresh = datetime.now()
 
     def _get_header(self) -> Panel:
-        """Create the application header."""
+        """Create the application header with connection health."""
         title = Text()
         title.append("MESHING-AROUND ", style="bold cyan")
         title.append(f"v{VERSION}", style="dim")
@@ -856,8 +969,25 @@ class MeshingAroundTUI:
         if self.demo_mode:
             title.append(" [DEMO MODE]", style="yellow")
 
-        if not self.api.is_connected:
-            title.append(" [DISCONNECTED]", style="bold red")
+        # Connection health indicator
+        health = self.api.connection_health
+        status = health.get("status", "unknown")
+
+        status_display = {
+            "healthy": ("bold green", "HEALTHY"),
+            "slow": ("bold yellow", "SLOW"),
+            "stale": ("bold yellow", "STALE"),
+            "degraded": ("bold yellow", "DEGRADED"),
+            "connected_no_traffic": ("dim yellow", "NO TRAFFIC"),
+            "disconnected": ("bold red", "DISCONNECTED"),
+        }
+        style, label = status_display.get(status, ("dim", status.upper()))
+        title.append(f" [{label}]", style=style)
+
+        # Show message rate if available (MQTT provides this)
+        msg_rate = health.get("messages_per_minute")
+        if msg_rate is not None and health.get("connected"):
+            title.append(f"  {msg_rate:.1f} msg/min", style="dim")
 
         return Panel(Align.center(title), box=box.DOUBLE, border_style="cyan", padding=(0, 2))
 

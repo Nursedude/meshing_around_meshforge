@@ -205,6 +205,21 @@ class WebApplication:
             lifespan=lifespan,
         )
 
+        # ---- Middleware: CORS (outermost, wraps all other middleware) ----
+        cors_origins_str = self.config.web.cors_origins
+        if cors_origins_str:
+            from starlette.middleware.cors import CORSMiddleware
+
+            origins = [o.strip() for o in cors_origins_str.split(",") if o.strip()]
+            if origins:
+                app.add_middleware(
+                    CORSMiddleware,
+                    allow_origins=origins,
+                    allow_credentials=True,
+                    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+                    allow_headers=["*"],
+                )
+
         # ---- Middleware: Security Headers ----
         @app.middleware("http")
         async def security_headers_middleware(request: Request, call_next):
