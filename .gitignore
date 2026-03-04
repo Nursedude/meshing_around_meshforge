@@ -45,6 +45,12 @@ secrets*.json
 *.key
 *.pem
 
+# Test / Coverage
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
 # Logs
 logs/
 *.log
