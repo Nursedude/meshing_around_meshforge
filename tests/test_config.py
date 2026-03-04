@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
-from meshing_around_clients.core.config import AlertConfig, Config, InterfaceConfig, TuiConfig, WebConfig
+from meshing_around_clients.core.config import AlertConfig, Config, InterfaceConfig, LoggingConfig, TuiConfig, WebConfig
 
 
 class TestInterfaceConfig(unittest.TestCase):
@@ -285,6 +285,205 @@ class TestConfigDefaults(unittest.TestCase):
         cfg = TuiConfig()
         self.assertGreaterEqual(cfg.refresh_rate, 0.1)
         self.assertLessEqual(cfg.refresh_rate, 10.0)
+
+
+class TestLoggingConfig(unittest.TestCase):
+    """Test LoggingConfig dataclass."""
+
+    def test_default_values(self):
+        cfg = LoggingConfig()
+        self.assertTrue(cfg.enabled)
+        self.assertEqual(cfg.level, "INFO")
+        self.assertEqual(cfg.file, "mesh_client.log")
+        self.assertEqual(cfg.max_size_mb, 10)
+        self.assertEqual(cfg.backup_count, 3)
+
+    def test_custom_values(self):
+        cfg = LoggingConfig(level="DEBUG", max_size_mb=50, backup_count=5)
+        self.assertEqual(cfg.level, "DEBUG")
+        self.assertEqual(cfg.max_size_mb, 50)
+        self.assertEqual(cfg.backup_count, 5)
+
+
+class TestLoggingConfigLoadSave(unittest.TestCase):
+    """Test loading and saving [logging] config section."""
+
+    def test_logging_section_loaded(self):
+        """Config should load [logging] section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "logging.ini"
+            config_path.write_text(
+                "[logging]\n"
+                "enabled = true\n"
+                "level = DEBUG\n"
+                "file = custom.log\n"
+                "max_size_mb = 25\n"
+                "backup_count = 5\n"
+            )
+            cfg = Config(config_path=str(config_path))
+            self.assertTrue(cfg.logging.enabled)
+            self.assertEqual(cfg.logging.level, "DEBUG")
+            self.assertEqual(cfg.logging.file, "custom.log")
+            self.assertEqual(cfg.logging.max_size_mb, 25)
+            self.assertEqual(cfg.logging.backup_count, 5)
+
+    def test_logging_defaults_when_missing(self):
+        """Config should use defaults when [logging] section is absent."""
+        cfg = Config(config_path="/nonexistent/path.ini")
+        self.assertTrue(cfg.logging.enabled)
+        self.assertEqual(cfg.logging.level, "INFO")
+
+    def test_logging_save_and_reload(self):
+        """Config should round-trip [logging] section."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "log_save.ini"
+            cfg1 = Config(config_path=str(config_path))
+            cfg1.logging.level = "WARNING"
+            cfg1.logging.max_size_mb = 50
+            cfg1.save()
+
+            cfg2 = Config(config_path=str(config_path))
+            self.assertEqual(cfg2.logging.level, "WARNING")
+            self.assertEqual(cfg2.logging.max_size_mb, 50)
+
+    def test_to_dict_includes_logging(self):
+        """to_dict should include logging section."""
+        cfg = Config(config_path="/nonexistent/path.ini")
+        d = cfg.to_dict()
+        self.assertIn("logging", d)
+        self.assertEqual(d["logging"]["level"], "INFO")
+
+
+class TestWebConfigCorsOrigins(unittest.TestCase):
+    """Test cors_origins field in WebConfig."""
+
+    def test_default_empty(self):
+        cfg = WebConfig()
+        self.assertEqual(cfg.cors_origins, "")
+
+    def test_cors_origins_load_save(self):
+        """CORS origins should be loaded and saved correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "cors.ini"
+            config_path.write_text("[web]\ncors_origins = http://localhost:3000,https://example.com\n")
+            cfg = Config(config_path=str(config_path))
+            self.assertEqual(cfg.web.cors_origins, "http://localhost:3000,https://example.com")
+
+            # Save and reload
+            cfg.save()
+            cfg2 = Config(config_path=str(config_path))
+            self.assertEqual(cfg2.web.cors_origins, "http://localhost:3000,https://example.com")
+
+    def test_to_dict_includes_cors_origins(self):
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg.web.cors_origins = "http://localhost:8080"
+        d = cfg.to_dict()
+        self.assertEqual(d["web"]["cors_origins"], "http://localhost:8080")
+
+    def test_validate_wildcard_cors_without_auth(self):
+        """Wildcard CORS without auth should generate a validation warning."""
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg.web.cors_origins = "*"
+        cfg.web.enable_auth = False
+        issues = cfg.validate()
+        self.assertTrue(any("CORS" in issue for issue in issues))
+
+    def test_validate_no_warning_with_auth(self):
+        """Wildcard CORS with auth should not generate a CORS warning."""
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg.web.cors_origins = "*"
+        cfg.web.enable_auth = True
+        cfg.web.api_key = "test-key"
+        issues = cfg.validate()
+        self.assertFalse(any("CORS" in issue for issue in issues))
+
+
+class TestEnvVarOverrides(unittest.TestCase):
+    """Test environment variable config overrides."""
+
+    def setUp(self):
+        # Clean up any MESHFORGE_ env vars before each test
+        self._original_env = {}
+        for key in list(os.environ):
+            if key.startswith("MESHFORGE_"):
+                self._original_env[key] = os.environ.pop(key)
+
+    def tearDown(self):
+        # Restore original env vars and clean up test vars
+        for key in list(os.environ):
+            if key.startswith("MESHFORGE_"):
+                del os.environ[key]
+        os.environ.update(self._original_env)
+
+    def test_mqtt_broker_override(self):
+        """MESHFORGE_MQTT_BROKER should override INI value."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "env_test.ini"
+            config_path.write_text("[mqtt]\nbroker = original.broker.com\n")
+
+            os.environ["MESHFORGE_MQTT_BROKER"] = "override.broker.com"
+            cfg = Config(config_path=str(config_path))
+            self.assertEqual(cfg.mqtt.broker, "override.broker.com")
+
+    def test_web_port_override_as_int(self):
+        """MESHFORGE_WEB_PORT should be converted to int."""
+        os.environ["MESHFORGE_WEB_PORT"] = "9090"
+        cfg = Config(config_path="/nonexistent/path.ini")
+        # Need to manually call load with env override
+        cfg._apply_env_overrides()
+        self.assertEqual(cfg.web.port, 9090)
+
+    def test_mqtt_enabled_as_bool(self):
+        """MESHFORGE_MQTT_ENABLED should be converted to bool."""
+        os.environ["MESHFORGE_MQTT_ENABLED"] = "true"
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg._apply_env_overrides()
+        self.assertTrue(cfg.mqtt.enabled)
+
+    def test_unset_env_vars_dont_affect_config(self):
+        """Config should use defaults when no env vars are set."""
+        cfg = Config(config_path="/nonexistent/path.ini")
+        self.assertEqual(cfg.mqtt.broker, "mqtt.meshtastic.org")
+        self.assertEqual(cfg.web.port, 8080)
+
+    def test_invalid_env_var_value_ignored(self):
+        """Invalid env var values (e.g., non-numeric port) should be ignored."""
+        os.environ["MESHFORGE_WEB_PORT"] = "not_a_number"
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg._apply_env_overrides()
+        # Should remain at default
+        self.assertEqual(cfg.web.port, 8080)
+
+    def test_cors_origins_via_env(self):
+        """MESHFORGE_WEB_CORS_ORIGINS should override cors_origins."""
+        os.environ["MESHFORGE_WEB_CORS_ORIGINS"] = "http://localhost:3000"
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg._apply_env_overrides()
+        self.assertEqual(cfg.web.cors_origins, "http://localhost:3000")
+
+    def test_logging_level_override(self):
+        """MESHFORGE_LOGGING_LEVEL should override logging level."""
+        os.environ["MESHFORGE_LOGGING_LEVEL"] = "DEBUG"
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg._apply_env_overrides()
+        self.assertEqual(cfg.logging.level, "DEBUG")
+
+    def test_tui_refresh_rate_as_float(self):
+        """MESHFORGE_TUI_REFRESH_RATE should be converted to float."""
+        os.environ["MESHFORGE_TUI_REFRESH_RATE"] = "0.5"
+        cfg = Config(config_path="/nonexistent/path.ini")
+        cfg._apply_env_overrides()
+        self.assertEqual(cfg.tui.refresh_rate, 0.5)
+
+    def test_env_overrides_ini_value(self):
+        """Env var should override INI file value (higher priority)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "priority.ini"
+            config_path.write_text("[web]\nhost = 127.0.0.1\n")
+
+            os.environ["MESHFORGE_WEB_HOST"] = "0.0.0.0"
+            cfg = Config(config_path=str(config_path))
+            self.assertEqual(cfg.web.host, "0.0.0.0")
 
 
 if __name__ == "__main__":

@@ -195,7 +195,7 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 - [x] Warn when non-default MQTT credentials used without TLS — fixed (prior session)
 - [ ] Tighten CSP (remove `'unsafe-inline'`)
 - [x] Proxy-aware rate limiting — fixed (prior session)
-- [ ] Explicit CORS middleware configuration
+- [x] Explicit CORS middleware configuration — fixed (Session 2)
 - [x] Narrow remaining `except Exception` to specific types — fixed (prior session)
 - [x] MQTT auth failure stops infinite reconnection — new
 - [x] Thread-safe _connected and rejection window stats — new

@@ -204,5 +204,84 @@ class TestCheckPythonVersion(unittest.TestCase):
         self.assertTrue(mesh_client.check_python_version())
 
 
+class TestSetupLogging(unittest.TestCase):
+    """Test setup_logging() configures RotatingFileHandler."""
+
+    def setUp(self):
+        import logging
+
+        # Save root logger state
+        self._root_handlers = logging.getLogger().handlers[:]
+        self._root_level = logging.getLogger().level
+
+    def tearDown(self):
+        import logging
+
+        # Restore root logger state
+        root = logging.getLogger()
+        root.handlers = self._root_handlers
+        root.setLevel(self._root_level)
+        mesh_client._logging_configured = False
+
+    def test_creates_rotating_file_handler(self):
+        """setup_logging should create a RotatingFileHandler."""
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ConfigParser()
+            config.read_string(
+                "[logging]\n"
+                "enabled = true\n"
+                "level = INFO\n"
+                f"file = {tmpdir}/test.log\n"
+                "max_size_mb = 5\n"
+                "backup_count = 2\n"
+            )
+            mesh_client.setup_logging(config)
+
+            root = logging.getLogger()
+            rotating_handlers = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
+            self.assertEqual(len(rotating_handlers), 1)
+            self.assertEqual(rotating_handlers[0].maxBytes, 5 * 1024 * 1024)
+            self.assertEqual(rotating_handlers[0].backupCount, 2)
+
+    def test_respects_disabled(self):
+        """setup_logging should not add file handler when disabled."""
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        config = ConfigParser()
+        config.read_string("[logging]\nenabled = false\n")
+        mesh_client.setup_logging(config)
+
+        root = logging.getLogger()
+        rotating_handlers = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
+        self.assertEqual(len(rotating_handlers), 0)
+
+    def test_sets_log_level(self):
+        """setup_logging should set the root logger level."""
+        import logging
+
+        config = ConfigParser()
+        config.read_string("[logging]\nenabled = false\nlevel = WARNING\n")
+        mesh_client.setup_logging(config)
+
+        self.assertEqual(logging.getLogger().level, logging.WARNING)
+
+    def test_log_delegates_after_setup(self):
+        """log() should delegate to standard logging after setup_logging()."""
+        import logging
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ConfigParser()
+            config.read_string(f"[logging]\nenabled = true\nfile = {tmpdir}/delegate.log\n")
+            mesh_client.setup_logging(config)
+
+            self.assertTrue(mesh_client._logging_configured)
+            # log() should not raise
+            mesh_client.log("test message", "INFO")
+
+
 if __name__ == "__main__":
     unittest.main()
