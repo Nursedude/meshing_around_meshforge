@@ -681,11 +681,7 @@ class AlertsScreen(Screen):
         # Text search filter
         if self.search_query:
             q = self.search_query.lower()
-            all_alerts = [
-                a
-                for a in all_alerts
-                if q in (a.title or "").lower() or q in (a.message or "").lower()
-            ]
+            all_alerts = [a for a in all_alerts if q in (a.title or "").lower() or q in (a.message or "").lower()]
 
         alerts = all_alerts[-20:]
 
