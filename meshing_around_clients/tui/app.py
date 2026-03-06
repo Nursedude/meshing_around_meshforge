@@ -27,6 +27,7 @@ from meshing_around_clients.tui.helpers import (  # noqa: E402
     SEVERITY_ICONS,
     format_battery,
     format_snr,
+    safe_panel_render,
 )
 
 # Check for Rich library - do NOT auto-install (PEP 668 compliance)
@@ -74,6 +75,103 @@ from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa
 from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
 
 
+class PlainTextTUI:
+    """Minimal plain-text fallback TUI for when Rich is not available.
+
+    Displays a polling dashboard using only stdlib print(). Refreshes every
+    2 seconds. Exit with Ctrl+C.
+    """
+
+    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False):
+        self.config = config or Config()
+        self.demo_mode = demo_mode
+        if demo_mode:
+            self.api = MockMeshtasticAPI(self.config)
+        else:
+            self.api = MeshtasticAPI(self.config)
+
+    def run(self) -> None:
+        """Run the plain-text dashboard loop."""
+        import os
+
+        print("=" * 60)
+        print(f"  MESHING-AROUND v{VERSION}  (plain-text mode)")
+        print("  Rich library not found — install for full TUI")
+        print("=" * 60)
+        print()
+
+        # Show config warnings
+        try:
+            issues = self.config.validate()
+            for issue in issues:
+                print(f"  WARNING: {issue}")
+            if issues:
+                print()
+        except Exception:
+            pass
+
+        # Connect
+        if not self.demo_mode:
+            print("Connecting...")
+            if not self.api.connect():
+                print("Connection failed. Starting in demo mode.")
+                self.demo_mode = True
+                self.api = MockMeshtasticAPI(self.config)
+                self.api.connect()
+            else:
+                print("Connected!")
+        else:
+            self.api.connect()
+            print("Running in demo mode.")
+
+        print("Press Ctrl+C to exit.\n")
+
+        try:
+            while True:
+                clear_cmd = "cls" if os.name == "nt" else "clear"
+                os.system(clear_cmd)  # noqa: S605
+
+                health = self.api.connection_health
+                status = health.get("status", "unknown").upper()
+                network = self.api.network
+
+                print(f"MESHING-AROUND v{VERSION}  [{status}]")
+                if self.demo_mode:
+                    print("[DEMO MODE]")
+                print("-" * 60)
+
+                # Stats
+                nodes = network.get_nodes_snapshot()
+                messages = network.get_messages_snapshot()
+                alerts = network.get_alerts_snapshot()
+                print(f"  Nodes: {len(nodes)}  |  Messages: {len(messages)}  |  Alerts: {len(alerts)}")
+
+                msg_rate = health.get("messages_per_minute")
+                if msg_rate is not None:
+                    print(f"  Message rate: {msg_rate:.1f} msg/min")
+                print()
+
+                # Last 5 messages
+                print("Recent Messages:")
+                recent = messages[-5:] if messages else []
+                if not recent:
+                    print("  (no messages)")
+                for msg in reversed(recent):
+                    ts = msg.timestamp.strftime("%H:%M:%S") if msg.timestamp else "??:??:??"
+                    sender = msg.sender_name or msg.sender_id or "unknown"
+                    text = (msg.text or "")[:50]
+                    print(f"  [{ts}] {sender}: {text}")
+
+                print(f"\n{'─' * 60}")
+                print("Press Ctrl+C to exit.")
+                time.sleep(2)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self.api.disconnect()
+            print("\nGoodbye!")
+
+
 class Screen:
     """Base class for TUI screens."""
 
@@ -96,17 +194,11 @@ class DashboardScreen(Screen):
     def render(self) -> Panel:
         layout = Layout()
 
-        # Create stats row
-        stats = self._create_stats_panel()
-
-        # Create node list
-        nodes = self._create_nodes_panel()
-
-        # Create messages panel
-        messages = self._create_messages_panel()
-
-        # Create alerts panel
-        alerts = self._create_alerts_panel()
+        # Create sub-panels with crash isolation
+        stats = safe_panel_render(self._create_stats_panel, "stats")
+        nodes = safe_panel_render(self._create_nodes_panel, "nodes")
+        messages = safe_panel_render(self._create_messages_panel, "messages")
+        alerts = safe_panel_render(self._create_alerts_panel, "alerts")
 
         # Combine into layout
         layout.split_column(Layout(stats, name="stats", size=5), Layout(name="main"))
@@ -509,7 +601,7 @@ class MessagesScreen(Screen):
                 "/: search | Esc: clear | 0-7: channel | a: all | e: export | q: return[/dim]"
             )
         else:
-            subtitle = "[dim]/: search | 0-7: filter channel | a: all | e: export JSON | q: return[/dim]"
+            subtitle = "[dim]/: search | 0-7: channel | a: all | e: JSON | E: CSV | q: return[/dim]"
 
         return Panel(
             table,
@@ -547,19 +639,22 @@ class MessagesScreen(Screen):
             self.channel_filter = None
             return True
         elif key == "e":
-            self._export_messages()
+            self._export_messages(fmt="json")
+            return True
+        elif key == "E":
+            self._export_messages(fmt="csv")
             return True
         return False
 
-    def _export_messages(self) -> None:
-        """Export current message view to a JSON file."""
+    def _export_messages(self, fmt: str = "json") -> None:
+        """Export current message view to a file."""
         try:
             from datetime import datetime as dt
 
             timestamp = dt.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"meshforge_messages_{timestamp}.json"
+            filename = f"meshforge_messages_{timestamp}.{fmt}"
             data = self.app.api.network.export_messages(
-                fmt="json",
+                fmt=fmt,
                 channel=self.channel_filter,
             )
             with open(filename, "w", encoding="utf-8") as f:
@@ -570,16 +665,27 @@ class MessagesScreen(Screen):
 
 
 class AlertsScreen(Screen):
-    """Detailed alerts view screen with severity filtering and acknowledgment."""
+    """Detailed alerts view screen with severity filtering, search, and acknowledgment."""
 
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self.severity_filter: Optional[int] = None
+        self.search_query: str = ""
+        self.search_active: bool = False
 
     def render(self) -> Panel:
         all_alerts = self.app.api.network.get_alerts_snapshot()
         if self.severity_filter is not None:
             all_alerts = [a for a in all_alerts if a.severity == self.severity_filter]
+
+        # Text search filter
+        if self.search_query:
+            q = self.search_query.lower()
+            all_alerts = [
+                a
+                for a in all_alerts
+                if q in (a.title or "").lower() or q in (a.message or "").lower()
+            ]
 
         alerts = all_alerts[-20:]
 
@@ -611,15 +717,42 @@ class AlertsScreen(Screen):
         filter_text = sev_labels.get(self.severity_filter, "All severities")
         unread = len(self.app.api.network.unread_alerts)
 
+        title = f"[bold cyan]Alerts[/bold cyan] - {filter_text} ({unread} unread)"
+        if self.search_active:
+            title += f"  [yellow]Search: {self.search_query}_[/yellow]"
+        elif self.search_query:
+            title += f"  [green]Filter: {self.search_query}[/green]"
+
         return Panel(
             table,
-            title=f"[bold cyan]Alerts[/bold cyan] - {filter_text} ({unread} unread)",
-            subtitle="[dim]l/m/H/C: low/med/high/crit | a: all | x: ack all | q: return[/dim]",
+            title=title,
+            subtitle="[dim]/: search | l/m/H/C: severity | a: all | x: ack all | q: return[/dim]",
             border_style="red",
         )
 
     def handle_input(self, key: str) -> bool:
-        if key == "l":
+        # Search mode input handling
+        if self.search_active:
+            if key == "\n" or key == "\r":
+                self.search_active = False
+            elif key == "\x1b":  # Escape
+                self.search_query = ""
+                self.search_active = False
+            elif key in ("\x7f", "\x08"):  # Backspace
+                self.search_query = self.search_query[:-1]
+            elif key.isprintable() and len(key) == 1:
+                self.search_query += key
+            return True
+
+        if key == "/":
+            self.search_active = True
+            self.search_query = ""
+            return True
+        elif key == "\x1b" and self.search_query:
+            # Escape clears confirmed search filter
+            self.search_query = ""
+            return True
+        elif key == "l":
             self._cycle_severity_filter(1)
             return True
         elif key == "m":
@@ -655,17 +788,11 @@ class TopologyScreen(Screen):
     def render(self) -> Panel:
         layout = Layout()
 
-        # Create mesh health panel
-        health_panel = self._create_health_panel()
-
-        # Create topology tree
-        topology_panel = self._create_topology_panel()
-
-        # Create routes panel
-        routes_panel = self._create_routes_panel()
-
-        # Create channels panel
-        channels_panel = self._create_channels_panel()
+        # Create sub-panels with crash isolation
+        health_panel = safe_panel_render(self._create_health_panel, "health")
+        topology_panel = safe_panel_render(self._create_topology_panel, "topology")
+        routes_panel = safe_panel_render(self._create_routes_panel, "routes")
+        channels_panel = safe_panel_render(self._create_channels_panel, "channels")
 
         # Layout: Health at top, then topology/routes, channels at bottom
         layout.split_column(
@@ -905,8 +1032,11 @@ class HelpScreen(Screen):
 - **/** - Search by text, sender name, or sender ID
 - **0-7** - Filter by channel
 - **a** - Show all channels
+- **e** - Export messages as JSON
+- **E** - Export messages as CSV
 
 ## Alerts View
+- **/** - Search by title or message text
 - **l** - Filter: Low severity
 - **m** - Filter: Medium severity
 - **H** - Filter: High severity
@@ -1044,7 +1174,7 @@ class MeshingAroundTUI:
         if screen:
             try:
                 layout["body"].update(screen.render())
-            except (AttributeError, KeyError, TypeError) as e:
+            except Exception as e:
                 # Guard against stale/missing API data during reconnection
                 logger.debug("Render error on %s: %s", self.current_screen, e)
                 msg = (
@@ -1078,6 +1208,23 @@ class MeshingAroundTUI:
         """Disconnect from the device."""
         self.api.disconnect()
 
+    def _show_config_warnings(self) -> None:
+        """Run config validation and display any warnings before connecting."""
+        try:
+            issues = self.config.validate()
+            if issues:
+                warning_lines = "\n".join(f"[yellow]! {issue}[/yellow]" for issue in issues)
+                self.console.print(
+                    Panel(
+                        warning_lines,
+                        title="[bold yellow]Configuration Warnings[/bold yellow]",
+                        border_style="yellow",
+                    )
+                )
+                time.sleep(2)
+        except Exception as e:
+            logger.debug("Config validation error: %s", e)
+
     def run(self) -> None:
         """Run TUI in display-only mode (no keyboard input).
 
@@ -1089,6 +1236,9 @@ class MeshingAroundTUI:
 
         # Show startup banner
         self._show_startup()
+
+        # Pre-flight config check
+        self._show_config_warnings()
 
         # Connect if not in demo mode
         if not self.demo_mode:
@@ -1146,6 +1296,9 @@ class MeshingAroundTUI:
 
         self.console.clear()
         self._show_startup()
+
+        # Pre-flight config check
+        self._show_config_warnings()
 
         # Connect
         if not self.demo_mode:
@@ -1276,16 +1429,6 @@ class MeshingAroundTUI:
 
 def main():
     """Main entry point for the TUI application."""
-    if not RICH_AVAILABLE:
-        print("Error: 'rich' library not found.")
-        print("The TUI requires the Rich library for terminal rendering.")
-        print("Please install it with: pip install rich")
-        print("  or: python3 -m pip install rich")
-        print("  or run: python3 mesh_client.py --install-deps")
-        print()
-        print("Alternatively, use the web interface: python3 mesh_client.py --web")
-        sys.exit(1)
-
     import argparse
 
     parser = argparse.ArgumentParser(description="Meshing-Around TUI Client")
@@ -1305,6 +1448,14 @@ def main():
     elif args.tcp:
         config.interface.type = "tcp"
         config.interface.hostname = args.tcp
+
+    if not RICH_AVAILABLE:
+        print("Note: 'rich' library not found — running in plain-text mode.")
+        print("Install Rich for the full TUI: pip install rich")
+        print()
+        tui = PlainTextTUI(config=config, demo_mode=args.demo)
+        tui.run()
+        return
 
     # Create and run TUI
     tui = MeshingAroundTUI(config=config, demo_mode=args.demo)
