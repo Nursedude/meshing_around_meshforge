@@ -491,6 +491,206 @@ class TestConnectionHealthInHeader(unittest.TestCase):
         self.assertIsNotNone(panel)
 
 
+class TestPlainTextTUI(unittest.TestCase):
+    """Test PlainTextTUI fallback mode (no Rich required)."""
+
+    def test_plain_text_tui_init(self):
+        """PlainTextTUI should initialize without Rich."""
+        from meshing_around_clients.tui.app import PlainTextTUI
+
+        config = Config()
+        tui = PlainTextTUI(config=config, demo_mode=True)
+        self.assertTrue(tui.demo_mode)
+        self.assertIsNotNone(tui.api)
+
+    def test_plain_text_tui_default_config(self):
+        """PlainTextTUI should work with default config."""
+        from meshing_around_clients.tui.app import PlainTextTUI
+
+        tui = PlainTextTUI(demo_mode=True)
+        self.assertIsNotNone(tui.config)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestSafePanelRender(unittest.TestCase):
+    """Test safe_panel_render crash isolation."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import DashboardScreen, MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = DashboardScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_dashboard_survives_stats_panel_crash(self):
+        """Dashboard should still render if _create_stats_panel crashes."""
+        self.screen._create_stats_panel = lambda: (_ for _ in ()).throw(RuntimeError("test crash"))
+        # Should not raise — safe_panel_render catches the error
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_dashboard_survives_nodes_panel_crash(self):
+        """Dashboard should still render if _create_nodes_panel crashes."""
+        self.screen._create_nodes_panel = lambda: (_ for _ in ()).throw(ValueError("test crash"))
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_topology_survives_health_panel_crash(self):
+        """Topology should still render if _create_health_panel crashes."""
+        from meshing_around_clients.tui.app import TopologyScreen
+
+        screen = TopologyScreen(self.tui)
+        screen._create_health_panel = lambda: (_ for _ in ()).throw(IndexError("test crash"))
+        panel = screen.render()
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestConfigValidationOnStartup(unittest.TestCase):
+    """Test that config validation runs and doesn't crash the TUI."""
+
+    def test_show_config_warnings_no_crash(self):
+        """_show_config_warnings should not crash even with invalid config."""
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        config = Config()
+        # Set an invalid MQTT port to trigger a validation issue
+        config.mqtt.port = 99999
+        tui = MeshingAroundTUI(config=config, demo_mode=True)
+        # Should not raise
+        tui._show_config_warnings()
+
+    def test_show_config_warnings_valid_config(self):
+        """_show_config_warnings should work with valid config too."""
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        config = Config()
+        tui = MeshingAroundTUI(config=config, demo_mode=True)
+        tui._show_config_warnings()
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestCSVExport(unittest.TestCase):
+    """Test CSV message export."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, MessagesScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = MessagesScreen(self.tui)
+
+        msg = Message(
+            id="csv-test", sender_id="!aabb1111", sender_name="TestNode", text="CSV test", message_type=MessageType.TEXT
+        )
+        self.tui.api.network.add_message(msg)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+        import glob
+        import os
+
+        for f in glob.glob("meshforge_messages_*.csv"):
+            os.remove(f)
+        for f in glob.glob("meshforge_messages_*.json"):
+            os.remove(f)
+
+    def test_csv_export_creates_file(self):
+        """E key should export CSV file."""
+        import glob
+
+        self.screen._export_messages(fmt="csv")
+        files = glob.glob("meshforge_messages_*.csv")
+        self.assertTrue(len(files) >= 1)
+
+    def test_shift_e_triggers_csv_export(self):
+        """E (shift-e) key should be handled."""
+        result = self.screen.handle_input("E")
+        self.assertTrue(result)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestAlertsScreenSearch(unittest.TestCase):
+    """Test AlertsScreen text search functionality."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import AlertsScreen, MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = AlertsScreen(self.tui)
+
+        # Add test alerts
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        alert1 = Alert(id="a1", title="Low battery", message="Node X at 10%", alert_type=AlertType.BATTERY, severity=3)
+        alert2 = Alert(id="a2", title="New node", message="Node Y joined", alert_type=AlertType.NEW_NODE, severity=1)
+        alert3 = Alert(id="a3", title="Emergency", message="SOS received", alert_type=AlertType.EMERGENCY, severity=4)
+        self.tui.api.network.add_alert(alert1)
+        self.tui.api.network.add_alert(alert2)
+        self.tui.api.network.add_alert(alert3)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_search_activation(self):
+        """Pressing / should activate search mode."""
+        self.assertFalse(self.screen.search_active)
+        result = self.screen.handle_input("/")
+        self.assertTrue(result)
+        self.assertTrue(self.screen.search_active)
+
+    def test_search_key_buffering(self):
+        """Keys in search mode should be buffered into search_query."""
+        self.screen.search_active = True
+        self.screen.handle_input("s")
+        self.screen.handle_input("o")
+        self.screen.handle_input("s")
+        self.assertEqual(self.screen.search_query, "sos")
+
+    def test_search_escape_cancels(self):
+        """Escape should cancel search and clear query."""
+        self.screen.search_active = True
+        self.screen.search_query = "test"
+        self.screen.handle_input("\x1b")
+        self.assertFalse(self.screen.search_active)
+        self.assertEqual(self.screen.search_query, "")
+
+    def test_search_enter_confirms(self):
+        """Enter should confirm search and keep query."""
+        self.screen.search_active = True
+        self.screen.search_query = "battery"
+        self.screen.handle_input("\n")
+        self.assertFalse(self.screen.search_active)
+        self.assertEqual(self.screen.search_query, "battery")
+
+    def test_search_backspace(self):
+        """Backspace should delete last character."""
+        self.screen.search_active = True
+        self.screen.search_query = "test"
+        self.screen.handle_input("\x7f")
+        self.assertEqual(self.screen.search_query, "tes")
+
+    def test_render_with_search_filter(self):
+        """Render should succeed with search filter applied."""
+        self.screen.search_query = "battery"
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+    def test_render_with_active_search(self):
+        """Render should succeed while search is active."""
+        self.screen.search_active = True
+        self.screen.search_query = "emer"
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+
 class TestMeshtasticAPIConnectionHealth(unittest.TestCase):
     """Test connection_health property on MeshtasticAPI."""
 

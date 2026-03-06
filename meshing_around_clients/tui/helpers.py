@@ -4,7 +4,10 @@ Centralises repeated rendering logic (battery, SNR, health colours, severity
 icons) so every screen uses the same thresholds and styling.
 """
 
-from typing import Optional
+import logging
+from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Health status colour map (used in DashboardScreen & TopologyScreen)
@@ -60,3 +63,20 @@ def format_snr(snr: Optional[float], *, unit: bool = False, styled: bool = False
     else:
         style = "red"
     return f"[{style}]{value_str}[/{style}]"
+
+
+def safe_panel_render(func: Callable, fallback_title: str = "") -> Any:
+    """Wrap a panel-rendering callable so exceptions return an error Panel.
+
+    Catches any exception, logs it at debug level, and returns a Rich Panel
+    with an error placeholder instead of letting one sub-panel crash take
+    down the entire screen.
+    """
+    try:
+        return func()
+    except Exception as e:
+        logger.debug("Panel render error in %s: %s", fallback_title, e)
+        # Import here to avoid circular import; Panel is only available when Rich is loaded
+        from rich.panel import Panel
+
+        return Panel(f"[dim]Error loading {fallback_title}[/dim]", border_style="dim")
