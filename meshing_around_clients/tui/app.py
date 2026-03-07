@@ -1084,7 +1084,20 @@ class MeshingAroundTUI:
         # State
         self._running = False
         self._interactive = False  # True when run_interactive() has input handling
+        self._dirty = True  # Render flag — set on data changes or user input
         self._last_refresh = datetime.now()
+
+        # Register API callbacks to mark display dirty on data changes
+        self._register_dirty_callbacks()
+
+    def _mark_dirty(self, *args, **kwargs) -> None:
+        """Callback to mark the display as needing a re-render."""
+        self._dirty = True
+
+    def _register_dirty_callbacks(self) -> None:
+        """Register API callbacks that trigger display refresh on data changes."""
+        for event in ("on_message", "on_node_update", "on_alert", "on_connect", "on_disconnect", "on_telemetry"):
+            self.api.register_callback(event, self._mark_dirty)
 
     def _get_header(self) -> Panel:
         """Create the application header with connection health."""
@@ -1114,6 +1127,15 @@ class MeshingAroundTUI:
         msg_rate = health.get("messages_per_minute")
         if msg_rate is not None and health.get("connected"):
             title.append(f"  {msg_rate:.1f} msg/min", style="dim")
+
+        # Show queue metrics when relevant (>50% full or drops occurred)
+        q_size = health.get("queue_size")
+        q_max = health.get("queue_maxsize")
+        dropped = health.get("messages_dropped", 0)
+        if q_size is not None and q_max and q_size > q_max * 0.5:
+            title.append(f"  Q:{q_size}/{q_max}", style="yellow")
+        if dropped:
+            title.append(f"  ({dropped} dropped)", style="red")
 
         return Panel(Align.center(title), box=box.DOUBLE, border_style="cyan", padding=(0, 2))
 
@@ -1183,7 +1205,7 @@ class MeshingAroundTUI:
         return layout
 
     def connect(self) -> bool:
-        """Connect to the Meshtastic device."""
+        """Connect to the Meshtastic device with retry and progress display."""
         self.console.print("[cyan]Connecting to Meshtastic device...[/cyan]")
 
         with Progress(
@@ -1191,7 +1213,16 @@ class MeshingAroundTUI:
         ) as progress:
             task = progress.add_task("Connecting...", total=None)
 
-            success = self.api.connect()
+            def on_retry(attempt, delay, error_msg):
+                progress.update(
+                    task,
+                    description=f"[yellow]Attempt {attempt} failed: {error_msg}. Retrying in {delay:.0f}s...[/yellow]",
+                )
+
+            if hasattr(self.api, "connect_with_retry"):
+                success = self.api.connect_with_retry(max_retries=3, on_retry=on_retry)
+            else:
+                success = self.api.connect()
 
             if success:
                 progress.update(task, description="[green]Connected![/green]")
@@ -1243,6 +1274,7 @@ class MeshingAroundTUI:
                     return
                 self.demo_mode = True
                 self.api = MockMeshtasticAPI(self.config)
+                self._register_dirty_callbacks()
                 self.api.connect()
         else:
             self.api.connect()
@@ -1302,6 +1334,7 @@ class MeshingAroundTUI:
                 if Confirm.ask("Connection failed. Run in demo mode?", default=True):
                     self.demo_mode = True
                     self.api = MockMeshtasticAPI(self.config)
+                    self._register_dirty_callbacks()
                     self.api.connect()
                 else:
                     return
@@ -1319,20 +1352,26 @@ class MeshingAroundTUI:
             tty.setcbreak(sys.stdin.fileno())
 
             while self._running:
-                # Render screen with error guard
-                try:
-                    self.console.clear()
-                    self.console.print(self._render())
-                except (AttributeError, KeyError, TypeError, IndexError) as e:
-                    # Transient data issue during render - show minimal output
-                    logger.debug("Interactive render error: %s", e)
-                    self.console.clear()
-                    self.console.print("[yellow]Updating...[/yellow]")
+                # Only re-render when data changed or user interacted (dirty flag)
+                if self._dirty:
+                    self._dirty = False
+                    try:
+                        self.console.clear()
+                        self.console.print(self._render())
+                    except (AttributeError, KeyError, TypeError, IndexError) as e:
+                        # Transient data issue during render - show minimal output
+                        logger.debug("Interactive render error: %s", e)
+                        self.console.clear()
+                        self.console.print("[yellow]Updating...[/yellow]")
 
-                # Check for input
+                # Check for input (0.5s timeout doubles as minimum refresh interval)
                 if select.select([sys.stdin], [], [], 0.5)[0]:
                     key = sys.stdin.read(1)
+                    self._dirty = True  # Any input triggers re-render
                     self._handle_key(key)
+                else:
+                    # No input — mark dirty for periodic refresh (health status, etc.)
+                    self._dirty = True
 
         except (KeyboardInterrupt, EOFError):
             pass  # Normal exit

@@ -8,12 +8,14 @@ import queue
 import random
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+_message_logger = logging.getLogger("mesh.messages")
 
 # Connection timeout for serial/TCP/BLE interfaces (seconds)
 CONNECT_TIMEOUT_SECONDS = 30.0
@@ -74,6 +76,7 @@ class MeshtasticAPI(CallbackMixin):
         self.network = MeshNetwork()
         self.connection_info = ConnectionInfo()
         self._message_queue: queue.Queue = queue.Queue(maxsize=5000)
+        self._messages_dropped = 0
         self._init_callbacks()
         self._running = threading.Event()
         self._stop_event = threading.Event()
@@ -249,6 +252,9 @@ class MeshtasticAPI(CallbackMixin):
             "connected": connected,
             "interface_type": self.connection_info.interface_type,
             "device_path": self.connection_info.device_path,
+            "queue_size": self._message_queue.qsize(),
+            "queue_maxsize": self._message_queue.maxsize,
+            "messages_dropped": self._messages_dropped,
         }
 
     def connect(self) -> bool:
@@ -322,6 +328,48 @@ class MeshtasticAPI(CallbackMixin):
             self.connection_info.connected = False
             self.network.connection_status = "error"
             return False
+
+    def connect_with_retry(
+        self,
+        max_retries: int = 3,
+        base_delay: float = 5.0,
+        max_delay: float = 60.0,
+        on_retry: Optional[callable] = None,
+    ) -> bool:
+        """Connect with exponential backoff and jitter.
+
+        Args:
+            max_retries: Maximum number of retry attempts.
+            base_delay: Initial delay between retries in seconds.
+            max_delay: Maximum delay between retries in seconds.
+            on_retry: Optional callback(attempt, delay, error_msg) called before each retry sleep.
+
+        Returns:
+            True if connection succeeded.
+        """
+        for attempt in range(1, max_retries + 1):
+            if self.connect():
+                return True
+
+            if attempt >= max_retries:
+                break
+
+            # Exponential backoff with ±25% jitter
+            delay = min(base_delay * (2 ** (attempt - 1)), max_delay)
+            jitter = delay * random.uniform(-0.25, 0.25)
+            delay = max(1.0, delay + jitter)
+
+            error_msg = self.connection_info.error_message
+            logger.warning(
+                "Connection attempt %d/%d failed: %s. Retrying in %.1fs", attempt, max_retries, error_msg, delay
+            )
+
+            if on_retry:
+                on_retry(attempt, delay, error_msg)
+
+            time.sleep(delay)
+
+        return False
 
     def disconnect(self) -> None:
         """Disconnect from the Meshtastic device."""
@@ -433,7 +481,12 @@ class MeshtasticAPI(CallbackMixin):
         try:
             self._message_queue.put_nowait(("receive", packet))
         except queue.Full:
-            logger.warning("Message queue full (maxsize=%d), dropping packet", self._message_queue.maxsize)
+            self._messages_dropped += 1
+            logger.warning(
+                "Message queue full (maxsize=%d), dropping packet (total dropped: %d)",
+                self._message_queue.maxsize,
+                self._messages_dropped,
+            )
 
     def _on_connection(self, interface: Any, topic: Any = None) -> None:
         """Handle connection established event."""
@@ -522,6 +575,7 @@ class MeshtasticAPI(CallbackMixin):
         )
 
         self.network.add_message(message)
+        _message_logger.info("ch%d %s (%s): %s", message.channel, sender_name, sender_id, text)
         self._trigger_callbacks("on_message", message)
 
         # Check for emergency keywords
