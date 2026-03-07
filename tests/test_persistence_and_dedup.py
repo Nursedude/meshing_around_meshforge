@@ -495,6 +495,7 @@ class TestFailoverScenarios(unittest.TestCase):
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
         config = Config(config_path="/nonexistent/path")
+        config.storage.enabled = False
         client = MQTTMeshtasticClient(config)
         client._client = MagicMock()
 

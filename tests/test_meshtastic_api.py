@@ -370,6 +370,7 @@ class TestMockAPIDynamicNodes(unittest.TestCase):
 
     def setUp(self):
         self.config = Config(config_path="/nonexistent/path")
+        self.config.storage.enabled = False
         self.api = MockMeshtasticAPI(self.config)
         self.api.connect()
 

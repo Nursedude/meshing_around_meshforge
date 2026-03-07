@@ -27,6 +27,8 @@ def config():
     cfg = Config(config_path="/nonexistent/path")
     cfg.alerts.enabled = True
     cfg.alerts.emergency_keywords = ["help", "sos", "emergency"]
+    # Disable storage persistence in tests to prevent stale state leaking
+    cfg.storage.enabled = False
     return cfg
 
 
