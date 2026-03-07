@@ -103,9 +103,14 @@ def setup_logging(config: ConfigParser) -> None:
     Reads [logging] section from config and sets up RotatingFileHandler
     plus colored console output. All modules using logging.getLogger(__name__)
     will automatically get file rotation.
+
+    Also configures a dedicated ``mesh.messages`` logger for mesh traffic,
+    inspired by the upstream meshing-around dual-logger pattern.  This keeps
+    message history in a separate file with daily rotation so long-running
+    deployments on Pi don't lose traffic logs when the system log rotates.
     """
     global _logging_configured
-    from logging.handlers import RotatingFileHandler
+    from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 
     enabled = config.getboolean("logging", "enabled", fallback=True)
     level_str = config.get("logging", "level", fallback="INFO").upper()
@@ -113,10 +118,19 @@ def setup_logging(config: ConfigParser) -> None:
     max_size_mb = config.getint("logging", "max_size_mb", fallback=10)
     backup_count = config.getint("logging", "backup_count", fallback=3)
 
+    # Message log settings
+    msg_log_enabled = config.getboolean("logging", "message_log_enabled", fallback=True)
+    msg_log_file = config.get("logging", "message_log_file", fallback="mesh_messages.log")
+    msg_log_backup_count = config.getint("logging", "message_log_backup_count", fallback=7)
+
     # Resolve relative paths against script directory
     log_path = Path(log_file)
     if not log_path.is_absolute():
         log_path = SCRIPT_DIR / log_path
+
+    msg_log_path = Path(msg_log_file)
+    if not msg_log_path.is_absolute():
+        msg_log_path = SCRIPT_DIR / msg_log_path
 
     level = getattr(_logging, level_str, _logging.INFO)
 
@@ -125,7 +139,7 @@ def setup_logging(config: ConfigParser) -> None:
     # Clear existing handlers to prevent duplicates on re-init
     root_logger.handlers.clear()
 
-    # Rotating file handler
+    # Rotating file handler (system log)
     if enabled:
         try:
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +158,31 @@ def setup_logging(config: ConfigParser) -> None:
             root_logger.addHandler(file_handler)
         except OSError as e:
             print(f"{Colors.YELLOW}[WARN]{Colors.RESET} Could not set up log file: {e}")
+
+    # Dedicated message logger (mesh traffic only, daily rotation)
+    msg_logger = _logging.getLogger("mesh.messages")
+    msg_logger.handlers.clear()
+    msg_logger.propagate = False  # Don't duplicate into system log
+    msg_logger.setLevel(_logging.INFO)
+
+    if enabled and msg_log_enabled:
+        try:
+            msg_log_path.parent.mkdir(parents=True, exist_ok=True)
+            msg_handler = TimedRotatingFileHandler(
+                str(msg_log_path),
+                when="midnight",
+                backupCount=msg_log_backup_count,
+                encoding="utf-8",
+            )
+            msg_handler.setLevel(_logging.INFO)
+            msg_formatter = _logging.Formatter(
+                "[%(asctime)s] %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+            msg_handler.setFormatter(msg_formatter)
+            msg_logger.addHandler(msg_handler)
+        except OSError as e:
+            print(f"{Colors.YELLOW}[WARN]{Colors.RESET} Could not set up message log file: {e}")
 
     # Colored console handler (only if TTY)
     if sys.stdout.isatty():

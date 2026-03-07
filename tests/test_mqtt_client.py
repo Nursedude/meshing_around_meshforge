@@ -64,6 +64,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
 
     def setUp(self):
         self.config = Config(config_path="/nonexistent/path")
+        self.config.storage.enabled = False
         self.config.alerts.enabled = True
         self.config.alerts.emergency_keywords = ["help", "sos", "emergency"]
 

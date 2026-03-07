@@ -17,6 +17,7 @@ import atexit
 import hashlib
 import json
 import logging
+import random
 import struct
 import threading
 import time
@@ -45,6 +46,7 @@ from .models import (
 )
 
 logger = logging.getLogger(__name__)
+_message_logger = logging.getLogger("mesh.messages")
 
 # --- Robustness limits (from meshforge) ---
 MAX_PAYLOAD_BYTES = 65536  # 64 KB max per MQTT message
@@ -145,9 +147,17 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self._stop_event = threading.Event()
 
+        # Persistence (mirrors MeshtasticAPI pattern)
+        self._auto_save_thread: Optional[threading.Thread] = None
+        self._last_save_time: Optional[datetime] = None
+        self._save_lock = threading.Lock()
+
         # Malformed message rejection rate tracking (SEC-14)
         self._rejection_window_start: float = time.monotonic()
         self._rejection_window_count: int = 0
+
+        # Load persisted state if enabled
+        self._load_persisted_state()
 
         # Generate client ID if not set
         if not self.mqtt_config.client_id:
@@ -157,6 +167,60 @@ class MQTTMeshtasticClient(CallbackMixin):
         self._packet_processor: Optional[MeshPacketProcessor] = None
         if MESH_CRYPTO_AVAILABLE:
             self._packet_processor = MeshPacketProcessor(encryption_key=self.mqtt_config.encryption_key)
+
+    # ==================== Persistence Methods ====================
+
+    def _load_persisted_state(self) -> None:
+        """Load network state from persistent storage."""
+        if not hasattr(self.config, "storage") or not self.config.storage.enabled:
+            return
+
+        state_path = self.config.get_state_file_path()
+        if state_path.exists():
+            loaded = MeshNetwork.load_from_file(state_path)
+            if loaded and loaded.nodes:
+                self.network = loaded
+                self.network.connection_status = "disconnected"
+                logger.info("MQTT: Loaded %d nodes from %s", len(self.network.nodes), state_path)
+
+    def _save_state(self) -> bool:
+        """Save network state to persistent storage.
+
+        Uses a non-blocking lock to skip if a previous save is still in progress.
+        """
+        if not hasattr(self.config, "storage") or not self.config.storage.enabled:
+            return False
+        if not self._save_lock.acquire(blocking=False):
+            logger.debug("MQTT: Skipping save — previous save still in progress")
+            return False
+
+        try:
+            state_path = self.config.get_state_file_path()
+            self.network.last_update = datetime.now(timezone.utc)
+            success = self.network.save_to_file(state_path)
+            if success:
+                self._last_save_time = datetime.now(timezone.utc)
+            return success
+        finally:
+            self._save_lock.release()
+
+    def _start_auto_save(self) -> None:
+        """Start background auto-save thread for crash-safe persistence."""
+        if not hasattr(self.config, "storage"):
+            return
+        if self.config.storage.auto_save_interval <= 0:
+            return
+
+        def auto_save_loop():
+            interval = self.config.storage.auto_save_interval
+            while not self._stop_event.is_set():
+                if self._stop_event.wait(timeout=interval):
+                    break
+                if self.is_connected:
+                    self._save_state()
+
+        self._auto_save_thread = threading.Thread(target=auto_save_loop, daemon=True, name="mqtt-auto-save")
+        self._auto_save_thread.start()
 
     @property
     def is_connected(self) -> bool:
@@ -277,8 +341,9 @@ class MQTTMeshtasticClient(CallbackMixin):
                     with self._stats_lock:
                         self._stats["messages_received"] = 0
                         self._stats["messages_rejected"] = 0
-                    # Start background stale node cleanup thread
+                    # Start background threads
                     self._start_cleanup_thread()
+                    self._start_auto_save()
                     return True
                 else:
                     # Connection timed out - stop the background loop thread
@@ -297,7 +362,11 @@ class MQTTMeshtasticClient(CallbackMixin):
             return False
 
     def _atexit_cleanup(self) -> None:
-        """Ensure clean disconnect on process exit."""
+        """Ensure state is saved and connection is cleaned up on process exit."""
+        try:
+            self._save_state()
+        except (OSError, RuntimeError) as e:
+            logger.debug("atexit save error: %s", e)
         try:
             self.disconnect()
         except (OSError, RuntimeError) as e:
@@ -328,12 +397,17 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
+        # Save state before disconnecting
+        self._save_state()
+
         with self._stats_lock:
             self._intentional_disconnect = True
             self._connected = False  # Signal threads to stop first
         self._stop_event.set()
 
-        # Wait for cleanup thread to finish
+        # Wait for background threads to finish
+        if self._auto_save_thread and self._auto_save_thread.is_alive():
+            self._auto_save_thread.join(timeout=5)
         if self._cleanup_thread and self._cleanup_thread.is_alive():
             self._cleanup_thread.join(timeout=5)
 
@@ -408,10 +482,24 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._reconnect_count = 0
         else:
             # paho's built-in reconnect (enabled via reconnect_delay_set) handles this
-            # We track the count for health reporting
+            # We track the count for health reporting and add jitter to prevent
+            # thundering herd when multiple clients reconnect simultaneously.
             with self._stats_lock:
                 self._reconnect_count += 1
                 count = self._reconnect_count
+
+            # Apply jitter: randomize next reconnect delay within ±25%
+            if self._client:
+                base = min(
+                    self.mqtt_config.reconnect_delay * (2 ** min(count - 1, 6)),
+                    self.mqtt_config.max_reconnect_delay,
+                )
+                jitter = base * random.uniform(-0.25, 0.25)
+                jittered = max(1, int(base + jitter))
+                try:
+                    self._client.reconnect_delay_set(min_delay=jittered, max_delay=self.mqtt_config.max_reconnect_delay)
+                except (AttributeError, ValueError):
+                    pass  # paho API may not support dynamic update
 
             # Log every 5th attempt at WARNING for visibility
             if count % 5 == 0:
@@ -687,6 +775,7 @@ class MQTTMeshtasticClient(CallbackMixin):
         )
 
         self.network.add_message(message)
+        _message_logger.info("ch%d %s (%s): %s", message.channel, sender_name, sender_id, text)
         self._trigger_callbacks("on_message", message)
 
         # Check for emergency keywords
@@ -1212,6 +1301,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             "messages_per_minute": round(msg_rate, 2),
             "last_message_ago_seconds": int(last_msg_ago) if last_msg_ago else None,
             "reconnect_count": reconnect_count,
+            "messages_dropped": stats_copy.get("messages_rejected", 0),
             "stats": stats_copy,
         }
 
