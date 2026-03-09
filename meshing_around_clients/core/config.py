@@ -94,6 +94,7 @@ class TuiConfig:
     show_timestamps: bool = True
     message_history: int = 500
     alert_sound: bool = True
+    space_weather: bool = True
 
 
 @dataclass
@@ -340,6 +341,7 @@ class Config:
                     10, min(self._parser.getint("tui", "message_history", fallback=500), 10000)
                 )
                 self.tui.alert_sound = self._parser.getboolean("tui", "alert_sound", fallback=True)
+                self.tui.space_weather = self._parser.getboolean("tui", "space_weather", fallback=True)
 
             # MQTT
             if self._parser.has_section("mqtt"):
@@ -523,6 +525,7 @@ class Config:
             self._parser.set("tui", "show_timestamps", str(self.tui.show_timestamps))
             self._parser.set("tui", "message_history", str(self.tui.message_history))
             self._parser.set("tui", "alert_sound", str(self.tui.alert_sound))
+            self._parser.set("tui", "space_weather", str(self.tui.space_weather))
 
             # MQTT
             if not self._parser.has_section("mqtt"):
@@ -623,6 +626,7 @@ class Config:
                 "show_timestamps": self.tui.show_timestamps,
                 "message_history": self.tui.message_history,
                 "alert_sound": self.tui.alert_sound,
+                "space_weather": self.tui.space_weather,
             },
             "mqtt": {
                 "enabled": self.mqtt.enabled,

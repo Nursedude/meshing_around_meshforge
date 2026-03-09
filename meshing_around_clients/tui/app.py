@@ -9,12 +9,16 @@ Based on MeshForge foundation principles:
 - Graceful fallbacks for missing dependencies
 """
 
+import json
 import logging
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
+from urllib.error import URLError
+from urllib.request import urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -1086,6 +1090,12 @@ class MeshingAroundTUI:
         self._interactive = False  # True when run_interactive() has input handling
         self._dirty = True  # Render flag — set on data changes or user input
         self._last_refresh = datetime.now()
+        self._unread_messages = 0  # Incoming messages while not on messages screen
+
+        # Space weather (RF propagation) — cached, fetched in background
+        self._space_weather: Optional[Dict[str, Any]] = None
+        self._space_weather_lock = threading.Lock()
+        self._space_weather_fetching = False
 
         # Register API callbacks to mark display dirty on data changes
         self._register_dirty_callbacks()
@@ -1098,6 +1108,103 @@ class MeshingAroundTUI:
         """Register API callbacks that trigger display refresh on data changes."""
         for event in ("on_message", "on_node_update", "on_alert", "on_connect", "on_disconnect", "on_telemetry"):
             self.api.register_callback(event, self._mark_dirty)
+        # Track unread incoming messages when not viewing messages screen
+        self.api.register_callback("on_message", self._on_message_received)
+
+    def _on_message_received(self, *args, **kwargs) -> None:
+        """Increment unread counter for incoming messages when not on messages screen."""
+        if self.current_screen != "messages":
+            self._unread_messages += 1
+
+    # ------------------------------------------------------------------
+    # Space weather (RF propagation) — NOAA SWPC public API
+    # ------------------------------------------------------------------
+
+    def _start_space_weather_fetch(self) -> None:
+        """Launch a background thread to fetch space weather data.
+
+        Called once at startup and then every 5 minutes by the render loop.
+        Uses daemon thread so it won't block app exit.
+        """
+        if not self.config.tui.space_weather:
+            return
+        if self._space_weather_fetching:
+            return
+        self._space_weather_fetching = True
+        t = threading.Thread(target=self._fetch_space_weather, daemon=True)
+        t.start()
+
+    def _fetch_space_weather(self) -> None:
+        """Fetch SFI and K-index from NOAA SWPC (runs in background thread)."""
+        result: Dict[str, Any] = {}
+        try:
+            # Solar Flux Index (F10.7 cm)
+            try:
+                resp = urlopen(
+                    "https://services.swpc.noaa.gov/json/f107_cm_flux.json",
+                    timeout=5,
+                )
+                data = json.loads(resp.read().decode())
+                if data:
+                    # Most recent entry is last in the list
+                    latest = data[-1]
+                    flux = latest.get("flux")
+                    if flux is not None:
+                        result["sfi"] = int(float(flux))
+            except (URLError, ValueError, KeyError, IndexError, OSError):
+                pass
+
+            # Planetary K-index
+            try:
+                resp = urlopen(
+                    "https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json",
+                    timeout=5,
+                )
+                data = json.loads(resp.read().decode())
+                if data and len(data) > 1:
+                    # First row is header, most recent observed is second row
+                    latest = data[1]
+                    k_val = latest[1] if len(latest) > 1 else None
+                    if k_val is not None:
+                        result["k_index"] = int(float(k_val))
+            except (URLError, ValueError, KeyError, IndexError, OSError):
+                pass
+
+            if result:
+                result["fetched_at"] = time.monotonic()
+                with self._space_weather_lock:
+                    self._space_weather = result
+        except Exception as e:
+            logger.debug("Space weather fetch error: %s", e)
+        finally:
+            self._space_weather_fetching = False
+
+    def _append_space_weather(self, title) -> None:
+        """Append compact space weather info to header Text object."""
+        with self._space_weather_lock:
+            sw = self._space_weather
+        if not sw:
+            return
+
+        # Re-fetch if stale (>5 minutes)
+        fetched = sw.get("fetched_at", 0)
+        if time.monotonic() - fetched > 300:
+            self._start_space_weather_fetch()
+
+        sfi = sw.get("sfi")
+        if sfi is not None:
+            title.append(f"  SFI:{sfi}", style="dim")
+
+        k = sw.get("k_index")
+        if k is not None:
+            # Color-code: 0-3 quiet (green), 4 unsettled (yellow), 5+ storm (red)
+            if k <= 3:
+                style = "green"
+            elif k == 4:
+                style = "yellow"
+            else:
+                style = "red bold"
+            title.append(f" K:{k}", style=style)
 
     def _get_header(self) -> Panel:
         """Create the application header with connection health."""
@@ -1123,10 +1230,22 @@ class MeshingAroundTUI:
         style, label = status_display.get(status, ("dim", status.upper()))
         title.append(f" [{label}]", style=style)
 
+        # Node count — quick-glance metric visible on every screen
+        try:
+            node_count = len(self.api.network.get_nodes_snapshot())
+            if node_count > 0:
+                title.append(f"  {node_count} nodes", style="dim")
+        except Exception:
+            pass
+
         # Show message rate if available (MQTT provides this)
         msg_rate = health.get("messages_per_minute")
         if msg_rate is not None and health.get("connected"):
             title.append(f"  {msg_rate:.1f} msg/min", style="dim")
+
+        # Unread message counter
+        if self._unread_messages > 0:
+            title.append(f"  {self._unread_messages} new", style="green bold")
 
         # Show queue metrics when relevant (>50% full or drops occurred)
         q_size = health.get("queue_size")
@@ -1136,6 +1255,9 @@ class MeshingAroundTUI:
             title.append(f"  Q:{q_size}/{q_max}", style="yellow")
         if dropped:
             title.append(f"  ({dropped} dropped)", style="red")
+
+        # Space weather / RF propagation (SFI + K-index from NOAA)
+        self._append_space_weather(title)
 
         return Panel(Align.center(title), box=box.DOUBLE, border_style="cyan", padding=(0, 2))
 
@@ -1280,6 +1402,7 @@ class MeshingAroundTUI:
             self.api.connect()
 
         self._running = True
+        self._start_space_weather_fetch()
 
         try:
             with Live(self._render(), console=self.console, refresh_per_second=2, screen=True) as live:
@@ -1343,6 +1466,7 @@ class MeshingAroundTUI:
 
         self._running = True
         self._interactive = True
+        self._start_space_weather_fetch()
 
         # Save terminal settings (guard: tcgetattr can raise OSError)
         old_settings = None
@@ -1405,6 +1529,7 @@ class MeshingAroundTUI:
             self.current_screen = "nodes"
         elif key == "3":
             self.current_screen = "messages"
+            self._unread_messages = 0
         elif key == "4":
             self.current_screen = "alerts"
         elif key == "5":
