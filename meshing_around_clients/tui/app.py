@@ -1385,6 +1385,7 @@ class MeshingAroundTUI:
             self.config.mqtt.password = "large4cats"
             try:
                 from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
                 self.api = MQTTMeshtasticClient(self.config)
                 self._register_dirty_callbacks()
                 return self.connect()
@@ -1401,6 +1402,7 @@ class MeshingAroundTUI:
             self.config.mqtt.port = port
             try:
                 from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
                 self.api = MQTTMeshtasticClient(self.config)
                 self._register_dirty_callbacks()
                 return self.connect()
