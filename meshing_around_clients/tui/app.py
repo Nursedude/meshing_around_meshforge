@@ -1102,7 +1102,10 @@ class DevicesScreen(Screen):
 
             layout.add_row(nodes_table)
 
-        footer = "[dim]a[/dim]=Add  [dim]d[/dim]=Remove  [dim]e[/dim]=Enable/Disable  [dim]t[/dim]=Test  [dim]r[/dim]=Set bot radio  [dim]j/k[/dim]=Navigate"
+        footer = (
+            "[dim]a[/dim]=Add  [dim]d[/dim]=Remove  [dim]e[/dim]=Enable/Disable  "
+            "[dim]t[/dim]=Test  [dim]r[/dim]=Set bot radio  [dim]j/k[/dim]=Navigate"
+        )
         return Panel(
             layout,
             title="[bold cyan]Devices[/bold cyan]",
@@ -1744,6 +1747,18 @@ class MeshingAroundTUI:
             self.console.clear()
             self.console.print("[cyan]Goodbye![/cyan]")
 
+    # Screen navigation keys — maps key to screen name
+    _SCREEN_KEYS = {
+        "1": "dashboard",
+        "2": "nodes",
+        "3": "messages",
+        "4": "alerts",
+        "5": "topology",
+        "6": "devices",
+        "?": "help",
+        "h": "help",
+    }
+
     def _handle_key(self, key: str) -> None:
         """Handle keyboard input."""
         # Screen-specific handling first
@@ -1751,33 +1766,18 @@ class MeshingAroundTUI:
         if screen and screen.handle_input(key):
             return
 
-        # Global shortcuts
-        if key == "q":
+        # Screen navigation via lookup
+        if key in self._SCREEN_KEYS:
+            self.current_screen = self._SCREEN_KEYS[key]
+            if key == "3":
+                self._unread_messages = 0
+        elif key == "q":
             if self.current_screen != "dashboard":
                 self.current_screen = "dashboard"
             else:
                 self._running = False
-        elif key == "1":
-            self.current_screen = "dashboard"
-        elif key == "2":
-            self.current_screen = "nodes"
-        elif key == "3":
-            self.current_screen = "messages"
-            self._unread_messages = 0
-        elif key == "4":
-            self.current_screen = "alerts"
-        elif key == "5":
-            self.current_screen = "topology"
-        elif key == "6":
-            self.current_screen = "devices"
         elif key == "s":
             self._send_message_prompt()
-        elif key == "?" or key == "h":
-            self.current_screen = "help"
-        elif key == "r":
-            # Refresh — the render loop re-draws within 0.5s automatically.
-            # Returning here (no-op) lets the loop iterate immediately.
-            pass
         elif key == "c":
             if self.api.is_connected:
                 self.disconnect()
