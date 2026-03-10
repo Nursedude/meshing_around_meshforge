@@ -228,24 +228,32 @@ def setup_logging(config: ConfigParser) -> None:
 
 def print_banner():
     """Print startup banner."""
-    banner = f"""
-{Colors.CYAN}╔══════════════════════════════════════════════════════════════╗
-║  {Colors.BOLD}MESHING-AROUND CLIENT{Colors.RESET}{Colors.CYAN}                                       ║
-║  Standalone Mesh Network Monitor                               ║
-║  Version {VERSION}                                                 ║
-╚══════════════════════════════════════════════════════════════╝{Colors.RESET}
-"""
+    # Box is 64 chars wide: ║ + 2-space indent + 60-char content area + ║
+    title = "MESHING-AROUND CLIENT"
+    subtitle = "Standalone Mesh Network Monitor"
+    ver = f"Version {VERSION}"
+    banner = (
+        f"\n{Colors.CYAN}"
+        f"╔══════════════════════════════════════════════════════════════╗\n"
+        f"║  {Colors.BOLD}{title:<60}{Colors.RESET}{Colors.CYAN}║\n"
+        f"║  {subtitle:<60}║\n"
+        f"║  {ver:<60}║\n"
+        f"╚══════════════════════════════════════════════════════════════╝"
+        f"{Colors.RESET}\n"
+    )
     try:
         print(banner)
     except UnicodeEncodeError:
         # Fallback for terminals that don't support Unicode (e.g. latin-1 locale)
-        ascii_banner = f"""
-{Colors.CYAN}+--------------------------------------------------------------+
-|  {Colors.BOLD}MESHING-AROUND CLIENT{Colors.RESET}{Colors.CYAN}                                       |
-|  Standalone Mesh Network Monitor                               |
-|  Version {VERSION}                                                 |
-+--------------------------------------------------------------+{Colors.RESET}
-"""
+        ascii_banner = (
+            f"\n{Colors.CYAN}"
+            f"+--------------------------------------------------------------+\n"
+            f"|  {Colors.BOLD}{title:<60}{Colors.RESET}{Colors.CYAN}|\n"
+            f"|  {subtitle:<60}|\n"
+            f"|  {ver:<60}|\n"
+            f"+--------------------------------------------------------------+"
+            f"{Colors.RESET}\n"
+        )
         print(ascii_banner)
 
 

@@ -1700,6 +1700,16 @@ class MeshingAroundTUI:
         self._interactive = True
         self._start_space_weather_fetch()
 
+        # Guard: TUI requires a real terminal (fails under systemd/pipes)
+        if not sys.stdin.isatty():
+            self.console.print(
+                "[red]Error: No terminal detected (running under systemd?).[/red]\n"
+                "[yellow]Use --web mode for headless/service deployments.[/yellow]"
+            )
+            self._running = False
+            self.disconnect()
+            return
+
         # Save terminal settings (guard: tcgetattr can raise OSError)
         old_settings = None
         try:
