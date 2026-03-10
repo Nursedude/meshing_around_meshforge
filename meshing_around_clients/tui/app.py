@@ -1055,7 +1055,14 @@ class DevicesScreen(Screen):
             style = "bold cyan" if i == self._selected_index else ""
             marker = "\u25b6 " if i == self._selected_index else "  "
             iface_table.add_row(
-                f"{marker}{i + 1}", iface.type.upper(), target, hw, label, status, active, style=style,
+                f"{marker}{i + 1}",
+                iface.type.upper(),
+                target,
+                hw,
+                label,
+                status,
+                active,
+                style=style,
             )
 
         if not interfaces:
@@ -1911,6 +1918,7 @@ class MeshingAroundTUI:
         try:
             if iface.type == "tcp" and iface.hostname:
                 import socket
+
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5)
                 try:
@@ -1929,6 +1937,7 @@ class MeshingAroundTUI:
                     self.console.print(f"[red]Serial port {port} not found[/red]")
             elif iface.type == "mqtt":
                 import socket
+
                 broker = self.config.mqtt.broker if hasattr(self.config, "mqtt") else "mqtt.meshtastic.org"
                 port = self.config.mqtt.port if hasattr(self.config, "mqtt") else 1883
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1990,6 +1999,7 @@ class MeshingAroundTUI:
         if interfaces[0].type == "mqtt":
             try:
                 from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
                 self.api = MQTTMeshtasticClient(self.config)
             except ImportError:
                 self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")

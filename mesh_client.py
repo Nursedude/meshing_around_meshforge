@@ -923,8 +923,15 @@ def interactive_setup():
     hw_choice = input("\nSelect your radio [9]: ").strip() or "9"
 
     hw_map = {
-        "1": "TBEAM", "2": "TLORA", "3": "TECHO", "4": "TDECK",
-        "5": "HELTEC", "6": "RAK4631", "7": "STATION_G2", "8": "", "9": "",
+        "1": "TBEAM",
+        "2": "TLORA",
+        "3": "TECHO",
+        "4": "TDECK",
+        "5": "HELTEC",
+        "6": "RAK4631",
+        "7": "STATION_G2",
+        "8": "",
+        "9": "",
     }
     hw_model = hw_map.get(hw_choice, "")
     if hw_model:
