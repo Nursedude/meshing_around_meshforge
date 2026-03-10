@@ -351,6 +351,12 @@ def install_dependencies(deps: List[str], use_venv: bool = True) -> bool:
     ret, stdout, stderr = run_cmd(pip_cmd)
 
     if ret != 0:
+        if any("cryptography" in d for d in deps):
+            log(
+                "Cryptography build failed. Install build deps: "
+                "sudo apt-get install -y libssl-dev build-essential pkg-config python3-dev",
+                "WARN",
+            )
         log(f"Failed to install dependencies: {stderr}", "ERROR")
         return False
 
