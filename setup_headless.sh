@@ -149,12 +149,14 @@ install_python_deps() {
 
     # Meshtastic (optional)
     if [ "$INSTALL_MESHTASTIC" = true ]; then
+        log_info "Installing meshtastic (this may take a few minutes)..."
         pip install meshtastic pypubsub -q
         log_ok "Installed: meshtastic (Radio support)"
     fi
 
     # Cryptography / SSL (pin to resolve pyopenssl conflict)
-    pip install 'pyopenssl>=25.3.0' 'cryptography>=45.0.7,<47' -q
+    log_info "Installing cryptography (may take 10+ minutes on ARM if building from source)..."
+    pip install 'pyopenssl>=25.3.0' 'cryptography>=45.0.7,<47'
     log_ok "Installed: cryptography (SSL/encryption)"
 }
 
