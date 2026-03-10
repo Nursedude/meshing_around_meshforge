@@ -363,6 +363,39 @@ def update_upstream(
     return git_pull(meshing_around_path)
 
 
+def _refresh_venv_deps(
+    meshforge_path: Path,
+    result: UpdateResult,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Reinstall requirements.txt into the venv after a pull.
+
+    Uses the venv's own pip to avoid PEP 668 issues.  Non-fatal: a pip
+    failure is logged but does not mark the overall update as failed.
+    """
+
+    def report(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+
+    venv_pip = meshforge_path / ".venv" / "bin" / "pip"
+    req_file = meshforge_path / "meshing_around_clients" / "requirements.txt"
+
+    if not venv_pip.exists() or not req_file.exists():
+        return
+
+    report("Refreshing venv dependencies...")
+    ret, _, stderr = run_command(
+        [str(venv_pip), "install", "--quiet", "--retries", "3", "--timeout", "120", "-r", str(req_file)],
+        timeout=300,
+    )
+    if ret == 0:
+        result.changes.append("Refreshed venv dependencies from requirements.txt")
+    else:
+        result.errors.append(f"pip install failed: {stderr[:200]}")
+        report(f"Warning: failed to refresh venv deps: {stderr[:100]}")
+
+
 def update_meshforge(
     meshforge_path: Optional[Path] = None, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
@@ -394,6 +427,10 @@ def update_meshforge(
             if migrated:
                 result.changes.extend(migrated)
                 result.requires_restart = True
+
+    # Refresh venv dependencies from requirements.txt
+    if result.success:
+        _refresh_venv_deps(meshforge_path, result, progress_callback)
 
     return result
 
