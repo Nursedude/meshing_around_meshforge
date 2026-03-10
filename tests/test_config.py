@@ -71,7 +71,7 @@ class TestWebConfig(unittest.TestCase):
     def test_default_values(self):
         cfg = WebConfig()
         self.assertEqual(cfg.host, "127.0.0.1")
-        self.assertEqual(cfg.port, 8080)
+        self.assertEqual(cfg.port, 9090)
         self.assertFalse(cfg.debug)
         self.assertFalse(cfg.enable_auth)
 
@@ -179,7 +179,7 @@ class TestConfig(unittest.TestCase):
             # Check defaults for missing sections
             self.assertEqual(cfg.interface.type, "serial")
             self.assertTrue(cfg.alerts.enabled)
-            self.assertEqual(cfg.web.port, 8080)
+            self.assertEqual(cfg.web.port, 9090)
 
     def test_emergency_keywords_parsing(self):
         """Test parsing of emergency keywords from config."""
@@ -444,7 +444,7 @@ class TestEnvVarOverrides(unittest.TestCase):
         """Config should use defaults when no env vars are set."""
         cfg = Config(config_path="/nonexistent/path.ini")
         self.assertEqual(cfg.mqtt.broker, "mqtt.meshtastic.org")
-        self.assertEqual(cfg.web.port, 8080)
+        self.assertEqual(cfg.web.port, 9090)
 
     def test_invalid_env_var_value_ignored(self):
         """Invalid env var values (e.g., non-numeric port) should be ignored."""
@@ -452,7 +452,7 @@ class TestEnvVarOverrides(unittest.TestCase):
         cfg = Config(config_path="/nonexistent/path.ini")
         cfg._apply_env_overrides()
         # Should remain at default
-        self.assertEqual(cfg.web.port, 8080)
+        self.assertEqual(cfg.web.port, 9090)
 
     def test_cors_origins_via_env(self):
         """MESHFORGE_WEB_CORS_ORIGINS should override cors_origins."""

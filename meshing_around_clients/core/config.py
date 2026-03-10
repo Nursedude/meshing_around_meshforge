@@ -79,7 +79,7 @@ class WebConfig:
     """Web client configuration."""
 
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 9090
     debug: bool = False
     api_key: str = ""
     enable_auth: bool = False
@@ -328,7 +328,7 @@ class Config:
             # Web
             if self._parser.has_section("web"):
                 self.web.host = self._parser.get("web", "host", fallback="127.0.0.1")
-                raw_port = self._parser.getint("web", "port", fallback=8080)
+                raw_port = self._parser.getint("web", "port", fallback=9090)
                 self.web.port = max(1, min(raw_port, 65535))
                 self.web.debug = self._parser.getboolean("web", "debug", fallback=False)
                 self.web.api_key = self._parser.get("web", "api_key", fallback="")
