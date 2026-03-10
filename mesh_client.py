@@ -1236,6 +1236,43 @@ def update_menu(config: ConfigParser) -> None:
 # =============================================================================
 
 
+def standalone_install(config: ConfigParser) -> None:
+    """Full standalone install: all deps, config, log dirs."""
+    use_venv = config.getboolean("advanced", "use_venv", fallback=True)
+
+    print(f"\n{Colors.CYAN}{Colors.BOLD}Standalone Install{Colors.RESET}\n")
+
+    # 1. Install ALL dependencies
+    all_deps: list = list(CORE_DEPS)
+    for dep_list in OPTIONAL_DEPS.values():
+        all_deps.extend(dep_list)
+    all_deps = list(set(all_deps))
+    missing = [d for d in all_deps if not check_dependency(d)]
+    if missing:
+        log(f"Installing {len(missing)} packages: {', '.join(missing)}", "INFO")
+        if not install_dependencies(missing, use_venv):
+            log("Dependency installation failed", "ERROR")
+            return
+        log("All dependencies installed", "OK")
+    else:
+        log("All dependencies already installed", "OK")
+
+    # 2. Generate config if missing
+    if not CONFIG_FILE.exists():
+        config.read_string(DEFAULT_CONFIG)
+        save_config(config)
+        log(f"Created config: {CONFIG_FILE}", "OK")
+    else:
+        log(f"Config exists: {CONFIG_FILE}", "OK")
+
+    # 3. Create logs directory
+    log_dir = SCRIPT_DIR / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log(f"Log directory: {log_dir}", "OK")
+
+    log("Standalone install complete — ready to run", "OK")
+
+
 def launcher_menu(config: ConfigParser) -> bool:
     """Interactive launcher menu - shown when no mode flag is passed.
 
@@ -1251,6 +1288,7 @@ def launcher_menu(config: ConfigParser) -> bool:
         print("  6. Setup Wizard")
         print(f"  7. Edit Configuration  {Colors.DIM}(nano){Colors.RESET}")
         print("  8. Update / Reinstall")
+        print(f"  9. Install Everything  {Colors.DIM}(standalone setup){Colors.RESET}")
         print("  0. Exit")
 
         try:
@@ -1286,6 +1324,9 @@ def launcher_menu(config: ConfigParser) -> bool:
             continue
         elif choice == "8":
             update_menu(config)
+            continue
+        elif choice == "9":
+            standalone_install(config)
             continue
         else:
             log(f"Invalid choice: {choice}", "WARN")
@@ -1564,8 +1605,7 @@ Examples:
                     log("Failed to install dependencies", "ERROR")
                     sys.exit(1)
             else:
-                log("Run with --install-deps to install", "INFO")
-                sys.exit(1)
+                log("Skipping — select 'Install Everything' from the launcher", "INFO")
         else:
             log(f"Missing dependencies: {', '.join(missing)}", "ERROR")
             log("Run with --install-deps to install", "INFO")
