@@ -10,6 +10,7 @@ import hashlib
 import struct
 import sys
 import unittest
+import unittest.mock
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
@@ -285,6 +286,108 @@ class TestMeshPacketProcessor(unittest.TestCase):
         processor = MeshPacketProcessor()
         result = processor.process_encrypted_packet(b"\x00" * 10, packet_id=1, sender=1)
         self.assertIsInstance(result, DecryptedPacket)
+
+
+class TestMeshCryptoWithoutCrypto(unittest.TestCase):
+    """Test MeshCrypto behavior when crypto library is not available."""
+
+    def test_decrypt_returns_empty_without_crypto(self):
+        """When CRYPTO_AVAILABLE is False, decrypt returns empty bytes."""
+        crypto = MeshCrypto()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.CRYPTO_AVAILABLE", False):
+            result = crypto.decrypt(b"encrypted data", 1, 1)
+            self.assertEqual(result, b"")
+
+    def test_encrypt_returns_empty_without_crypto(self):
+        """When CRYPTO_AVAILABLE is False, encrypt returns empty bytes."""
+        crypto = MeshCrypto()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.CRYPTO_AVAILABLE", False):
+            result = crypto.encrypt(b"plaintext", 1, 1)
+            self.assertEqual(result, b"")
+
+
+class TestProtobufDecoderWithoutProtobuf(unittest.TestCase):
+    """Test ProtobufDecoder behavior when protobuf is not available."""
+
+    def test_decode_mesh_packet_returns_none_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder.decode_mesh_packet(b"\x00\x01\x02")
+            self.assertIsNone(result)
+
+    def test_decode_position_returns_empty_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder._decode_position(b"\x00")
+            self.assertEqual(result, {})
+
+    def test_decode_nodeinfo_returns_empty_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder._decode_nodeinfo(b"\x00")
+            self.assertEqual(result, {})
+
+    def test_decode_telemetry_returns_empty_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder._decode_telemetry(b"\x00")
+            self.assertEqual(result, {})
+
+    def test_decode_traceroute_returns_empty_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder._decode_traceroute(b"\x00")
+            self.assertEqual(result, {})
+
+    def test_decode_neighborinfo_returns_empty_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder._decode_neighborinfo(b"\x00")
+            self.assertEqual(result, {})
+
+    def test_decode_routing_returns_empty_without_protobuf(self):
+        decoder = ProtobufDecoder()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = decoder._decode_routing(b"\x00")
+            self.assertEqual(result, {})
+
+
+class TestMeshPacketProcessorExtended(unittest.TestCase):
+    """Test MeshPacketProcessor additional paths."""
+
+    def test_process_encrypted_packet_without_crypto(self):
+        processor = MeshPacketProcessor()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.CRYPTO_AVAILABLE", False):
+            result = processor.process_encrypted_packet(b"\x00" * 10, packet_id=1, sender=1)
+            self.assertFalse(result.success)
+            self.assertIn("not available", result.error)
+
+    def test_process_encrypted_packet_no_key(self):
+        processor = MeshPacketProcessor()
+        processor.crypto.set_key("none")
+        if CRYPTO_AVAILABLE:
+            result = processor.process_encrypted_packet(b"\x00" * 10, packet_id=1, sender=1)
+            self.assertIsInstance(result, DecryptedPacket)
+
+    def test_set_channel_key_none(self):
+        processor = MeshPacketProcessor()
+        self.assertTrue(processor.set_channel_key("none"))
+
+    def test_parse_service_envelope_without_protobuf(self):
+        processor = MeshPacketProcessor()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = processor._parse_service_envelope(b"\x00" * 10)
+            self.assertIsNone(result)
+
+    def test_try_decode_data_without_protobuf(self):
+        processor = MeshPacketProcessor()
+        with unittest.mock.patch("meshing_around_clients.core.mesh_crypto.PROTOBUF_AVAILABLE", False):
+            result = processor._try_decode_data(b"\x00" * 10)
+            self.assertIsNone(result)
+
+    def test_init_with_key(self):
+        processor = MeshPacketProcessor("AQ==")
+        self.assertEqual(processor.crypto._key, DEFAULT_CHANNEL_KEY)
 
 
 if __name__ == "__main__":

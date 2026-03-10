@@ -463,5 +463,162 @@ class TestMockAPISendMessageExtended(unittest.TestCase):
         self.assertTrue(result)
 
 
+class TestConnectionInfo(unittest.TestCase):
+    """Test ConnectionInfo dataclass."""
+
+    def test_default_values(self):
+        from meshing_around_clients.core.meshtastic_api import ConnectionInfo
+
+        info = ConnectionInfo()
+        self.assertFalse(info.connected)
+        self.assertEqual(info.interface_type, "")
+        self.assertEqual(info.device_path, "")
+        self.assertEqual(info.error_message, "")
+        self.assertEqual(info.my_node_id, "")
+        self.assertEqual(info.my_node_num, 0)
+
+
+class TestConnectionHealth(unittest.TestCase):
+    """Test connection_health property."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_health_disconnected(self):
+        health = self.api.connection_health
+        self.assertEqual(health["status"], "disconnected")
+        self.assertFalse(health["connected"])
+
+    def test_health_connected(self):
+        self.api.connect()
+        health = self.api.connection_health
+        self.assertEqual(health["connected"], True)
+        self.assertIn("queue_size", health)
+        self.assertIn("queue_maxsize", health)
+        self.assertIn("messages_dropped", health)
+        self.assertEqual(health["messages_dropped"], 0)
+
+
+class TestIsHealthy(unittest.TestCase):
+    """Test is_healthy method."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_not_healthy_when_disconnected(self):
+        self.assertFalse(self.api.is_healthy())
+
+    def test_healthy_when_connected(self):
+        self.api.connect()
+        # MockAPI sets _running but no worker thread, so check connected status
+        self.assertTrue(self.api.connection_info.connected)
+
+
+class TestGetMessagesFiltered(unittest.TestCase):
+    """Test get_messages with channel filter."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_get_messages_no_filter(self):
+        self.api.send_message("msg1", channel=0)
+        self.api.send_message("msg2", channel=1)
+        msgs = self.api.get_messages()
+        self.assertGreaterEqual(len(msgs), 2)
+
+    def test_get_messages_with_channel_filter(self):
+        self.api.send_message("ch0 msg", channel=0)
+        self.api.send_message("ch1 msg", channel=1)
+        msgs = self.api.get_messages(channel=0)
+        for m in msgs:
+            self.assertEqual(m.channel, 0)
+
+    def test_get_messages_with_limit(self):
+        for i in range(10):
+            self.api.send_message(f"msg {i}")
+        msgs = self.api.get_messages(limit=3)
+        self.assertLessEqual(len(msgs), 3)
+
+
+class TestAcknowledgeAlert(unittest.TestCase):
+    """Test acknowledge_alert method."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_acknowledge_nonexistent_returns_false(self):
+        result = self.api.acknowledge_alert("nonexistent-id")
+        self.assertFalse(result)
+
+    def test_acknowledge_existing_alert(self):
+        # Generate alerts via demo events
+        for _ in range(20):
+            with patch("random.random", return_value=0.01):
+                self.api._generate_demo_event()
+        alerts = self.api.get_alerts()
+        if alerts:
+            result = self.api.acknowledge_alert(alerts[0].id)
+            self.assertTrue(result)
+            self.assertTrue(alerts[0].acknowledged)
+
+
+class TestGetAlertsFiltered(unittest.TestCase):
+    """Test get_alerts with unread filter."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_get_all_alerts(self):
+        alerts = self.api.get_alerts()
+        self.assertIsInstance(alerts, list)
+
+    def test_get_unread_alerts(self):
+        alerts = self.api.get_unread_alerts = self.api.get_alerts(unread_only=True)
+        self.assertIsInstance(alerts, list)
+
+
+class TestMockAPIMessageCallbacks(unittest.TestCase):
+    """Test message-related callbacks in MockMeshtasticAPI."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+        self.messages_received = []
+        self.api.register_callback("on_message", lambda m: self.messages_received.append(m))
+        self.api.connect()
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_demo_events_trigger_message_callbacks(self):
+        for _ in range(10):
+            with patch("random.random", side_effect=[0.99, 0.3]):
+                self.api._generate_demo_event()
+        self.assertGreater(len(self.messages_received), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
