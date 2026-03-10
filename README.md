@@ -250,12 +250,15 @@ MeshForge Launcher
   6. Setup Wizard
   7. Edit Configuration  (nano)
   8. Update / Reinstall
+  9. Install Everything  (standalone setup)
   0. Exit
 
 Select [1]:
 ```
 
 This is the recommended way to start MeshForge — select your mode interactively without needing to remember CLI flags.
+
+Option **9** performs a full standalone install: installs all Python dependencies, generates a default config file, and creates log directories. After install, choose your connection mode (MQTT, Serial, TCP, etc.) at runtime via the TUI.
 
 ### Common Run Modes
 
