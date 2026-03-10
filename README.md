@@ -370,7 +370,7 @@ downlink_enabled = true        # Send messages to mesh
 ```ini
 [features]
 mode = tui                     # tui, web, or both
-web_port = 8080                # Web UI port
+web_port = 9090                # Web UI port
 
 [general]
 bot_name = MeshBot             # Display name
@@ -491,7 +491,7 @@ Options:
   --tui                Force TUI mode
   --web                Force Web mode
   --host ADDR          Web server bind address (e.g. 0.0.0.0 for network access)
-  --port PORT          Web server port (default: 8080)
+  --port PORT          Web server port (default: 9090)
   --demo               Demo mode (no hardware)
   --no-venv            Don't use virtual environment
   --import-config PATH Import config from upstream meshing-around config.ini
@@ -522,7 +522,7 @@ Options:
 Real-time updates via WebSocket at `ws://host:port/ws`:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
+const ws = new WebSocket('ws://localhost:9090/ws');
 
 ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
