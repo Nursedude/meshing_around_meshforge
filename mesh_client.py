@@ -217,7 +217,18 @@ def print_banner():
 ║  Version {VERSION}                                                 ║
 ╚══════════════════════════════════════════════════════════════╝{Colors.RESET}
 """
-    print(banner)
+    try:
+        print(banner)
+    except UnicodeEncodeError:
+        # Fallback for terminals that don't support Unicode (e.g. latin-1 locale)
+        ascii_banner = f"""
+{Colors.CYAN}+--------------------------------------------------------------+
+|  {Colors.BOLD}MESHING-AROUND CLIENT{Colors.RESET}{Colors.CYAN}                                       |
+|  Standalone Mesh Network Monitor                               |
+|  Version {VERSION}                                                 |
++--------------------------------------------------------------+{Colors.RESET}
+"""
+        print(ascii_banner)
 
 
 def run_cmd(cmd: List[str], capture: bool = True, timeout: int = 300) -> Tuple[int, str, str]:
