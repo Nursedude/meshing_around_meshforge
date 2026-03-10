@@ -1097,12 +1097,22 @@ class MeshingAroundTUI:
         self._space_weather_lock = threading.Lock()
         self._space_weather_fetching = False
 
+        # Render debouncing — minimum interval between re-renders (seconds)
+        self._last_render_time: float = 0.0
+        self._min_render_interval: float = 0.25
+
         # Register API callbacks to mark display dirty on data changes
         self._register_dirty_callbacks()
 
     def _mark_dirty(self, *args, **kwargs) -> None:
-        """Callback to mark the display as needing a re-render."""
-        self._dirty = True
+        """Callback to mark the display as needing a re-render.
+
+        Debounces rapid callbacks (e.g. telemetry storms) by only setting
+        the dirty flag if enough time has passed since the last render.
+        """
+        now = time.monotonic()
+        if now - self._last_render_time >= self._min_render_interval:
+            self._dirty = True
 
     def _register_dirty_callbacks(self) -> None:
         """Register API callbacks that trigger display refresh on data changes."""
@@ -1475,15 +1485,17 @@ class MeshingAroundTUI:
         self._start_space_weather_fetch()
 
         try:
-            with Live(self._render(), console=self.console, refresh_per_second=2, screen=True) as live:
+            with Live(self._render(), console=self.console, refresh_per_second=1, screen=True) as live:
                 while self._running:
-                    try:
-                        # Update display — match Rich.Live refresh rate (2Hz = 0.5s)
-                        live.update(self._render())
-                    except (AttributeError, KeyError, TypeError, IndexError) as e:
-                        # Guard against transient data issues during updates
-                        logger.debug("Display-mode render error: %s", e)
-                    time.sleep(0.5)
+                    if self._dirty:
+                        self._dirty = False
+                        self._last_render_time = time.monotonic()
+                        try:
+                            live.update(self._render())
+                        except (AttributeError, KeyError, TypeError, IndexError) as e:
+                            # Guard against transient data issues during updates
+                            logger.debug("Display-mode render error: %s", e)
+                    time.sleep(1.0)
 
         except KeyboardInterrupt:
             pass
@@ -1542,29 +1554,30 @@ class MeshingAroundTUI:
 
             last_refresh = time.monotonic()
 
-            while self._running:
-                # Only re-render when data changed or user interacted (dirty flag)
-                if self._dirty:
-                    self._dirty = False
-                    last_refresh = time.monotonic()
-                    try:
-                        self.console.clear()
-                        self.console.print(self._render())
-                    except (AttributeError, KeyError, TypeError, IndexError) as e:
-                        # Transient data issue during render - show minimal output
-                        logger.debug("Interactive render error: %s", e)
-                        self.console.clear()
-                        self.console.print("[yellow]Updating...[/yellow]")
+            # Use Rich Live for flicker-free in-place updates instead of
+            # console.clear() + console.print() which causes visible blanking.
+            with Live(self._render(), console=self.console, auto_refresh=False, screen=True) as live:
+                while self._running:
+                    # Only re-render when data changed or user interacted (dirty flag)
+                    if self._dirty:
+                        self._dirty = False
+                        last_refresh = time.monotonic()
+                        self._last_render_time = last_refresh
+                        try:
+                            live.update(self._render())
+                            live.refresh()
+                        except (AttributeError, KeyError, TypeError, IndexError) as e:
+                            logger.debug("Interactive render error: %s", e)
 
-                # Check for input (0.5s timeout doubles as minimum refresh interval)
-                if select.select([sys.stdin], [], [], 0.5)[0]:
-                    key = sys.stdin.read(1)
-                    self._dirty = True  # Any input triggers re-render
-                    self._handle_key(key)
-                else:
-                    # Periodic refresh for health/status updates (not every tick)
-                    if time.monotonic() - last_refresh >= 5.0:
-                        self._dirty = True
+                    # Check for input (0.5s timeout doubles as minimum refresh interval)
+                    if select.select([sys.stdin], [], [], 0.5)[0]:
+                        key = sys.stdin.read(1)
+                        self._dirty = True  # Any input triggers re-render
+                        self._handle_key(key)
+                    else:
+                        # Periodic refresh for health/status updates (not every tick)
+                        if time.monotonic() - last_refresh >= 5.0:
+                            self._dirty = True
 
         except (KeyboardInterrupt, EOFError):
             pass  # Normal exit

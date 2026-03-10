@@ -481,6 +481,9 @@ password = large4cats
 # Topic configuration
 topic_root = msh/US
 channel = LongFast
+# Subscribe to multiple channels (comma-separated)
+# e.g. channels = LongFast,meshforge,2
+channels = LongFast
 
 # Your node ID for MQTT (leave empty to receive only)
 node_id =
@@ -923,6 +926,12 @@ def interactive_setup():
         topic = input("MQTT topic root [msh/US]: ").strip() or "msh/US"
         config.set("mqtt", "topic_root", topic)
 
+        channels = input("MQTT channels (comma-separated) [LongFast]: ").strip() or "LongFast"
+        config.set("mqtt", "channels", channels)
+        # Set active (send) channel to the first one
+        first_channel = channels.split(",")[0].strip()
+        config.set("mqtt", "channel", first_channel)
+
     # Interface mode
     print("\nInterface Mode:")
     print("  1. TUI (Terminal)")
@@ -945,6 +954,61 @@ def interactive_setup():
 
     print(f"\n{Colors.GREEN}Configuration saved to {CONFIG_FILE}{Colors.RESET}")
     print("Run 'python3 mesh_client.py' to start the client.")
+
+
+# =============================================================================
+# LAUNCHER MENU
+# =============================================================================
+
+
+def launcher_menu(config: ConfigParser) -> bool:
+    """Interactive launcher menu - shown when no mode flag is passed.
+
+    Returns True if the user selected a mode and the app ran, False to exit.
+    """
+    while True:
+        print(f"\n{Colors.CYAN}{Colors.BOLD}MeshForge Launcher{Colors.RESET}\n")
+        print("  1. TUI Client (Terminal UI)")
+        print("  2. Web Dashboard")
+        print("  3. MQTT Monitor")
+        print("  4. Both (TUI + Web)")
+        print("  5. Demo Mode")
+        print("  6. Setup Wizard")
+        print("  0. Exit")
+
+        try:
+            choice = input(f"\n{Colors.CYAN}Select mode [1]:{Colors.RESET} ").strip() or "1"
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return True
+
+        if choice == "0":
+            return True
+
+        if choice == "1":
+            config.set("features", "mode", "tui")
+        elif choice == "2":
+            config.set("features", "mode", "web")
+            config.set("features", "web_server", "true")
+        elif choice == "3":
+            # MQTT Monitor: TUI mode with MQTT connection
+            config.set("features", "mode", "tui")
+            config.set("mqtt", "enabled", "true")
+            config.set("interface", "type", "mqtt")
+        elif choice == "4":
+            config.set("features", "mode", "both")
+            config.set("features", "web_server", "true")
+        elif choice == "5":
+            config.set("advanced", "demo_mode", "true")
+            config.set("features", "mode", "tui")
+        elif choice == "6":
+            interactive_setup()
+            return True
+        else:
+            log(f"Invalid choice: {choice}", "WARN")
+            continue
+
+        return run_application(config)
 
 
 # =============================================================================
@@ -1211,6 +1275,8 @@ Examples:
         sys.exit(0)
 
     # Apply command line overrides
+    has_mode_flag = args.tui or args.web or args.demo
+
     if args.demo:
         config.set("advanced", "demo_mode", "true")
 
@@ -1229,13 +1295,22 @@ Examples:
     if not check_system():
         sys.exit(1)
 
-    # Run application
-    try:
-        success = run_application(config)
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        log("Interrupted by user", "INFO")
-        sys.exit(0)
+    # Show launcher menu if no mode flag was passed and we have a TTY
+    if not has_mode_flag and sys.stdin.isatty():
+        try:
+            success = launcher_menu(config)
+            sys.exit(0 if success else 1)
+        except KeyboardInterrupt:
+            log("Interrupted by user", "INFO")
+            sys.exit(0)
+    else:
+        # Direct launch with CLI-specified mode
+        try:
+            success = run_application(config)
+            sys.exit(0 if success else 1)
+        except KeyboardInterrupt:
+            log("Interrupted by user", "INFO")
+            sys.exit(0)
 
 
 if __name__ == "__main__":
