@@ -12,7 +12,7 @@ Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-aroun
 
 > **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
-> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (596 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
+> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (768 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
 
 > **NO RADIO REQUIRED** - MeshForge can connect to the Meshtastic mesh via MQTT broker without any radio hardware. Use Demo mode to explore the interface with simulated data, or MQTT mode to participate in live mesh channels using only a network connection.
 
@@ -52,6 +52,7 @@ graph LR
         CFG[Config System]
         MODELS[Data Models]
         ALERTS[Alert Detection]
+        LAUNCH[Launcher Menu]
     end
 
     subgraph "Partial"
@@ -73,6 +74,7 @@ graph LR
     style CFG fill:#27ae60,color:#fff
     style MODELS fill:#27ae60,color:#fff
     style ALERTS fill:#27ae60,color:#fff
+    style LAUNCH fill:#27ae60,color:#fff
     style WEB fill:#f39c12,color:#fff
     style MQTT fill:#f39c12,color:#fff
     style NOTIFY fill:#f39c12,color:#fff
@@ -85,11 +87,12 @@ graph LR
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **TUI Client** | Working | 6 screens, search, export, plain-text fallback |
+| **TUI Client** | Working | 7 screens, search, export, plain-text fallback |
 | **Demo Mode** | Working | Simulated data for testing |
 | **Config System** | Working | INI-based configuration |
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
 | **Alert Detection** | Working | Emergency keywords, proximity |
+| **Launcher Menu** | Working | Interactive mode selection, config editor, updater |
 | **Web Client** | Partial | API works, templates need testing |
 | **MQTT Mode** | Partial | Connects but limited testing |
 | **Notifications** | Partial | Email framework exists, untested |
@@ -104,7 +107,7 @@ graph LR
 ```mermaid
 graph TB
     subgraph "Entry Points"
-        MC[mesh_client.py<br/>Zero-dep Launcher]
+        MC[mesh_client.py<br/>Launcher Menu]
         CB[configure_bot.py<br/>Setup Wizard]
         SH[setup_headless.sh<br/>Pi Installer]
     end
@@ -232,12 +235,33 @@ python3 mesh_client.py --check
 python3 mesh_client.py --demo
 ```
 
+### Launcher Menu
+
+When you run `python3 mesh_client.py` with no flags, an interactive launcher menu is displayed:
+
+```
+MeshForge Launcher
+
+  1. TUI Client (Terminal UI)
+  2. Web Dashboard
+  3. MQTT Monitor
+  4. Both (TUI + Web)
+  5. Demo Mode
+  6. Setup Wizard
+  7. Edit Configuration  (nano)
+  8. Update / Reinstall
+  0. Exit
+
+Select [1]:
+```
+
+This is the recommended way to start MeshForge — select your mode interactively without needing to remember CLI flags.
+
 ### Common Run Modes
 
 ```bash
+python3 mesh_client.py             # Interactive launcher menu
 python3 mesh_client.py --demo      # Simulated data, no hardware
-python3 mesh_client.py --mqtt      # Join live mesh via MQTT broker
-python3 mesh_client.py --serial    # USB radio connection
 python3 mesh_client.py --setup     # Interactive setup wizard
 python3 mesh_client.py --tui       # Force TUI mode
 python3 mesh_client.py --web       # Force Web mode
@@ -290,10 +314,10 @@ You do **not** need a Meshtastic radio to use MeshForge. Two modes work without 
 - **Demo Mode** — Generates simulated nodes with realistic positions, telemetry, and messages. Use this to explore every screen and feature before connecting to a live mesh.
 
 ```bash
-# MQTT mode — join the live mesh without a radio
-python3 mesh_client.py --mqtt
+# Launch and select "3. MQTT Monitor" from the menu
+python3 mesh_client.py
 
-# Demo mode — explore the interface with simulated data
+# Or jump straight to demo mode
 python3 mesh_client.py --demo
 ```
 
@@ -328,7 +352,7 @@ use_tls = false                # Enable TLS encryption
 username = meshdev             # Broker credentials
 password = large4cats          # Public broker default
 topic_root = msh/US            # Region: US, EU_868, EU_433, AU_915, CN, JP, etc.
-channel = LongFast             # Channel name (must match device config)
+channel = LongFast             # Channel name(s) — comma-separated for multi-channel (e.g. LongFast,MediumSlow)
 encryption_key =               # Base64 256-bit PSK for private channels
 node_id = !meshforg            # Virtual node ID for MQTT-only operation
 qos = 1                        # MQTT QoS level (0, 1, 2)
@@ -405,7 +429,8 @@ graph LR
     N --> M[Messages<br/>Key: 3]
     M --> A[Alerts<br/>Key: 4]
     A --> T[Topology<br/>Key: 5]
-    T --> H[Help<br/>Key: ?]
+    T --> DV[Devices<br/>Key: 6]
+    DV --> H[Help<br/>Key: ?]
     H --> D
 
     style D fill:#4a9eff,color:#fff
@@ -413,14 +438,15 @@ graph LR
     style M fill:#9b59b6,color:#fff
     style A fill:#e74c3c,color:#fff
     style T fill:#e67e22,color:#fff
+    style DV fill:#2c3e50,color:#fff
     style H fill:#f39c12,color:#fff
 ```
 
-The TUI works with or without the Rich library. When Rich is installed you get the full 6-screen interface; without it, a plain-text fallback displays connection status and recent messages.
+The TUI works with or without the Rich library. When Rich is installed you get the full 7-screen interface; without it, a plain-text fallback displays connection status and recent messages.
 
 | Key | Action |
 |-----|--------|
-| `1-5` | Switch screens (Dashboard, Nodes, Messages, Alerts, Topology) |
+| `1-6` | Switch screens (Dashboard, Nodes, Messages, Alerts, Topology, Devices) |
 | `/` | Search (Nodes, Messages, Alerts) |
 | `s` | Send message |
 | `e` / `E` | Export messages (JSON / CSV) |
@@ -456,17 +482,21 @@ MeshForge includes 12 configurable alert types. Each can be independently enable
 python3 mesh_client.py [OPTIONS]
 
 Options:
-  --setup         Interactive configuration wizard
-  --check         Check dependencies only
-  --install-deps  Install dependencies and exit
-  --tui           Force TUI mode
-  --web           Force Web mode
-  --demo          Demo mode (no hardware)
-  --mqtt          Force MQTT mode
-  --serial        Force Serial mode
-  --no-venv       Don't use virtual environment
-  --version       Show version
+  --setup              Interactive configuration wizard
+  --check              Check dependencies only
+  --install-deps       Install dependencies and exit
+  --tui                Force TUI mode
+  --web                Force Web mode
+  --host ADDR          Web server bind address (e.g. 0.0.0.0 for network access)
+  --port PORT          Web server port (default: 8080)
+  --demo               Demo mode (no hardware)
+  --no-venv            Don't use virtual environment
+  --import-config PATH Import config from upstream meshing-around config.ini
+  --check-config       Validate config file and exit
+  --version            Show version
 ```
+
+> **Note:** Connection modes (Serial, TCP, MQTT, BLE) are selected via the [Launcher Menu](#launcher-menu) or `mesh_client.ini` configuration, not CLI flags.
 
 ## API Endpoints (Web)
 
@@ -539,7 +569,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py
     │   └── config_schema.py
     ├── tui/
-    │   ├── app.py          # Rich terminal UI (+ PlainTextTUI fallback)
+    │   ├── app.py          # Rich terminal UI (7 screens + PlainTextTUI fallback)
     │   └── helpers.py      # Shared formatting, safe panel rendering
     └── web/
         ├── app.py          # FastAPI server
@@ -576,7 +606,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **596 automated tests** across 18 test files covering core models, config, TUI rendering, MQTT client, crypto, API, middleware, and more.
+The project has **768 automated tests** across 18 test files covering core models, config, TUI rendering, MQTT client, crypto, API, middleware, and more.
 
 ```bash
 # Run all tests
