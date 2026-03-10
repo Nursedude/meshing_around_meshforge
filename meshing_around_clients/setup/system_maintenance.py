@@ -12,13 +12,14 @@ Provides:
 Extracted from configure_bot.py for reusability.
 """
 
+import configparser
 import os
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from .pi_utils import (
     get_pip_command,
@@ -383,7 +384,95 @@ def update_meshforge(
         meshforge_path = Path.cwd()
 
     report(f"Updating MeshForge at {meshforge_path}...")
-    return git_pull(meshforge_path)
+    result = git_pull(meshforge_path)
+
+    # Migrate config defaults that changed in the new version
+    if result.success:
+        config_path = _find_config(meshforge_path)
+        if config_path:
+            migrated = migrate_config(config_path, progress_callback)
+            if migrated:
+                result.changes.extend(migrated)
+                result.requires_restart = True
+
+    return result
+
+
+# =============================================================================
+# Config Migration
+# =============================================================================
+
+# Each entry: (section, key, old_value, new_value)
+# Only applied when the INI still has the exact old default value.
+CONFIG_MIGRATIONS: List[Tuple[str, str, str, str]] = [
+    ("features", "web_port", "8080", "9090"),
+]
+
+
+def migrate_config(
+    config_path: Path, progress_callback: Optional[Callable[[str], None]] = None
+) -> List[str]:
+    """Apply config migrations to an existing mesh_client.ini.
+
+    Only changes values that still match the old default — user-customised
+    values are left untouched.
+
+    Args:
+        config_path: Path to the INI file.
+        progress_callback: Optional callback for progress messages.
+
+    Returns:
+        List of human-readable changes applied.
+    """
+    changes: List[str] = []
+
+    def report(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+
+    if not config_path.exists():
+        return changes
+
+    parser = configparser.ConfigParser()
+    try:
+        parser.read(config_path)
+    except configparser.Error:
+        report(f"Could not parse {config_path} for migration")
+        return changes
+
+    for section, key, old_val, new_val in CONFIG_MIGRATIONS:
+        if not parser.has_section(section):
+            continue
+        current = parser.get(section, key, fallback=None)
+        if current is not None and current.strip() == old_val:
+            parser.set(section, key, new_val)
+            desc = f"[{section}] {key}: {old_val} -> {new_val}"
+            changes.append(desc)
+            report(f"Migrated config: {desc}")
+
+    if changes:
+        try:
+            with open(config_path, "w") as f:
+                parser.write(f)
+            os.chmod(config_path, 0o600)
+        except OSError as e:
+            report(f"Failed to write migrated config: {e}")
+            return []
+
+    return changes
+
+
+def _find_config(meshforge_path: Path) -> Optional[Path]:
+    """Locate mesh_client.ini relative to the repo root."""
+    candidates = [
+        meshforge_path / "mesh_client.ini",
+        Path.home() / ".config" / "meshing-around-clients" / "config.ini",
+        Path("/etc/meshing-around-clients/config.ini"),
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
 
 
 # =============================================================================
