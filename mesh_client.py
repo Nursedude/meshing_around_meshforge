@@ -37,6 +37,23 @@ from configparser import ConfigParser
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+
+# =============================================================================
+# ENCODING FIX — ensure UTF-8 stdout/stderr before any Unicode output
+# =============================================================================
+def _ensure_utf8_stdio():
+    """Reconfigure stdout/stderr to UTF-8 if needed for Unicode output."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError):
+                pass
+
+
+_ensure_utf8_stdio()
+
 # Version
 VERSION = "0.5.0-beta"
 
