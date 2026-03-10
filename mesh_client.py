@@ -460,6 +460,10 @@ http_url =
 # MAC address like AA:BB:CC:DD:EE:FF or "scan" for discovery
 mac =
 
+# Radio hardware model (for reference and device management)
+# Options: TBEAM, TLORA, TECHO, TDECK, HELTEC, RAK4631, STATION_G2
+hardware_model =
+
 # Connection behavior
 auto_reconnect = true
 reconnect_delay = 5
@@ -888,15 +892,64 @@ def interactive_setup():
 
     config = load_config()
 
+    # Platform detection
+    try:
+        from meshing_around_clients.setup.pi_utils import (
+            get_pi_model,
+            get_recommended_connection_mode,
+            is_raspberry_pi,
+        )
+
+        if is_raspberry_pi():
+            model = get_pi_model()
+            rec_mode = get_recommended_connection_mode()
+            print(f"{Colors.GREEN}Detected: {model}{Colors.RESET}")
+            print(f"Recommended connection: {rec_mode}\n")
+    except ImportError:
+        pass
+
+    # Hardware selection
+    print("Supported Radio Hardware:")
+    print("  1. LILYGO T-Beam        (ESP32, GPS built-in)")
+    print("  2. LILYGO T-Lora        (ESP32, compact)")
+    print("  3. LILYGO T-Echo        (nRF52840, e-ink, GPS)")
+    print("  4. LILYGO T-Deck        (ESP32-S3, keyboard)")
+    print("  5. Heltec LoRa 32       (ESP32, OLED)")
+    print("  6. RAK WisBlock 4631    (nRF52840, modular)")
+    print("  7. Station G2           (ESP32-S3, high-power)")
+    print("  8. No radio hardware    (MQTT or Demo only)")
+    print("  9. Other / not sure")
+
+    hw_choice = input("\nSelect your radio [9]: ").strip() or "9"
+
+    hw_map = {
+        "1": "TBEAM", "2": "TLORA", "3": "TECHO", "4": "TDECK",
+        "5": "HELTEC", "6": "RAK4631", "7": "STATION_G2", "8": "", "9": "",
+    }
+    hw_model = hw_map.get(hw_choice, "")
+    if hw_model:
+        config.set("interface", "hardware_model", hw_model)
+
+    # Set connection type default based on hardware
+    if hw_choice == "8":
+        conn_default = "4"  # MQTT for no-hardware
+        conn_default_label = "4"
+    elif hw_choice in ("1", "2", "3", "4", "5", "6", "7"):
+        conn_default = "1"  # Serial for real hardware
+        conn_default_label = "1"
+    else:
+        conn_default = "5"  # Auto-detect
+        conn_default_label = "5"
+
     # Connection type
-    print("Connection Options:")
+    print("\nConnection Options:")
     print("  1. Serial (USB radio connected)")
     print("  2. TCP (Remote Meshtastic device, protobuf port)")
     print("  3. HTTP (meshtasticd HTTP API)")
     print("  4. MQTT (No radio, connect via broker)")
     print("  5. Auto-detect")
 
-    choice = input("\nSelect connection type [5]: ").strip() or "5"
+    choice = input(f"\nSelect connection type [{conn_default_label}]: ").strip() or conn_default
 
     conn_map = {"1": "serial", "2": "tcp", "3": "http", "4": "mqtt", "5": "auto"}
     conn_type = conn_map.get(choice, "auto")
@@ -1059,7 +1112,7 @@ def update_menu(config: ConfigParser) -> None:
         print("  3. Reinstall dependencies")
         print(f"  4. Update meshing-around {Colors.DIM}(upstream){Colors.RESET}")
         print(f"  5. Install meshing-around {Colors.DIM}(clone){Colors.RESET}")
-        print(f"  6. Remove meshing-around")
+        print("  6. Remove meshing-around")
         print("  0. Back to launcher")
 
         try:

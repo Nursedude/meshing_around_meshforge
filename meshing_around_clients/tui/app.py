@@ -75,6 +75,7 @@ except ImportError:
 
 from meshing_around_clients import __version__ as VERSION  # noqa: E402
 from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
+from meshing_around_clients.core.config import InterfaceConfig  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
 
@@ -995,6 +996,140 @@ class TopologyScreen(Screen):
         return Panel(table, title="[bold]Channels[/bold]", border_style="yellow")
 
 
+class DevicesScreen(Screen):
+    """Device/interface management screen."""
+
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
+        self._selected_index = 0
+
+    def _get_iface_status(self, index: int, iface) -> str:
+        """Get status string for an interface."""
+        if not iface.enabled:
+            return "[dim]Disabled[/dim]"
+        # The primary interface (index 0) is the active connection
+        if index == 0 and self.app.api.is_connected:
+            return "[green]Connected[/green]"
+        if index == 0:
+            return "[red]Disconnected[/red]"
+        return "[yellow]Standby[/yellow]"
+
+    def _get_iface_target(self, iface) -> str:
+        """Get display target for an interface."""
+        if iface.type == "serial":
+            return iface.port or "auto-detect"
+        elif iface.type == "tcp":
+            return iface.hostname or "-"
+        elif iface.type == "http":
+            return iface.http_url or "-"
+        elif iface.type == "ble":
+            return iface.mac or "scan"
+        elif iface.type == "mqtt":
+            return getattr(self.app.config, "mqtt", None) and self.app.config.mqtt.broker or "broker"
+        return "-"
+
+    def render(self) -> Panel:
+        layout = Table.grid(padding=(1, 0))
+
+        # Configured interfaces table
+        iface_table = Table(title="Configured Devices", box=box.ROUNDED, expand=True)
+        iface_table.add_column("#", width=3, justify="center")
+        iface_table.add_column("Type", width=8)
+        iface_table.add_column("Target", width=25)
+        iface_table.add_column("Hardware", width=15)
+        iface_table.add_column("Label", width=15)
+        iface_table.add_column("Status", width=14)
+        iface_table.add_column("Active", width=8, justify="center")
+
+        interfaces = self.app.config.interfaces
+        # Clamp selected index
+        if interfaces:
+            self._selected_index = max(0, min(self._selected_index, len(interfaces) - 1))
+
+        for i, iface in enumerate(interfaces):
+            target = self._get_iface_target(iface)
+            hw = iface.hardware_model or "-"
+            label = iface.label or "-"
+            status = self._get_iface_status(i, iface)
+            active = "[bold green]\u2713[/bold green]" if i == 0 else "[dim]-[/dim]"
+            style = "bold cyan" if i == self._selected_index else ""
+            marker = "\u25b6 " if i == self._selected_index else "  "
+            iface_table.add_row(
+                f"{marker}{i + 1}", iface.type.upper(), target, hw, label, status, active, style=style,
+            )
+
+        if not interfaces:
+            iface_table.add_row("-", "-", "No devices configured", "-", "-", "-", "-")
+
+        layout.add_row(iface_table)
+
+        # Discovered mesh nodes table
+        nodes = list(self.app.api.network.online_nodes)[:15]
+        if nodes:
+            nodes_table = Table(title="Discovered Mesh Nodes", box=box.SIMPLE, expand=True)
+            nodes_table.add_column("Name", width=18)
+            nodes_table.add_column("ID", width=12)
+            nodes_table.add_column("Hardware", width=15)
+            nodes_table.add_column("Role", width=14)
+            nodes_table.add_column("Battery", width=10)
+            nodes_table.add_column("Last Heard", width=12)
+
+            for node in nodes:
+                name = node.long_name or node.short_name or "Unknown"
+                node_id = node.node_id[:12] if node.node_id else "-"
+                hw = node.hardware_model or "-"
+                role = node.role.value if node.role else "-"
+                batt = format_battery(node.telemetry.battery_level) if node.telemetry else "-"
+
+                last_heard = "-"
+                if node.last_heard:
+                    delta = (datetime.now(timezone.utc) - node.last_heard).total_seconds()
+                    if delta < 60:
+                        last_heard = f"{int(delta)}s ago"
+                    elif delta < 3600:
+                        last_heard = f"{int(delta / 60)}m ago"
+                    else:
+                        last_heard = f"{int(delta / 3600)}h ago"
+
+                nodes_table.add_row(name, node_id, hw, role, batt, last_heard)
+
+            layout.add_row(nodes_table)
+
+        footer = "[dim]a[/dim]=Add  [dim]d[/dim]=Remove  [dim]e[/dim]=Enable/Disable  [dim]t[/dim]=Test  [dim]r[/dim]=Set bot radio  [dim]j/k[/dim]=Navigate"
+        return Panel(
+            layout,
+            title="[bold cyan]Devices[/bold cyan]",
+            subtitle=footer,
+            border_style="cyan",
+        )
+
+    def handle_input(self, key: str) -> bool:
+        interfaces = self.app.config.interfaces
+        if key == "a":
+            self.app._add_device_prompt()
+            return True
+        elif key == "d" and interfaces:
+            self.app._remove_device_prompt(self._selected_index)
+            return True
+        elif key == "e" and interfaces:
+            iface = interfaces[self._selected_index]
+            iface.enabled = not iface.enabled
+            return True
+        elif key == "t" and interfaces:
+            self.app._test_device_connection(self._selected_index)
+            return True
+        elif key == "r" and interfaces:
+            self.app._set_bot_radio(self._selected_index)
+            return True
+        elif key == "j" and interfaces:
+            self._selected_index = min(self._selected_index + 1, len(interfaces) - 1)
+            return True
+        elif key == "k":
+            self._selected_index = max(self._selected_index - 1, 0)
+            return True
+        return False
+
+
 class HelpScreen(Screen):
     """Help screen showing keyboard shortcuts."""
 
@@ -1008,6 +1143,7 @@ class HelpScreen(Screen):
 - **3** - Messages view
 - **4** - Alerts view
 - **5** - Topology view
+- **6** - Devices view
 - **q** - Return to dashboard / Quit
 
 ## Actions
@@ -1048,6 +1184,14 @@ class HelpScreen(Screen):
 - Mesh health score, node relationships, routes, and channels
 - Link quality percentages and hop counts
 - Neighbor relationships
+
+## Devices View
+- **a** - Add new device/interface
+- **d** - Remove selected device
+- **e** - Enable/Disable device
+- **t** - Test connection to device
+- **r** - Set as bot output radio
+- **j/k** - Navigate device list
 """
         return Panel(
             Markdown(help_text),
@@ -1081,6 +1225,7 @@ class MeshingAroundTUI:
             "messages": MessagesScreen(self),
             "alerts": AlertsScreen(self),
             "topology": TopologyScreen(self),
+            "devices": DevicesScreen(self),
             "help": HelpScreen(self),
         }
         self.current_screen = "dashboard"
@@ -1616,6 +1761,8 @@ class MeshingAroundTUI:
             self.current_screen = "alerts"
         elif key == "5":
             self.current_screen = "topology"
+        elif key == "6":
+            self.current_screen = "devices"
         elif key == "s":
             self._send_message_prompt()
         elif key == "?" or key == "h":
@@ -1669,6 +1816,198 @@ class MeshingAroundTUI:
                 time.sleep(1)
         except KeyboardInterrupt:
             pass
+
+    def _add_device_prompt(self) -> None:
+        """Prompt user to add a new device/interface."""
+        self.console.clear()
+        self.console.print(Panel("[bold cyan]Add Device[/bold cyan]", border_style="cyan"))
+
+        self.console.print("  1. Serial (USB radio)")
+        self.console.print("  2. TCP (Remote device)")
+        self.console.print("  3. MQTT (Broker)")
+        self.console.print("  4. BLE (Bluetooth)")
+        self.console.print("  5. Cancel")
+
+        try:
+            choice = Prompt.ask("Select type", choices=["1", "2", "3", "4", "5"], default="5")
+        except KeyboardInterrupt:
+            return
+
+        if choice == "5":
+            return
+
+        type_map = {"1": "serial", "2": "tcp", "3": "mqtt", "4": "ble"}
+        iface_type = type_map[choice]
+        iface = InterfaceConfig(type=iface_type)
+
+        try:
+            if iface_type == "serial":
+                port = Prompt.ask("Serial port", default="auto-detect")
+                if port != "auto-detect":
+                    iface.port = port
+            elif iface_type == "tcp":
+                iface.hostname = Prompt.ask("Hostname/IP")
+                iface.label = Prompt.ask("Label (optional)", default="")
+            elif iface_type == "mqtt":
+                self.console.print("[dim]MQTT uses broker settings from mesh_client.ini[/dim]")
+            elif iface_type == "ble":
+                iface.mac = Prompt.ask("BLE MAC address", default="scan")
+
+            # Hardware model (optional for all types)
+            hw = Prompt.ask(
+                "Hardware model",
+                choices=["TBEAM", "TLORA", "TECHO", "TDECK", "HELTEC", "RAK4631", "STATION_G2", "skip"],
+                default="skip",
+            )
+            if hw != "skip":
+                iface.hardware_model = hw
+
+            if self.config.add_interface(iface):
+                self.console.print(f"[green]Added {iface_type.upper()} device[/green]")
+            else:
+                self.console.print("[red]Max 9 interfaces reached[/red]")
+
+        except KeyboardInterrupt:
+            return
+
+        time.sleep(1)
+        self._dirty = True
+
+    def _remove_device_prompt(self, index: int) -> None:
+        """Remove a device/interface by index."""
+        interfaces = self.config.interfaces
+        if not interfaces or index >= len(interfaces):
+            return
+
+        iface = interfaces[index]
+        self.console.clear()
+        target = iface.port or iface.hostname or iface.mac or iface.type
+        self.console.print(f"Remove device #{index + 1}: {iface.type.upper()} ({target})?")
+
+        try:
+            if Confirm.ask("Confirm removal", default=False):
+                if index == 0 and self.api.is_connected:
+                    self.console.print("[yellow]Disconnecting active device first...[/yellow]")
+                    self.disconnect()
+                self.config._interfaces.pop(index)
+                self.console.print("[green]Device removed[/green]")
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+
+        self._dirty = True
+
+    def _test_device_connection(self, index: int) -> None:
+        """Test connection to a device."""
+        interfaces = self.config.interfaces
+        if not interfaces or index >= len(interfaces):
+            return
+
+        iface = interfaces[index]
+        self.console.clear()
+        target = iface.port or iface.hostname or iface.mac or iface.type
+        self.console.print(f"Testing connection to {iface.type.upper()} ({target})...")
+
+        try:
+            if iface.type == "tcp" and iface.hostname:
+                import socket
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                try:
+                    sock.connect((iface.hostname, 4403))
+                    sock.close()
+                    self.console.print("[green]TCP connection successful![/green]")
+                except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                    self.console.print(f"[red]TCP connection failed: {e}[/red]")
+            elif iface.type == "serial":
+                port = iface.port or "auto"
+                if port != "auto" and Path(port).exists():
+                    self.console.print(f"[green]Serial port {port} exists[/green]")
+                elif port == "auto":
+                    self.console.print("[yellow]Auto-detect requires meshtastic library[/yellow]")
+                else:
+                    self.console.print(f"[red]Serial port {port} not found[/red]")
+            elif iface.type == "mqtt":
+                import socket
+                broker = self.config.mqtt.broker if hasattr(self.config, "mqtt") else "mqtt.meshtastic.org"
+                port = self.config.mqtt.port if hasattr(self.config, "mqtt") else 1883
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(5)
+                try:
+                    sock.connect((broker, port))
+                    sock.close()
+                    self.console.print(f"[green]MQTT broker {broker}:{port} reachable![/green]")
+                except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                    self.console.print(f"[red]MQTT broker unreachable: {e}[/red]")
+            else:
+                self.console.print(f"[yellow]Test not available for {iface.type} connections[/yellow]")
+        except ImportError as e:
+            self.console.print(f"[red]Missing dependency: {e}[/red]")
+
+        try:
+            Prompt.ask("Press Enter to continue", default="")
+        except KeyboardInterrupt:
+            pass
+        self._dirty = True
+
+    def _set_bot_radio(self, index: int) -> None:
+        """Set a device as the primary bot output radio."""
+        interfaces = self.config.interfaces
+        if not interfaces or index >= len(interfaces) or index == 0:
+            if index == 0:
+                self.console.clear()
+                self.console.print("[dim]This device is already the active radio[/dim]")
+                time.sleep(1)
+                self._dirty = True
+            return
+
+        iface = interfaces[index]
+        target = iface.port or iface.hostname or iface.mac or iface.type
+        self.console.clear()
+        self.console.print(f"Set {iface.type.upper()} ({target}) as active bot radio?")
+        self.console.print("[dim]This will disconnect the current radio and switch to this one.[/dim]")
+
+        try:
+            if Confirm.ask("Confirm switch", default=False):
+                self._switch_to_interface(iface, index)
+        except KeyboardInterrupt:
+            pass
+        self._dirty = True
+
+    def _switch_to_interface(self, iface, index: int) -> bool:
+        """Switch the active API connection to a different interface."""
+        self.console.print("[yellow]Switching interface...[/yellow]")
+
+        # Disconnect current
+        self.disconnect()
+
+        # Swap selected interface to position 0 (primary)
+        interfaces = self.config._interfaces
+        interfaces[0], interfaces[index] = interfaces[index], interfaces[0]
+        self.config.interface = interfaces[0]
+
+        # Create new API for the interface type
+        if interfaces[0].type == "mqtt":
+            try:
+                from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+                self.api = MQTTMeshtasticClient(self.config)
+            except ImportError:
+                self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                time.sleep(2)
+                return False
+        else:
+            self.api = MeshtasticAPI(self.config)
+
+        self._register_dirty_callbacks()
+
+        if self.connect():
+            self.console.print("[green]Switched successfully![/green]")
+            time.sleep(1)
+            return True
+        else:
+            self.console.print("[red]Connection failed[/red]")
+            time.sleep(2)
+            return False
 
 
 def main():

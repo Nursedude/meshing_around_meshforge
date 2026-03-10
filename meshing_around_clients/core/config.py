@@ -21,6 +21,8 @@ class InterfaceConfig:
     baudrate: int = 115200
     enabled: bool = True  # For multi-interface support
     http_url: str = ""  # Base URL for meshtasticd HTTP API (e.g. http://meshtastic.local)
+    hardware_model: str = ""  # Radio model (e.g. TBEAM, RAK4631, HELTEC)
+    label: str = ""  # User-friendly label for this interface
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "InterfaceConfig":
@@ -33,6 +35,8 @@ class InterfaceConfig:
             baudrate=int(data.get("baudrate", 115200)),
             enabled=_str_to_bool(data.get("enabled", True)),
             http_url=str(data.get("http_url", "")),
+            hardware_model=str(data.get("hardware_model", "")),
+            label=str(data.get("label", "")),
         )
 
 
