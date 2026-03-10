@@ -101,8 +101,9 @@ install_system_deps() {
             log_error "apt-get update failed — check network or sources"
             exit 1
         fi
-        if ! sudo apt-get install -y -qq python3-pip python3-venv git; then
-            log_error "Failed to install required packages (python3-pip, python3-venv, git)"
+        if ! sudo apt-get install -y -qq python3-pip python3-venv git \
+                libssl-dev build-essential pkg-config python3-dev; then
+            log_error "Failed to install required packages (python3-pip, python3-venv, git, libssl-dev)"
             exit 1
         fi
         log_ok "System dependencies installed"

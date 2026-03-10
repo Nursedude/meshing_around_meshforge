@@ -32,6 +32,8 @@ pypubsub>=4.0.3,<5.0.0
 
 # =============================================================================
 # CRYPTOGRAPHY / SSL (pin to resolve pyopenssl conflict)
+# System build deps (if no pre-built wheel available for your architecture):
+#   sudo apt-get install -y libssl-dev build-essential pkg-config python3-dev
 # =============================================================================
 
 pyopenssl>=25.3.0,<27
