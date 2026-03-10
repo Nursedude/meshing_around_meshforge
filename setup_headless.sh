@@ -128,35 +128,38 @@ setup_venv() {
     source "$VENV_DIR/bin/activate"
 
     # Upgrade pip
-    pip install --upgrade pip -q
+    pip install --upgrade pip --retries 5 --timeout 120 -q
     log_ok "Pip upgraded"
 }
 
 install_python_deps() {
     log_info "Installing Python dependencies..."
 
+    # Network resilience for slow/flaky connections (Pi Zero, satellite, etc.)
+    PIP_OPTS="--retries 5 --timeout 120"
+
     # Core deps
-    pip install rich -q
+    pip install $PIP_OPTS rich -q
     log_ok "Installed: rich (TUI)"
 
     # Web deps
-    pip install fastapi uvicorn jinja2 python-multipart -q
+    pip install $PIP_OPTS fastapi uvicorn jinja2 python-multipart -q
     log_ok "Installed: FastAPI (Web server)"
 
     # MQTT deps
-    pip install paho-mqtt -q
+    pip install $PIP_OPTS paho-mqtt -q
     log_ok "Installed: paho-mqtt (MQTT support)"
 
     # Meshtastic (optional)
     if [ "$INSTALL_MESHTASTIC" = true ]; then
         log_info "Installing meshtastic (this may take a few minutes)..."
-        pip install meshtastic pypubsub -q
+        pip install $PIP_OPTS meshtastic pypubsub -q
         log_ok "Installed: meshtastic (Radio support)"
     fi
 
     # Cryptography / SSL (pin to resolve pyopenssl conflict)
     log_info "Installing cryptography (may take 10+ minutes on ARM if building from source)..."
-    pip install 'pyopenssl>=25.3.0' 'cryptography>=45.0.7,<47'
+    pip install $PIP_OPTS 'pyopenssl>=25.3.0' 'cryptography>=45.0.7,<47'
     log_ok "Installed: cryptography (SSL/encryption)"
 }
 

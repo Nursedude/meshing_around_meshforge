@@ -1357,6 +1357,80 @@ class MeshingAroundTUI:
         """Disconnect from the device."""
         self.api.disconnect()
 
+    def _connection_fallback_menu(self) -> bool:
+        """Show connection type selection menu after a connection failure.
+
+        Returns True if a connection was established, False to exit.
+        """
+        error_msg = ""
+        if hasattr(self.api, "connection_info"):
+            error_msg = getattr(self.api.connection_info, "error_message", "")
+
+        self.console.print(f"\n[red]Connection failed: {error_msg}[/red]\n" if error_msg else "")
+        self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
+        self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
+        self.console.print("  [white]2)[/white] MQTT - Local/custom broker")
+        self.console.print("  [white]3)[/white] TCP  - Remote Meshtastic device")
+        self.console.print("  [white]4)[/white] Demo mode (simulated data)")
+        self.console.print("  [white]5)[/white] Exit\n")
+
+        choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="4")
+
+        if choice == "1":
+            # MQTT public broker
+            self.config.mqtt.enabled = True
+            self.config.mqtt.broker = "mqtt.meshtastic.org"
+            self.config.mqtt.port = 1883
+            self.config.mqtt.username = "meshdev"
+            self.config.mqtt.password = "large4cats"
+            try:
+                from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+                self.api = MQTTMeshtasticClient(self.config)
+                self._register_dirty_callbacks()
+                return self.connect()
+            except ImportError:
+                self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                return self._connection_fallback_menu()
+
+        elif choice == "2":
+            # MQTT custom broker
+            broker = Prompt.ask("Broker hostname", default="localhost")
+            port = int(Prompt.ask("Broker port", default="1883"))
+            self.config.mqtt.enabled = True
+            self.config.mqtt.broker = broker
+            self.config.mqtt.port = port
+            try:
+                from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+                self.api = MQTTMeshtasticClient(self.config)
+                self._register_dirty_callbacks()
+                return self.connect()
+            except ImportError:
+                self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                return self._connection_fallback_menu()
+
+        elif choice == "3":
+            # TCP remote device
+            hostname = Prompt.ask("Device hostname/IP")
+            self.config.interface.type = "tcp"
+            self.config.interface.hostname = hostname
+            self.api = MeshtasticAPI(self.config)
+            self._register_dirty_callbacks()
+            return self.connect()
+
+        elif choice == "4":
+            # Demo mode
+            self.demo_mode = True
+            self.api = MockMeshtasticAPI(self.config)
+            self._register_dirty_callbacks()
+            self.api.connect()
+            return True
+
+        else:
+            # Exit
+            return False
+
     def _show_config_warnings(self) -> None:
         """Run config validation and display any warnings before connecting."""
         try:
@@ -1392,12 +1466,8 @@ class MeshingAroundTUI:
         # Connect if not in demo mode
         if not self.demo_mode:
             if not self.connect():
-                if not Confirm.ask("Connection failed. Run in demo mode?", default=True):
+                if not self._connection_fallback_menu():
                     return
-                self.demo_mode = True
-                self.api = MockMeshtasticAPI(self.config)
-                self._register_dirty_callbacks()
-                self.api.connect()
         else:
             self.api.connect()
 
@@ -1454,12 +1524,7 @@ class MeshingAroundTUI:
         # Connect
         if not self.demo_mode:
             if not self.connect():
-                if Confirm.ask("Connection failed. Run in demo mode?", default=True):
-                    self.demo_mode = True
-                    self.api = MockMeshtasticAPI(self.config)
-                    self._register_dirty_callbacks()
-                    self.api.connect()
-                else:
+                if not self._connection_fallback_menu():
                     return
         else:
             self.api.connect()
@@ -1475,10 +1540,13 @@ class MeshingAroundTUI:
             # Set terminal to raw mode
             tty.setcbreak(sys.stdin.fileno())
 
+            last_refresh = time.monotonic()
+
             while self._running:
                 # Only re-render when data changed or user interacted (dirty flag)
                 if self._dirty:
                     self._dirty = False
+                    last_refresh = time.monotonic()
                     try:
                         self.console.clear()
                         self.console.print(self._render())
@@ -1494,8 +1562,9 @@ class MeshingAroundTUI:
                     self._dirty = True  # Any input triggers re-render
                     self._handle_key(key)
                 else:
-                    # No input — mark dirty for periodic refresh (health status, etc.)
-                    self._dirty = True
+                    # Periodic refresh for health/status updates (not every tick)
+                    if time.monotonic() - last_refresh >= 5.0:
+                        self._dirty = True
 
         except (KeyboardInterrupt, EOFError):
             pass  # Normal exit
@@ -1546,7 +1615,9 @@ class MeshingAroundTUI:
             if self.api.is_connected:
                 self.disconnect()
             else:
-                self.connect()
+                self.console.clear()
+                if not self.connect():
+                    self._connection_fallback_menu()
 
     def _send_message_prompt(self) -> None:
         """Prompt user to send a message."""
