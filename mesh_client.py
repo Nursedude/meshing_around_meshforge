@@ -29,6 +29,7 @@ Configuration:
 
 import logging as _logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -599,8 +600,8 @@ log_telemetry = false
 # Use virtual environment for dependencies
 use_venv = true
 
-# Auto-install missing dependencies
-auto_install_deps = true
+# Auto-install missing dependencies (set to true to skip prompts)
+auto_install_deps = false
 
 # Demo mode (no real connection, simulated data)
 demo_mode = false
@@ -957,6 +958,220 @@ def interactive_setup():
 
 
 # =============================================================================
+# CONFIG EDITOR & UPDATE MENUS
+# =============================================================================
+
+
+def _find_editor() -> str:
+    """Find an available text editor, preferring nano."""
+    for editor in ("nano", "vi", "vim"):
+        if shutil.which(editor):
+            return editor
+    return ""
+
+
+def config_editor_menu() -> None:
+    """Interactive menu for editing configuration files with nano."""
+    editor = _find_editor()
+    if not editor:
+        log("No text editor found (nano, vi, vim). Install nano: sudo apt install nano", "ERROR")
+        return
+
+    while True:
+        print(f"\n{Colors.CYAN}{Colors.BOLD}Configuration Files{Colors.RESET}\n")
+        print(f"  1. mesh_client.ini        {Colors.DIM}(Main configuration){Colors.RESET}")
+        print(f"  2. config.enhanced.ini    {Colors.DIM}(Alert reference template){Colors.RESET}")
+        print(f"  3. Systemd service file   {Colors.DIM}(Auto-start service){Colors.RESET}")
+        print(f"  4. mesh_client.log        {Colors.DIM}(View current log){Colors.RESET}")
+        print("  0. Back to launcher")
+
+        try:
+            choice = input(f"\n{Colors.CYAN}Select file [0]:{Colors.RESET} ").strip() or "0"
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+
+        if choice == "0":
+            return
+
+        if choice == "1":
+            ini_path = CONFIG_FILE
+            if not ini_path.exists():
+                log(f"{ini_path} not found.", "WARN")
+                try:
+                    create = input("Create from default template? [Y/n]: ").strip().lower()
+                except (KeyboardInterrupt, EOFError):
+                    print()
+                    continue
+                if create in ("", "y", "yes"):
+                    try:
+                        ini_path.write_text(DEFAULT_CONFIG)
+                        os.chmod(str(ini_path), 0o600)
+                        log(f"Created {ini_path}", "OK")
+                    except OSError as e:
+                        log(f"Failed to create config: {e}", "ERROR")
+                        continue
+                else:
+                    continue
+            subprocess.run([editor, str(ini_path)])
+
+        elif choice == "2":
+            enhanced_path = SCRIPT_DIR / "config.enhanced.ini"
+            if not enhanced_path.exists():
+                log(f"{enhanced_path} not found.", "ERROR")
+                continue
+            subprocess.run([editor, str(enhanced_path)])
+
+        elif choice == "3":
+            service_path = Path("/etc/systemd/system/mesh-client.service")
+            if not service_path.exists():
+                log("Systemd service not installed.", "WARN")
+                log("Run setup_headless.sh to create one, or use the Update menu to install.", "INFO")
+                continue
+            log("Opening service file (sudo required)...", "INFO")
+            subprocess.run(["sudo", editor, str(service_path)])
+
+        elif choice == "4":
+            log_path = LOG_FILE
+            if not log_path.exists():
+                log("No log file found yet. Run the client first.", "WARN")
+                continue
+            # Open in read-only mode with nano -v, or use less
+            if editor == "nano":
+                subprocess.run([editor, "-v", str(log_path)])
+            else:
+                less = shutil.which("less")
+                if less:
+                    subprocess.run([less, str(log_path)])
+                else:
+                    subprocess.run([editor, str(log_path)])
+
+        else:
+            log(f"Invalid choice: {choice}", "WARN")
+
+
+def update_menu(config: ConfigParser) -> None:
+    """Interactive menu for updating/reinstalling MeshForge and meshing-around."""
+    while True:
+        print(f"\n{Colors.CYAN}{Colors.BOLD}Update / Reinstall{Colors.RESET}\n")
+        print("  1. Check for MeshForge updates")
+        print("  2. Update MeshForge (git pull)")
+        print("  3. Reinstall dependencies")
+        print(f"  4. Update meshing-around {Colors.DIM}(upstream){Colors.RESET}")
+        print(f"  5. Install meshing-around {Colors.DIM}(clone){Colors.RESET}")
+        print(f"  6. Remove meshing-around")
+        print("  0. Back to launcher")
+
+        try:
+            choice = input(f"\n{Colors.CYAN}Select action [0]:{Colors.RESET} ").strip() or "0"
+        except (KeyboardInterrupt, EOFError):
+            print()
+            return
+
+        if choice == "0":
+            return
+
+        # Options 1, 2, 4, 5, 6 need system_maintenance imports
+        if choice in ("1", "2", "4", "5", "6"):
+            try:
+                from meshing_around_clients.setup.system_maintenance import (
+                    check_for_updates,
+                    clone_meshing_around,
+                    find_meshing_around,
+                    update_meshforge,
+                    update_upstream,
+                )
+            except ImportError:
+                log("Cannot import update modules — dependencies may not be installed.", "ERROR")
+                log("Use option 3 to install dependencies first.", "INFO")
+                continue
+
+        if choice == "1":
+            log("Checking for updates...", "INFO")
+            has_updates, message, commits = check_for_updates(SCRIPT_DIR)
+            if has_updates:
+                log(f"Updates available: {message}", "WARN")
+            else:
+                log(message, "OK")
+
+        elif choice == "2":
+            log("Updating MeshForge...", "INFO")
+            result = update_meshforge(SCRIPT_DIR)
+            if result.success:
+                log(result.message, "OK")
+                if result.requires_restart:
+                    log("Restart recommended to apply changes.", "WARN")
+            else:
+                log(result.message, "ERROR")
+                for err in result.errors:
+                    log(f"  {err[:100]}", "ERROR")
+
+        elif choice == "3":
+            missing = get_missing_deps(config)
+            if missing:
+                log(f"Installing missing: {', '.join(missing)}", "INFO")
+                use_venv = config.getboolean("advanced", "use_venv", fallback=True)
+                if install_dependencies(missing, use_venv):
+                    log("Dependencies installed.", "OK")
+                else:
+                    log("Installation failed.", "ERROR")
+            else:
+                try:
+                    reinstall = input("All dependencies present. Reinstall all? [y/N]: ").strip().lower()
+                except (KeyboardInterrupt, EOFError):
+                    print()
+                    continue
+                if reinstall in ("y", "yes"):
+                    all_deps = list(CORE_DEPS)
+                    for dep_list in OPTIONAL_DEPS.values():
+                        all_deps.extend(dep_list)
+                    all_deps = list(set(all_deps))
+                    log(f"Reinstalling: {', '.join(all_deps)}", "INFO")
+                    use_venv = config.getboolean("advanced", "use_venv", fallback=True)
+                    if install_dependencies(all_deps, use_venv):
+                        log("Dependencies reinstalled.", "OK")
+                    else:
+                        log("Reinstallation failed.", "ERROR")
+
+        elif choice == "4":
+            log("Updating meshing-around...", "INFO")
+            result = update_upstream()
+            if result.success:
+                log(result.message, "OK")
+            else:
+                log(result.message, "ERROR")
+
+        elif choice == "5":
+            log("Installing meshing-around...", "INFO")
+            result = clone_meshing_around()
+            if result.success:
+                log(result.message, "OK")
+            else:
+                log(result.message, "ERROR")
+
+        elif choice == "6":
+            ma_path = find_meshing_around()
+            if ma_path is None:
+                log("meshing-around installation not found.", "WARN")
+                continue
+            log(f"Found meshing-around at: {ma_path}", "INFO")
+            try:
+                confirm = input(f"Remove {ma_path}? This cannot be undone. [y/N]: ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                continue
+            if confirm in ("y", "yes"):
+                try:
+                    shutil.rmtree(str(ma_path))
+                    log("meshing-around removed.", "OK")
+                except OSError as e:
+                    log(f"Failed to remove: {e}", "ERROR")
+
+        else:
+            log(f"Invalid choice: {choice}", "WARN")
+
+
+# =============================================================================
 # LAUNCHER MENU
 # =============================================================================
 
@@ -974,10 +1189,12 @@ def launcher_menu(config: ConfigParser) -> bool:
         print("  4. Both (TUI + Web)")
         print("  5. Demo Mode")
         print("  6. Setup Wizard")
+        print(f"  7. Edit Configuration  {Colors.DIM}(nano){Colors.RESET}")
+        print("  8. Update / Reinstall")
         print("  0. Exit")
 
         try:
-            choice = input(f"\n{Colors.CYAN}Select mode [1]:{Colors.RESET} ").strip() or "1"
+            choice = input(f"\n{Colors.CYAN}Select [1]:{Colors.RESET} ").strip() or "1"
         except (KeyboardInterrupt, EOFError):
             print()
             return True
@@ -1004,6 +1221,12 @@ def launcher_menu(config: ConfigParser) -> bool:
         elif choice == "6":
             interactive_setup()
             return True
+        elif choice == "7":
+            config_editor_menu()
+            continue
+        elif choice == "8":
+            update_menu(config)
+            continue
         else:
             log(f"Invalid choice: {choice}", "WARN")
             continue
@@ -1255,7 +1478,7 @@ Examples:
 
     # Install dependencies if needed
     if missing:
-        auto_install = config.getboolean("advanced", "auto_install_deps", fallback=True)
+        auto_install = config.getboolean("advanced", "auto_install_deps", fallback=False)
 
         if args.install_deps or auto_install:
             if not check_internet():
@@ -1264,6 +1487,24 @@ Examples:
 
             if not install_dependencies(missing, use_venv):
                 log("Failed to install dependencies", "ERROR")
+                sys.exit(1)
+        elif sys.stdin.isatty():
+            # Interactive prompt — let user decide
+            log(f"Missing dependencies: {', '.join(missing)}", "WARN")
+            try:
+                answer = input(f"{Colors.CYAN}Install now? [Y/n]:{Colors.RESET} ").strip().lower()
+            except (KeyboardInterrupt, EOFError):
+                print()
+                sys.exit(1)
+            if answer in ("", "y", "yes"):
+                if not check_internet():
+                    log("No internet connection for dependency installation", "ERROR")
+                    sys.exit(1)
+                if not install_dependencies(missing, use_venv):
+                    log("Failed to install dependencies", "ERROR")
+                    sys.exit(1)
+            else:
+                log("Run with --install-deps to install", "INFO")
                 sys.exit(1)
         else:
             log(f"Missing dependencies: {', '.join(missing)}", "ERROR")
