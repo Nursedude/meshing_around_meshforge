@@ -351,6 +351,10 @@ class MeshtasticAPI(CallbackMixin):
             if self.connect():
                 return True
 
+            # Fail fast for non-transient errors (no point retrying)
+            if not MESHTASTIC_AVAILABLE:
+                return False
+
             if attempt >= max_retries:
                 break
 
