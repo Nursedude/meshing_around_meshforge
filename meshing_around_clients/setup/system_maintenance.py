@@ -409,9 +409,7 @@ CONFIG_MIGRATIONS: List[Tuple[str, str, str, str]] = [
 ]
 
 
-def migrate_config(
-    config_path: Path, progress_callback: Optional[Callable[[str], None]] = None
-) -> List[str]:
+def migrate_config(config_path: Path, progress_callback: Optional[Callable[[str], None]] = None) -> List[str]:
     """Apply config migrations to an existing mesh_client.ini.
 
     Only changes values that still match the old default — user-customised
