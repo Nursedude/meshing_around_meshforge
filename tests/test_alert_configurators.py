@@ -395,7 +395,14 @@ class TestAlertConfiguratorFunctions:
 
         config = configparser.ConfigParser()
         mock_yes_no.side_effect = [True, False]  # configure email=True, sms=False
-        mock_input.side_effect = ["smtp.gmail.com", "587", "user@test.com", "pass123", "user@test.com", "admin@test.com"]
+        mock_input.side_effect = [
+            "smtp.gmail.com",
+            "587",
+            "user@test.com",
+            "pass123",
+            "user@test.com",
+            "admin@test.com",
+        ]
         configure_email_sms(config)
         assert config.get("smtp", "enableSMTP") == "True"
         assert config.get("smtp", "SMTP_SERVER") == "smtp.gmail.com"
@@ -481,7 +488,9 @@ class TestRunAllConfigurators:
     @patch("meshing_around_clients.setup.alert_configurators.print_warning")
     @patch("meshing_around_clients.setup.alert_configurators.validate_coordinates", return_value=True)
     @patch("meshing_around_clients.setup.alert_configurators.validate_email", return_value=True)
-    def test_run_all_does_not_crash(self, mock_ve, mock_vc, mock_warn, mock_success, mock_section, mock_yes_no, mock_input):
+    def test_run_all_does_not_crash(
+        self, mock_ve, mock_vc, mock_warn, mock_success, mock_section, mock_yes_no, mock_input
+    ):
         from meshing_around_clients.setup.alert_configurators import run_all_configurators
 
         config = configparser.ConfigParser()
