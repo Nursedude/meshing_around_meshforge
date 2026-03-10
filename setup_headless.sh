@@ -150,104 +150,15 @@ install_python_deps() {
     pip install $PIP_OPTS paho-mqtt -q
     log_ok "Installed: paho-mqtt (MQTT support)"
 
-    # Meshtastic (optional)
-    if [ "$INSTALL_MESHTASTIC" = true ]; then
-        log_info "Installing meshtastic (this may take a few minutes)..."
-        pip install $PIP_OPTS meshtastic pypubsub -q
-        log_ok "Installed: meshtastic (Radio support)"
-    fi
+    # Meshtastic (radio support)
+    log_info "Installing meshtastic (this may take a few minutes)..."
+    pip install $PIP_OPTS meshtastic pypubsub -q
+    log_ok "Installed: meshtastic (Radio support)"
 
     # Cryptography / SSL (pin to resolve pyopenssl conflict)
     log_info "Installing cryptography (may take 10+ minutes on ARM if building from source)..."
     pip install $PIP_OPTS 'pyopenssl>=25.3.0' 'cryptography>=45.0.7,<47'
     log_ok "Installed: cryptography (SSL/encryption)"
-}
-
-configure_connection() {
-    log_info "Configuring connection..."
-
-    echo ""
-    echo "How will this device connect to the mesh?"
-    echo ""
-    echo "  1) Serial/USB - Radio connected directly to this device"
-    echo "  2) TCP - Remote Meshtastic device on network"
-    echo "  3) MQTT - No radio, connect via MQTT broker"
-    echo "  4) Auto-detect"
-    echo ""
-    read -p "Select option [3]: " CONN_CHOICE
-    CONN_CHOICE=${CONN_CHOICE:-3}
-
-    case $CONN_CHOICE in
-        1)
-            CONN_TYPE="serial"
-            INSTALL_MESHTASTIC=true
-            # Detect serial ports
-            if ls /dev/ttyUSB* 2>/dev/null || ls /dev/ttyACM* 2>/dev/null; then
-                log_ok "Serial ports detected"
-            else
-                log_warn "No serial ports detected. Connect radio and restart."
-            fi
-            ;;
-        2)
-            CONN_TYPE="tcp"
-            INSTALL_MESHTASTIC=true
-            read -p "Enter TCP host [192.168.1.1]: " TCP_HOST
-            TCP_HOST=${TCP_HOST:-192.168.1.1}
-            ;;
-        3)
-            CONN_TYPE="mqtt"
-            INSTALL_MESHTASTIC=false
-            read -p "Enter MQTT broker [mqtt.meshtastic.org]: " MQTT_BROKER
-            MQTT_BROKER=${MQTT_BROKER:-mqtt.meshtastic.org}
-            read -p "Enter MQTT topic root [msh/US]: " MQTT_TOPIC
-            MQTT_TOPIC=${MQTT_TOPIC:-msh/US}
-            ;;
-        4)
-            CONN_TYPE="auto"
-            INSTALL_MESHTASTIC=true
-            ;;
-        *)
-            CONN_TYPE="mqtt"
-            INSTALL_MESHTASTIC=false
-            ;;
-    esac
-
-    log_ok "Connection type: $CONN_TYPE"
-}
-
-configure_interface() {
-    log_info "Configuring interface..."
-
-    echo ""
-    echo "Select interface mode:"
-    echo ""
-    echo "  1) TUI - Terminal interface (good for SSH)"
-    echo "  2) Web - Browser interface"
-    echo "  3) Both - TUI + Web server"
-    echo "  4) Headless - API only (for automation)"
-    echo ""
-    read -p "Select option [1]: " MODE_CHOICE
-    MODE_CHOICE=${MODE_CHOICE:-1}
-
-    case $MODE_CHOICE in
-        1) INTERFACE_MODE="tui" ;;
-        2) INTERFACE_MODE="web" ;;
-        3) INTERFACE_MODE="both" ;;
-        4) INTERFACE_MODE="headless" ;;
-        *) INTERFACE_MODE="tui" ;;
-    esac
-
-    if [ "$INTERFACE_MODE" = "web" ] || [ "$INTERFACE_MODE" = "both" ]; then
-        read -p "Enter web port [8080]: " WEB_PORT
-        WEB_PORT=${WEB_PORT:-8080}
-        # Validate port is a number in range 1-65535
-        if ! [[ "$WEB_PORT" =~ ^[0-9]+$ ]] || [ "$WEB_PORT" -lt 1 ] || [ "$WEB_PORT" -gt 65535 ]; then
-            log_warn "Invalid port '$WEB_PORT', using default 8080"
-            WEB_PORT=8080
-        fi
-    fi
-
-    log_ok "Interface mode: $INTERFACE_MODE"
 }
 
 generate_config() {
@@ -459,10 +370,13 @@ print_summary() {
     echo "  source $SCRIPT_DIR/.venv/bin/activate"
     echo "  python3 mesh_client.py"
     echo ""
-    echo "Or with options:"
-    echo "  python3 mesh_client.py --demo    # Demo mode"
-    echo "  python3 mesh_client.py --web     # Web interface"
+    echo "The launcher menu lets you choose your connection mode"
+    echo "(MQTT, Serial, TCP, etc.) and interface at runtime."
+    echo ""
+    echo "Quick start:"
+    echo "  python3 mesh_client.py --demo    # Demo mode (no hardware)"
     echo "  python3 mesh_client.py --tui     # TUI interface"
+    echo "  python3 mesh_client.py --web     # Web interface"
     echo ""
 
     if [[ "$INSTALL_SERVICE" =~ ^[Yy]$ ]]; then
@@ -471,12 +385,6 @@ print_summary() {
         echo "  sudo systemctl stop mesh-client    # Stop"
         echo "  sudo systemctl status mesh-client  # Status"
         echo "  sudo journalctl -u mesh-client -f  # Logs"
-        echo ""
-    fi
-
-    if [ "$INTERFACE_MODE" = "web" ] || [ "$INTERFACE_MODE" = "both" ]; then
-        echo "Web interface will be available at:"
-        echo "  http://$(hostname -I | awk '{print $1}'):${WEB_PORT:-8080}"
         echo ""
     fi
 }
@@ -499,11 +407,23 @@ main() {
     fi
 
     install_system_deps
-    configure_connection
-    configure_interface
+
+    # Defaults — connection mode is chosen at runtime via the launcher menu
+    CONN_TYPE="auto"
+    INSTALL_MESHTASTIC=true
+    MQTT_BROKER="mqtt.meshtastic.org"
+    MQTT_TOPIC="msh/US"
+    INTERFACE_MODE="tui"
+    WEB_PORT=8080
+
     setup_venv
     install_python_deps
     generate_config
+
+    # Create logs directory
+    mkdir -p "$SCRIPT_DIR/logs"
+    log_ok "Log directory created"
+
     setup_serial_permissions
     setup_systemd_service
     print_summary
