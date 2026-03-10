@@ -519,7 +519,7 @@ tui_color_scheme = default
 # Web server settings
 web_server = false
 web_host = 127.0.0.1
-web_port = 8080
+web_port = 9090
 web_api_enabled = true
 web_auth_enabled = false
 web_username = admin
@@ -1015,7 +1015,7 @@ def interactive_setup():
 
     if mode in ["web", "both"]:
         config.set("features", "web_server", "true")
-        port = input("Web port [8080]: ").strip() or "8080"
+        port = input("Web port [9090]: ").strip() or "9090"
         config.set("features", "web_port", port)
 
     # Save config with restrictive permissions
@@ -1421,7 +1421,7 @@ def run_application(config: ConfigParser):
 
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
             host = config.get("features", "web_host", fallback="127.0.0.1")
-            port = config.getint("features", "web_port", fallback=8080)
+            port = config.getint("features", "web_port", fallback=9090)
             web_app.run(host=host, port=port)
 
         elif mode == "both":
@@ -1436,7 +1436,7 @@ def run_application(config: ConfigParser):
             # Start web server in thread
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
             host = config.get("features", "web_host", fallback="127.0.0.1")
-            port = config.getint("features", "web_port", fallback=8080)
+            port = config.getint("features", "web_port", fallback=9090)
 
             def run_web():
                 import uvicorn
@@ -1510,7 +1510,7 @@ Examples:
     parser.add_argument(
         "--host", type=str, default=None, help="Web server bind address (e.g. 0.0.0.0 for network access)"
     )
-    parser.add_argument("--port", type=int, default=None, help="Web server port (default: 8080)")
+    parser.add_argument("--port", type=int, default=None, help="Web server port (default: 9090)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")

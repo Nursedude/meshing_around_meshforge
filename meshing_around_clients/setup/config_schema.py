@@ -508,7 +508,7 @@ class WebConfig:
     """Web dashboard configuration."""
 
     host: str = "127.0.0.1"
-    port: int = 8080
+    port: int = 9090
     debug: bool = False
     api_key: str = ""
     enable_auth: bool = False
@@ -748,7 +748,7 @@ class ConfigLoader:
             data = dict(parser.items("web"))
             config.web = WebConfig(
                 host=data.get("host", "127.0.0.1"),
-                port=int(data.get("port", 8080)),
+                port=int(data.get("port", 9090)),
                 debug=_str_to_bool(data.get("debug", False)),
                 api_key=data.get("api_key", ""),
                 enable_auth=_str_to_bool(data.get("enable_auth", False)),
