@@ -550,28 +550,42 @@ class MQTTMeshtasticClient(CallbackMixin):
             raise ValueError(f"MQTT {name} must not contain wildcard characters (# or +)")
         return value
 
+    def _resolve_channel_name(self, channel_index: int) -> str:
+        """Map a channel index to a channel name from the configured channels list.
+
+        Args:
+            channel_index: Numeric channel index (0-based).
+
+        Returns:
+            Channel name string for use in MQTT topic paths.
+        """
+        channels_str = getattr(self.mqtt_config, "channels", "") or self.mqtt_config.channel
+        channel_list = [c.strip() for c in channels_str.split(",") if c.strip()]
+        if not channel_list:
+            return self.mqtt_config.channel or "LongFast"
+        if 0 <= channel_index < len(channel_list):
+            return channel_list[channel_index]
+        return channel_list[0]
+
     def _subscribe_topics(self):
-        """Subscribe to Meshtastic MQTT topics."""
+        """Subscribe to Meshtastic MQTT topics for all configured channels."""
         root = self._validate_mqtt_topic_component(self.mqtt_config.topic_root, "topic_root")
-        channel = self._validate_mqtt_topic_component(self.mqtt_config.channel, "channel")
         qos = self.mqtt_config.qos
 
-        # Build comprehensive topic list
-        topics = [
-            # Primary channel topics
-            f"{root}/{channel}/#",  # All messages on configured channel
-            # JSON formatted messages (easier to parse)
-            f"{root}/+/json/#",  # JSON on any channel (covers /2/json/# too)
-            # Encrypted messages (channel 2 is often public)
-            f"{root}/2/e/#",
-            # Stats and service messages
-            f"{root}/2/stat/#",
-        ]
+        # Parse multi-channel list (comma-separated), fall back to single channel
+        channels_str = getattr(self.mqtt_config, "channels", "") or self.mqtt_config.channel
+        channel_list = [c.strip() for c in channels_str.split(",") if c.strip()]
+        if not channel_list:
+            channel_list = [self.mqtt_config.channel or "LongFast"]
 
-        # If using a specific channel, also subscribe to it explicitly
-        if channel and channel != "LongFast":
-            topics.append(f"{root}/{channel}/json/#")
-            topics.append(f"{root}/{channel}/e/#")
+        # Build topic list from configured channels
+        topics = []
+        for ch in channel_list:
+            ch = self._validate_mqtt_topic_component(ch, "channel")
+            topics.append(f"{root}/{ch}/#")
+            topics.append(f"{root}/{ch}/json/#")
+            topics.append(f"{root}/{ch}/e/#")
+            topics.append(f"{root}/{ch}/stat/#")
 
         # Deduplicate and subscribe
         seen = set()
@@ -1212,8 +1226,9 @@ class MQTTMeshtasticClient(CallbackMixin):
                 "payload": {"text": text},
             }
 
-            # Publish to appropriate topic
-            topic = f"{self.mqtt_config.topic_root}/{self.mqtt_config.channel}/json/{self.mqtt_config.node_id}"
+            # Publish to appropriate topic using the channel parameter
+            channel_name = self._resolve_channel_name(channel)
+            topic = f"{self.mqtt_config.topic_root}/{channel_name}/json/{self.mqtt_config.node_id}"
             self._client.publish(topic, json.dumps(message))
 
             # Log outgoing message

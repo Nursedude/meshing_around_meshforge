@@ -133,6 +133,7 @@ class MQTTConfig:
     password: str = "large4cats"
     topic_root: str = "msh/US"
     channel: str = "LongFast"
+    channels: str = "LongFast"  # Comma-separated channel list, e.g. "LongFast,meshforge,2"
     node_id: str = ""  # Virtual node ID for sending
     client_id: str = ""  # MQTT client ID (auto-generated if empty)
     # Encryption key for decrypting channel messages (base64 encoded)
@@ -353,6 +354,7 @@ class Config:
                 self.mqtt.password = self._parser.get("mqtt", "password", fallback="large4cats")
                 self.mqtt.topic_root = self._parser.get("mqtt", "topic_root", fallback="msh/US")
                 self.mqtt.channel = self._parser.get("mqtt", "channel", fallback="LongFast")
+                self.mqtt.channels = self._parser.get("mqtt", "channels", fallback=self.mqtt.channel)
                 self.mqtt.node_id = self._parser.get("mqtt", "node_id", fallback="")
                 self.mqtt.client_id = self._parser.get("mqtt", "client_id", fallback="")
                 self.mqtt.encryption_key = self._parser.get("mqtt", "encryption_key", fallback="")
@@ -538,6 +540,7 @@ class Config:
             self._parser.set("mqtt", "password", self.mqtt.password)
             self._parser.set("mqtt", "topic_root", self.mqtt.topic_root)
             self._parser.set("mqtt", "channel", self.mqtt.channel)
+            self._parser.set("mqtt", "channels", self.mqtt.channels)
             self._parser.set("mqtt", "node_id", self.mqtt.node_id)
             self._parser.set("mqtt", "client_id", self.mqtt.client_id)
             self._parser.set("mqtt", "encryption_key", self.mqtt.encryption_key)
