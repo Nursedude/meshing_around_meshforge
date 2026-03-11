@@ -1540,12 +1540,13 @@ class MeshingAroundTUI:
             self.console.print(f"\n[red]Connection failed: {error_msg}[/red]\n" if error_msg else "")
             self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
             self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
-            self.console.print("  [white]2)[/white] MQTT - Local/custom broker")
+            self.console.print("  [white]2)[/white] MQTT - Custom broker")
             self.console.print("  [white]3)[/white] TCP  - Remote Meshtastic device")
-            self.console.print("  [white]4)[/white] Demo mode (simulated data)")
-            self.console.print("  [white]5)[/white] Exit\n")
+            self.console.print("  [white]4)[/white] Install Meshtastic library")
+            self.console.print("  [white]5)[/white] Demo mode (simulated data)")
+            self.console.print("  [white]6)[/white] Exit\n")
 
-            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="4")
+            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6"], default="5")
 
             if choice == "1":
                 # MQTT public broker
@@ -1554,6 +1555,11 @@ class MeshingAroundTUI:
                 self.config.mqtt.port = 1883
                 self.config.mqtt.username = "meshdev"
                 self.config.mqtt.password = "large4cats"
+                # Allow customizing topic/channel even on public broker
+                topic = Prompt.ask("Topic root", default=self.config.mqtt.topic_root or "msh/US")
+                channel = Prompt.ask("Channel", default=self.config.mqtt.channel or "LongFast")
+                self.config.mqtt.topic_root = topic
+                self.config.mqtt.channel = channel
                 try:
                     from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
@@ -1565,12 +1571,21 @@ class MeshingAroundTUI:
                     return self._connection_fallback_menu()
 
             elif choice == "2":
-                # MQTT custom broker
-                broker = Prompt.ask("Broker hostname", default="localhost")
-                port = int(Prompt.ask("Broker port", default="1883"))
+                # MQTT custom broker — pre-fill from config
+                mqtt = self.config.mqtt
+                broker = Prompt.ask("Broker hostname", default=mqtt.broker or "localhost")
+                port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                username = Prompt.ask("Username", default=mqtt.username or "meshdev")
+                password = Prompt.ask("Password", default=mqtt.password or "large4cats")
+                topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
+                channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
                 self.config.mqtt.enabled = True
                 self.config.mqtt.broker = broker
                 self.config.mqtt.port = port
+                self.config.mqtt.username = username
+                self.config.mqtt.password = password
+                self.config.mqtt.topic_root = topic
+                self.config.mqtt.channel = channel
                 try:
                     from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
@@ -1591,6 +1606,10 @@ class MeshingAroundTUI:
                 return self.connect()
 
             elif choice == "4":
+                # Install Meshtastic library
+                return self._install_meshtastic_library()
+
+            elif choice == "5":
                 # Demo mode
                 self.demo_mode = True
                 self.api = MockMeshtasticAPI(self.config)
@@ -1601,6 +1620,48 @@ class MeshingAroundTUI:
             else:
                 # Exit
                 return False
+
+    def _install_meshtastic_library(self) -> bool:
+        """Install the Meshtastic library and dependencies, then reconnect."""
+        try:
+            from mesh_client import OPTIONAL_DEPS, check_internet, install_dependencies
+        except ImportError:
+            self.console.print("[red]Cannot import installer (mesh_client.py not found)[/red]")
+            time.sleep(2)
+            return self._connection_fallback_menu()
+
+        # Pre-flight internet check
+        self.console.print("[cyan]Checking internet connectivity...[/cyan]")
+        if not check_internet():
+            self.console.print("[red]No internet connection. Cannot install packages.[/red]")
+            time.sleep(2)
+            return self._connection_fallback_menu()
+
+        deps = OPTIONAL_DEPS.get("meshtastic", [])
+        self.console.print(f"[cyan]Installing: {', '.join(deps)}[/cyan]")
+        self.console.print("[dim]This may take a few minutes on ARM devices...[/dim]\n")
+
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=self.console) as progress:
+            task = progress.add_task("Installing Meshtastic library...", total=None)
+            success = install_dependencies(deps)
+            if success:
+                progress.update(task, description="[green]Installation complete![/green]")
+            else:
+                progress.update(task, description="[red]Installation failed[/red]")
+
+        if not success:
+            self.console.print("[red]Failed to install Meshtastic library. Check logs for details.[/red]")
+            time.sleep(2)
+            return self._connection_fallback_menu()
+
+        # Reload the meshtastic module
+        self.console.print("[green]Meshtastic library installed successfully![/green]")
+        time.sleep(1)
+
+        # Create a fresh API and attempt connection
+        self.api = MeshtasticAPI(self.config)
+        self._register_dirty_callbacks()
+        return self.connect()
 
     def _show_config_warnings(self) -> None:
         """Run config validation and display any warnings before connecting."""
