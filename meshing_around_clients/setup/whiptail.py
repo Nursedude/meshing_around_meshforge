@@ -45,8 +45,7 @@ def _reset_terminal() -> None:
     """
     try:
         tty_fd = os.open("/dev/tty", os.O_RDWR)
-        subprocess.run(["stty", "sane"], stdin=tty_fd, stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL)
+        subprocess.run(["stty", "sane"], stdin=tty_fd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         os.close(tty_fd)
     except OSError:
         pass
