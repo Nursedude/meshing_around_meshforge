@@ -14,6 +14,7 @@ import logging
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -1252,6 +1253,10 @@ class MeshingAroundTUI:
         self._space_weather_lock = threading.Lock()
         self._space_weather_fetching = False
 
+        # Live display and terminal state (set by run_interactive)
+        self._live: Optional[Any] = None
+        self._old_terminal_settings: Optional[Any] = None
+
         # Render debouncing — minimum interval between re-renders (seconds)
         self._last_render_time: float = 0.0
         self._min_render_interval: float = 0.25
@@ -1527,74 +1532,75 @@ class MeshingAroundTUI:
 
         Returns True if a connection was established, False to exit.
         """
-        error_msg = ""
-        if hasattr(self.api, "connection_info"):
-            error_msg = getattr(self.api.connection_info, "error_message", "")
+        with self._prompt_mode():
+            error_msg = ""
+            if hasattr(self.api, "connection_info"):
+                error_msg = getattr(self.api.connection_info, "error_message", "")
 
-        self.console.print(f"\n[red]Connection failed: {error_msg}[/red]\n" if error_msg else "")
-        self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
-        self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
-        self.console.print("  [white]2)[/white] MQTT - Local/custom broker")
-        self.console.print("  [white]3)[/white] TCP  - Remote Meshtastic device")
-        self.console.print("  [white]4)[/white] Demo mode (simulated data)")
-        self.console.print("  [white]5)[/white] Exit\n")
+            self.console.print(f"\n[red]Connection failed: {error_msg}[/red]\n" if error_msg else "")
+            self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
+            self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
+            self.console.print("  [white]2)[/white] MQTT - Local/custom broker")
+            self.console.print("  [white]3)[/white] TCP  - Remote Meshtastic device")
+            self.console.print("  [white]4)[/white] Demo mode (simulated data)")
+            self.console.print("  [white]5)[/white] Exit\n")
 
-        choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="4")
+            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="4")
 
-        if choice == "1":
-            # MQTT public broker
-            self.config.mqtt.enabled = True
-            self.config.mqtt.broker = "mqtt.meshtastic.org"
-            self.config.mqtt.port = 1883
-            self.config.mqtt.username = "meshdev"
-            self.config.mqtt.password = "large4cats"
-            try:
-                from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+            if choice == "1":
+                # MQTT public broker
+                self.config.mqtt.enabled = True
+                self.config.mqtt.broker = "mqtt.meshtastic.org"
+                self.config.mqtt.port = 1883
+                self.config.mqtt.username = "meshdev"
+                self.config.mqtt.password = "large4cats"
+                try:
+                    from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
-                self.api = MQTTMeshtasticClient(self.config)
+                    self.api = MQTTMeshtasticClient(self.config)
+                    self._register_dirty_callbacks()
+                    return self.connect()
+                except ImportError:
+                    self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                    return self._connection_fallback_menu()
+
+            elif choice == "2":
+                # MQTT custom broker
+                broker = Prompt.ask("Broker hostname", default="localhost")
+                port = int(Prompt.ask("Broker port", default="1883"))
+                self.config.mqtt.enabled = True
+                self.config.mqtt.broker = broker
+                self.config.mqtt.port = port
+                try:
+                    from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+                    self.api = MQTTMeshtasticClient(self.config)
+                    self._register_dirty_callbacks()
+                    return self.connect()
+                except ImportError:
+                    self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                    return self._connection_fallback_menu()
+
+            elif choice == "3":
+                # TCP remote device
+                hostname = Prompt.ask("Device hostname/IP")
+                self.config.interface.type = "tcp"
+                self.config.interface.hostname = hostname
+                self.api = MeshtasticAPI(self.config)
                 self._register_dirty_callbacks()
                 return self.connect()
-            except ImportError:
-                self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
-                return self._connection_fallback_menu()
 
-        elif choice == "2":
-            # MQTT custom broker
-            broker = Prompt.ask("Broker hostname", default="localhost")
-            port = int(Prompt.ask("Broker port", default="1883"))
-            self.config.mqtt.enabled = True
-            self.config.mqtt.broker = broker
-            self.config.mqtt.port = port
-            try:
-                from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-                self.api = MQTTMeshtasticClient(self.config)
+            elif choice == "4":
+                # Demo mode
+                self.demo_mode = True
+                self.api = MockMeshtasticAPI(self.config)
                 self._register_dirty_callbacks()
-                return self.connect()
-            except ImportError:
-                self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
-                return self._connection_fallback_menu()
+                self.api.connect()
+                return True
 
-        elif choice == "3":
-            # TCP remote device
-            hostname = Prompt.ask("Device hostname/IP")
-            self.config.interface.type = "tcp"
-            self.config.interface.hostname = hostname
-            self.api = MeshtasticAPI(self.config)
-            self._register_dirty_callbacks()
-            return self.connect()
-
-        elif choice == "4":
-            # Demo mode
-            self.demo_mode = True
-            self.api = MockMeshtasticAPI(self.config)
-            self._register_dirty_callbacks()
-            self.api.connect()
-            return True
-
-        else:
-            # Exit
-            return False
+            else:
+                # Exit
+                return False
 
     def _show_config_warnings(self) -> None:
         """Run config validation and display any warnings before connecting."""
@@ -1714,6 +1720,7 @@ class MeshingAroundTUI:
         old_settings = None
         try:
             old_settings = termios.tcgetattr(sys.stdin)
+            self._old_terminal_settings = old_settings
             # Set terminal to raw mode
             tty.setcbreak(sys.stdin.fileno())
 
@@ -1722,6 +1729,7 @@ class MeshingAroundTUI:
             # Use Rich Live for flicker-free in-place updates instead of
             # console.clear() + console.print() which causes visible blanking.
             with Live(self._render(), console=self.console, auto_refresh=False, screen=True) as live:
+                self._live = live
                 while self._running:
                     # Only re-render when data changed or user interacted (dirty flag)
                     if self._dirty:
@@ -1749,6 +1757,8 @@ class MeshingAroundTUI:
         except OSError as e:
             self.console.print(f"[red]I/O Error: {e}[/red]")
         finally:
+            self._live = None
+            self._old_terminal_settings = None
             # Restore terminal settings if we saved them successfully
             if old_settings is not None:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
@@ -1792,103 +1802,147 @@ class MeshingAroundTUI:
             if self.api.is_connected:
                 self.disconnect()
             else:
-                self.console.clear()
-                if not self.connect():
-                    self._connection_fallback_menu()
+                with self._prompt_mode():
+                    self.console.clear()
+                    if not self.connect():
+                        self._connection_fallback_menu()
+
+    @contextmanager
+    def _prompt_mode(self):
+        """Temporarily suspend Live display and restore cooked terminal for prompts."""
+        import termios
+        import tty
+
+        live = self._live
+        saved = self._old_terminal_settings
+
+        # Stop Live display (exits alternate screen buffer)
+        if live is not None:
+            try:
+                live.stop()
+            except Exception:
+                logger.debug("Failed to stop Live display for prompt mode")
+
+        # Restore cooked terminal mode so input()/Prompt.ask() works
+        if saved is not None:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
+            except (termios.error, OSError) as e:
+                logger.debug("Failed to restore terminal settings: %s", e)
+
+        try:
+            yield
+        finally:
+            # Re-enter cbreak mode
+            if saved is not None:
+                try:
+                    tty.setcbreak(sys.stdin.fileno())
+                except (termios.error, OSError) as e:
+                    logger.debug("Failed to re-enter cbreak mode: %s", e)
+
+            # Restart Live display
+            if live is not None:
+                try:
+                    live.start()
+                except Exception as e:
+                    logger.debug("Failed to restart Live display: %s", e)
+
+            self._dirty = True
 
     def _send_message_prompt(self) -> None:
         """Prompt user to send a message."""
-        self.console.clear()
-        self.console.print(Panel("[bold cyan]Send Message[/bold cyan]", border_style="cyan"))
+        with self._prompt_mode():
+            self.console.clear()
+            self.console.print(Panel("[bold cyan]Send Message[/bold cyan]", border_style="cyan"))
 
-        try:
-            text = Prompt.ask("Message")
-            if text:
-                msg_len = len(text.encode("utf-8"))
-                if msg_len > MAX_MESSAGE_BYTES:
-                    self.console.print(
-                        f"[red]Message too long: {msg_len}/{MAX_MESSAGE_BYTES} bytes. "
-                        f"Please shorten by {msg_len - MAX_MESSAGE_BYTES} bytes.[/red]"
-                    )
-                    time.sleep(2)
-                    return
+            try:
+                text = Prompt.ask("Message")
+                if text:
+                    msg_len = len(text.encode("utf-8"))
+                    if msg_len > MAX_MESSAGE_BYTES:
+                        self.console.print(
+                            f"[red]Message too long: {msg_len}/{MAX_MESSAGE_BYTES} bytes. "
+                            f"Please shorten by {msg_len - MAX_MESSAGE_BYTES} bytes.[/red]"
+                        )
+                        time.sleep(2)
+                        return
 
-                try:
-                    channel = int(Prompt.ask("Channel", default="0"))
-                except ValueError:
-                    self.console.print("[red]Invalid channel number[/red]")
+                    try:
+                        channel = int(Prompt.ask("Channel", default="0"))
+                    except ValueError:
+                        self.console.print("[red]Invalid channel number[/red]")
+                        time.sleep(1)
+                        return
+                    if channel < 0 or channel > 7:
+                        self.console.print("[red]Channel must be 0-7[/red]")
+                        time.sleep(1)
+                        return
+                    dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
+
+                    if self.api.send_message(text, dest, channel):
+                        self.console.print("[green]Message sent![/green]")
+                    else:
+                        self.console.print("[red]Failed to send message[/red]")
+
                     time.sleep(1)
-                    return
-                if channel < 0 or channel > 7:
-                    self.console.print("[red]Channel must be 0-7[/red]")
-                    time.sleep(1)
-                    return
-                dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
-
-                if self.api.send_message(text, dest, channel):
-                    self.console.print("[green]Message sent![/green]")
-                else:
-                    self.console.print("[red]Failed to send message[/red]")
-
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+            except KeyboardInterrupt:
+                pass
 
     def _add_device_prompt(self) -> None:
         """Prompt user to add a new device/interface."""
-        self.console.clear()
-        self.console.print(Panel("[bold cyan]Add Device[/bold cyan]", border_style="cyan"))
+        with self._prompt_mode():
+            self.console.clear()
+            self.console.print(Panel("[bold cyan]Add Device[/bold cyan]", border_style="cyan"))
 
-        self.console.print("  1. Serial (USB radio)")
-        self.console.print("  2. TCP (Remote device)")
-        self.console.print("  3. MQTT (Broker)")
-        self.console.print("  4. BLE (Bluetooth)")
-        self.console.print("  5. Cancel")
+            self.console.print("  1. Serial (USB radio)")
+            self.console.print("  2. TCP (Remote device)")
+            self.console.print("  3. MQTT (Broker)")
+            self.console.print("  4. BLE (Bluetooth)")
+            self.console.print("  5. Cancel")
 
-        try:
-            choice = Prompt.ask("Select type", choices=["1", "2", "3", "4", "5"], default="5")
-        except KeyboardInterrupt:
-            return
+            try:
+                choice = Prompt.ask("Select type", choices=["1", "2", "3", "4", "5"], default="5")
+            except KeyboardInterrupt:
+                return
 
-        if choice == "5":
-            return
+            if choice == "5":
+                return
 
-        type_map = {"1": "serial", "2": "tcp", "3": "mqtt", "4": "ble"}
-        iface_type = type_map[choice]
-        iface = InterfaceConfig(type=iface_type)
+            type_map = {"1": "serial", "2": "tcp", "3": "mqtt", "4": "ble"}
+            iface_type = type_map[choice]
+            iface = InterfaceConfig(type=iface_type)
 
-        try:
-            if iface_type == "serial":
-                port = Prompt.ask("Serial port", default="auto-detect")
-                if port != "auto-detect":
-                    iface.port = port
-            elif iface_type == "tcp":
-                iface.hostname = Prompt.ask("Hostname/IP")
-                iface.label = Prompt.ask("Label (optional)", default="")
-            elif iface_type == "mqtt":
-                self.console.print("[dim]MQTT uses broker settings from mesh_client.ini[/dim]")
-            elif iface_type == "ble":
-                iface.mac = Prompt.ask("BLE MAC address", default="scan")
+            try:
+                if iface_type == "serial":
+                    port = Prompt.ask("Serial port", default="auto-detect")
+                    if port != "auto-detect":
+                        iface.port = port
+                elif iface_type == "tcp":
+                    iface.hostname = Prompt.ask("Hostname/IP")
+                    iface.label = Prompt.ask("Label (optional)", default="")
+                elif iface_type == "mqtt":
+                    self.console.print("[dim]MQTT uses broker settings from mesh_client.ini[/dim]")
+                elif iface_type == "ble":
+                    iface.mac = Prompt.ask("BLE MAC address", default="scan")
 
-            # Hardware model (optional for all types)
-            hw = Prompt.ask(
-                "Hardware model",
-                choices=["TBEAM", "TLORA", "TECHO", "TDECK", "HELTEC", "RAK4631", "STATION_G2", "skip"],
-                default="skip",
-            )
-            if hw != "skip":
-                iface.hardware_model = hw
+                # Hardware model (optional for all types)
+                hw = Prompt.ask(
+                    "Hardware model",
+                    choices=["TBEAM", "TLORA", "TECHO", "TDECK", "HELTEC", "RAK4631", "STATION_G2", "skip"],
+                    default="skip",
+                )
+                if hw != "skip":
+                    iface.hardware_model = hw
 
-            if self.config.add_interface(iface):
-                self.console.print(f"[green]Added {iface_type.upper()} device[/green]")
-            else:
-                self.console.print("[red]Max 9 interfaces reached[/red]")
+                if self.config.add_interface(iface):
+                    self.console.print(f"[green]Added {iface_type.upper()} device[/green]")
+                else:
+                    self.console.print("[red]Max 9 interfaces reached[/red]")
 
-        except KeyboardInterrupt:
-            return
+            except KeyboardInterrupt:
+                return
 
-        time.sleep(1)
-        self._dirty = True
+            time.sleep(1)
 
     def _remove_device_prompt(self, index: int) -> None:
         """Remove a device/interface by index."""
@@ -1896,23 +1950,22 @@ class MeshingAroundTUI:
         if not interfaces or index >= len(interfaces):
             return
 
-        iface = interfaces[index]
-        self.console.clear()
-        target = iface.port or iface.hostname or iface.mac or iface.type
-        self.console.print(f"Remove device #{index + 1}: {iface.type.upper()} ({target})?")
+        with self._prompt_mode():
+            iface = interfaces[index]
+            self.console.clear()
+            target = iface.port or iface.hostname or iface.mac or iface.type
+            self.console.print(f"Remove device #{index + 1}: {iface.type.upper()} ({target})?")
 
-        try:
-            if Confirm.ask("Confirm removal", default=False):
-                if index == 0 and self.api.is_connected:
-                    self.console.print("[yellow]Disconnecting active device first...[/yellow]")
-                    self.disconnect()
-                self.config._interfaces.pop(index)
-                self.console.print("[green]Device removed[/green]")
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
-
-        self._dirty = True
+            try:
+                if Confirm.ask("Confirm removal", default=False):
+                    if index == 0 and self.api.is_connected:
+                        self.console.print("[yellow]Disconnecting active device first...[/yellow]")
+                        self.disconnect()
+                    self.config._interfaces.pop(index)
+                    self.console.print("[green]Device removed[/green]")
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                pass
 
     def _test_device_connection(self, index: int) -> None:
         """Test connection to a device."""
@@ -1920,54 +1973,54 @@ class MeshingAroundTUI:
         if not interfaces or index >= len(interfaces):
             return
 
-        iface = interfaces[index]
-        self.console.clear()
-        target = iface.port or iface.hostname or iface.mac or iface.type
-        self.console.print(f"Testing connection to {iface.type.upper()} ({target})...")
+        with self._prompt_mode():
+            iface = interfaces[index]
+            self.console.clear()
+            target = iface.port or iface.hostname or iface.mac or iface.type
+            self.console.print(f"Testing connection to {iface.type.upper()} ({target})...")
 
-        try:
-            if iface.type == "tcp" and iface.hostname:
-                import socket
+            try:
+                if iface.type == "tcp" and iface.hostname:
+                    import socket
 
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                try:
-                    sock.connect((iface.hostname, 4403))
-                    sock.close()
-                    self.console.print("[green]TCP connection successful![/green]")
-                except (ConnectionRefusedError, TimeoutError, OSError) as e:
-                    self.console.print(f"[red]TCP connection failed: {e}[/red]")
-            elif iface.type == "serial":
-                port = iface.port or "auto"
-                if port != "auto" and Path(port).exists():
-                    self.console.print(f"[green]Serial port {port} exists[/green]")
-                elif port == "auto":
-                    self.console.print("[yellow]Auto-detect requires meshtastic library[/yellow]")
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(5)
+                    try:
+                        sock.connect((iface.hostname, 4403))
+                        sock.close()
+                        self.console.print("[green]TCP connection successful![/green]")
+                    except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                        self.console.print(f"[red]TCP connection failed: {e}[/red]")
+                elif iface.type == "serial":
+                    port = iface.port or "auto"
+                    if port != "auto" and Path(port).exists():
+                        self.console.print(f"[green]Serial port {port} exists[/green]")
+                    elif port == "auto":
+                        self.console.print("[yellow]Auto-detect requires meshtastic library[/yellow]")
+                    else:
+                        self.console.print(f"[red]Serial port {port} not found[/red]")
+                elif iface.type == "mqtt":
+                    import socket
+
+                    broker = self.config.mqtt.broker if hasattr(self.config, "mqtt") else "mqtt.meshtastic.org"
+                    port = self.config.mqtt.port if hasattr(self.config, "mqtt") else 1883
+                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock.settimeout(5)
+                    try:
+                        sock.connect((broker, port))
+                        sock.close()
+                        self.console.print(f"[green]MQTT broker {broker}:{port} reachable![/green]")
+                    except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                        self.console.print(f"[red]MQTT broker unreachable: {e}[/red]")
                 else:
-                    self.console.print(f"[red]Serial port {port} not found[/red]")
-            elif iface.type == "mqtt":
-                import socket
+                    self.console.print(f"[yellow]Test not available for {iface.type} connections[/yellow]")
+            except ImportError as e:
+                self.console.print(f"[red]Missing dependency: {e}[/red]")
 
-                broker = self.config.mqtt.broker if hasattr(self.config, "mqtt") else "mqtt.meshtastic.org"
-                port = self.config.mqtt.port if hasattr(self.config, "mqtt") else 1883
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(5)
-                try:
-                    sock.connect((broker, port))
-                    sock.close()
-                    self.console.print(f"[green]MQTT broker {broker}:{port} reachable![/green]")
-                except (ConnectionRefusedError, TimeoutError, OSError) as e:
-                    self.console.print(f"[red]MQTT broker unreachable: {e}[/red]")
-            else:
-                self.console.print(f"[yellow]Test not available for {iface.type} connections[/yellow]")
-        except ImportError as e:
-            self.console.print(f"[red]Missing dependency: {e}[/red]")
-
-        try:
-            Prompt.ask("Press Enter to continue", default="")
-        except KeyboardInterrupt:
-            pass
-        self._dirty = True
+            try:
+                Prompt.ask("Press Enter to continue", default="")
+            except KeyboardInterrupt:
+                pass
 
     def _set_bot_radio(self, index: int) -> None:
         """Set a device as the primary bot output radio."""
@@ -1980,18 +2033,18 @@ class MeshingAroundTUI:
                 self._dirty = True
             return
 
-        iface = interfaces[index]
-        target = iface.port or iface.hostname or iface.mac or iface.type
-        self.console.clear()
-        self.console.print(f"Set {iface.type.upper()} ({target}) as active bot radio?")
-        self.console.print("[dim]This will disconnect the current radio and switch to this one.[/dim]")
+        with self._prompt_mode():
+            iface = interfaces[index]
+            target = iface.port or iface.hostname or iface.mac or iface.type
+            self.console.clear()
+            self.console.print(f"Set {iface.type.upper()} ({target}) as active bot radio?")
+            self.console.print("[dim]This will disconnect the current radio and switch to this one.[/dim]")
 
-        try:
-            if Confirm.ask("Confirm switch", default=False):
-                self._switch_to_interface(iface, index)
-        except KeyboardInterrupt:
-            pass
-        self._dirty = True
+            try:
+                if Confirm.ask("Confirm switch", default=False):
+                    self._switch_to_interface(iface, index)
+            except KeyboardInterrupt:
+                pass
 
     def _switch_to_interface(self, iface, index: int) -> bool:
         """Switch the active API connection to a different interface."""
