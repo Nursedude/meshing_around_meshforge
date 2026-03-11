@@ -1641,7 +1641,9 @@ class MeshingAroundTUI:
         self.console.print(f"[cyan]Installing: {', '.join(deps)}[/cyan]")
         self.console.print("[dim]This may take a few minutes on ARM devices...[/dim]\n")
 
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=self.console) as progress:
+        with Progress(
+            SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=self.console
+        ) as progress:
             task = progress.add_task("Installing Meshtastic library...", total=None)
             success = install_dependencies(deps)
             if success:
