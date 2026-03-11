@@ -219,7 +219,7 @@ def _fallback_menu(
     for i, (tag, desc) in enumerate(items, 1):
         marker = f" {_DIM}(default){_RESET}" if tag == default else ""
         print(f"  {i}. {desc}{marker}")
-    print(f"  0. Cancel / Back")
+    print("  0. Cancel / Back")
 
     default_num = "0"
     for i, (tag, _) in enumerate(items, 1):
@@ -296,7 +296,7 @@ def _fallback_radiolist(
         print(f"  {i}. {desc}{marker}")
         if selected:
             default_num = str(i)
-    print(f"  0. Cancel")
+    print("  0. Cancel")
 
     try:
         raw = input(f"\n{_CYAN}Select [{default_num}]:{_RESET} ").strip()
