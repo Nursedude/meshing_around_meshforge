@@ -900,7 +900,9 @@ def interactive_setup():
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     """
     from meshing_around_clients.setup.whiptail import (
-        inputbox, msgbox, radiolist,
+        inputbox,
+        msgbox,
+        radiolist,
     )
 
     print_banner()
@@ -926,15 +928,15 @@ def interactive_setup():
 
     # Hardware selection
     hw_items = [
-        ("TBEAM",      "LILYGO T-Beam (ESP32, GPS)", False),
-        ("TLORA",      "LILYGO T-Lora (ESP32, compact)", False),
-        ("TECHO",      "LILYGO T-Echo (nRF52840, e-ink)", False),
-        ("TDECK",      "LILYGO T-Deck (ESP32-S3, keyboard)", False),
-        ("HELTEC",     "Heltec LoRa 32 (ESP32, OLED)", False),
-        ("RAK4631",    "RAK WisBlock 4631 (nRF52840)", False),
+        ("TBEAM", "LILYGO T-Beam (ESP32, GPS)", False),
+        ("TLORA", "LILYGO T-Lora (ESP32, compact)", False),
+        ("TECHO", "LILYGO T-Echo (nRF52840, e-ink)", False),
+        ("TDECK", "LILYGO T-Deck (ESP32-S3, keyboard)", False),
+        ("HELTEC", "Heltec LoRa 32 (ESP32, OLED)", False),
+        ("RAK4631", "RAK WisBlock 4631 (nRF52840)", False),
         ("STATION_G2", "Station G2 (ESP32-S3, high-power)", False),
-        ("none",       "No radio hardware (MQTT/Demo)", False),
-        ("other",      "Other / not sure", True),
+        ("none", "No radio hardware (MQTT/Demo)", False),
+        ("other", "Other / not sure", True),
     ]
 
     hw_choice = radiolist("Select Your Radio Hardware", hw_items)
@@ -955,10 +957,10 @@ def interactive_setup():
     # Connection type
     conn_items = [
         ("serial", "Serial (USB radio connected)", conn_default == "serial"),
-        ("tcp",    "TCP (Remote device, protobuf port)", False),
-        ("http",   "HTTP (meshtasticd HTTP API)", False),
-        ("mqtt",   "MQTT (No radio, connect via broker)", conn_default == "mqtt"),
-        ("auto",   "Auto-detect", conn_default == "auto"),
+        ("tcp", "TCP (Remote device, protobuf port)", False),
+        ("http", "HTTP (meshtasticd HTTP API)", False),
+        ("mqtt", "MQTT (No radio, connect via broker)", conn_default == "mqtt"),
+        ("auto", "Auto-detect", conn_default == "auto"),
     ]
 
     conn_type = radiolist("Connection Type", conn_items)
@@ -1003,9 +1005,9 @@ def interactive_setup():
 
     # Interface mode
     mode_items = [
-        ("tui",      "TUI (Terminal)", True),
-        ("web",      "Web (Browser)", False),
-        ("both",     "Both (TUI + Web)", False),
+        ("tui", "TUI (Terminal)", True),
+        ("web", "Web (Browser)", False),
+        ("both", "Both (TUI + Web)", False),
         ("headless", "Headless (API only)", False),
     ]
 
@@ -1055,10 +1057,10 @@ def config_editor_menu() -> None:
         return
 
     items = [
-        ("ini",     "mesh_client.ini (Main configuration)"),
+        ("ini", "mesh_client.ini (Main configuration)"),
         ("enhanced", "config.enhanced.ini (Alert reference)"),
         ("systemd", "Systemd service file (Auto-start)"),
-        ("log",     "mesh_client.log (View current log)"),
+        ("log", "mesh_client.log (View current log)"),
     ]
 
     while True:
@@ -1122,12 +1124,12 @@ def update_menu(config: ConfigParser) -> None:
     from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
 
     items = [
-        ("check",     "Check for MeshForge updates"),
-        ("update",    "Update MeshForge (git pull)"),
-        ("deps",      "Reinstall dependencies"),
-        ("upstream",  "Update meshing-around (upstream)"),
-        ("clone",     "Install meshing-around (clone)"),
-        ("remove",    "Remove meshing-around"),
+        ("check", "Check for MeshForge updates"),
+        ("update", "Update MeshForge (git pull)"),
+        ("deps", "Reinstall dependencies"),
+        ("upstream", "Update meshing-around (upstream)"),
+        ("clone", "Install meshing-around (clone)"),
+        ("remove", "Remove meshing-around"),
     ]
 
     while True:
@@ -1274,14 +1276,14 @@ def launcher_menu(config: ConfigParser) -> bool:
     from meshing_around_clients.setup.whiptail import menu as wt_menu
 
     items = [
-        ("tui",     "TUI Client (Terminal UI)"),
-        ("web",     "Web Dashboard"),
-        ("mqtt",    "MQTT Monitor"),
-        ("both",    "Both (TUI + Web)"),
-        ("demo",    "Demo Mode"),
-        ("setup",   "Setup Wizard"),
-        ("config",  "Edit Configuration"),
-        ("update",  "Update / Reinstall"),
+        ("tui", "TUI Client (Terminal UI)"),
+        ("web", "Web Dashboard"),
+        ("mqtt", "MQTT Monitor"),
+        ("both", "Both (TUI + Web)"),
+        ("demo", "Demo Mode"),
+        ("setup", "Setup Wizard"),
+        ("config", "Edit Configuration"),
+        ("update", "Update / Reinstall"),
         ("install", "Install Everything"),
     ]
 

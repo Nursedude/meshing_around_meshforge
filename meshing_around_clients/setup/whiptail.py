@@ -37,6 +37,7 @@ def _can_use_whiptail() -> bool:
 # Whiptail wrappers
 # ---------------------------------------------------------------------------
 
+
 def menu(
     title: str,
     items: List[Tuple[str, str]],
@@ -60,8 +61,16 @@ def menu(
     if height == 0:
         height = menu_height + 8
     cmd = [
-        "whiptail", "--backtitle", BACKTITLE, "--title", title,
-        "--menu", "", str(height), str(width), str(menu_height),
+        "whiptail",
+        "--backtitle",
+        BACKTITLE,
+        "--title",
+        title,
+        "--menu",
+        "",
+        str(height),
+        str(width),
+        str(menu_height),
     ]
     if default:
         cmd.extend(["--default-item", default])
@@ -85,8 +94,15 @@ def yesno(
         return _fallback_yesno(question, default_yes)
 
     cmd = [
-        "whiptail", "--backtitle", BACKTITLE, "--title", "Confirm",
-        "--yesno", question, str(height), str(width),
+        "whiptail",
+        "--backtitle",
+        BACKTITLE,
+        "--title",
+        "Confirm",
+        "--yesno",
+        question,
+        str(height),
+        str(width),
     ]
     if not default_yes:
         cmd.append("--defaultno")
@@ -106,8 +122,15 @@ def msgbox(
         return
 
     cmd = [
-        "whiptail", "--backtitle", BACKTITLE, "--title", title,
-        "--msgbox", message, str(height), str(width),
+        "whiptail",
+        "--backtitle",
+        BACKTITLE,
+        "--title",
+        title,
+        "--msgbox",
+        message,
+        str(height),
+        str(width),
     ]
     subprocess.run(cmd)
 
@@ -123,8 +146,16 @@ def inputbox(
         return _fallback_inputbox(prompt, default)
 
     cmd = [
-        "whiptail", "--backtitle", BACKTITLE, "--title", "Input",
-        "--inputbox", prompt, str(height), str(width), default,
+        "whiptail",
+        "--backtitle",
+        BACKTITLE,
+        "--title",
+        "Input",
+        "--inputbox",
+        prompt,
+        str(height),
+        str(width),
+        default,
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -153,8 +184,16 @@ def radiolist(
     if height == 0:
         height = list_height + 8
     cmd = [
-        "whiptail", "--backtitle", BACKTITLE, "--title", title,
-        "--radiolist", "", str(height), str(width), str(list_height),
+        "whiptail",
+        "--backtitle",
+        BACKTITLE,
+        "--title",
+        title,
+        "--radiolist",
+        "",
+        str(height),
+        str(width),
+        str(list_height),
     ]
     for tag, desc, selected in items:
         cmd.extend([tag, desc, "ON" if selected else "OFF"])
@@ -168,6 +207,7 @@ def radiolist(
 # ---------------------------------------------------------------------------
 # Fallback implementations (print/input, no external deps)
 # ---------------------------------------------------------------------------
+
 
 def _fallback_menu(
     title: str,
