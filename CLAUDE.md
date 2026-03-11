@@ -72,6 +72,7 @@ meshing_around_meshforge/
     ├── setup/                  # Setup-only modules (used by configure_bot.py)
     │   ├── cli_utils.py        # Terminal colors, input helpers
     │   ├── pi_utils.py         # Pi detection, serial ports
+    │   ├── whiptail.py         # Whiptail dialog helpers + text fallback
     │   ├── system_maintenance.py # Updates, systemd
     │   ├── alert_configurators.py # Alert wizards
     │   └── config_schema.py    # Upstream format conversion
@@ -149,6 +150,7 @@ meshing_around_meshforge/
 | `core/mesh_crypto.py` | Encryption | AES-256-CTR, optional deps |
 | `tui/app.py` | Terminal UI | Rich-based, 6 screens |
 | `web/app.py` | Web UI | FastAPI + WebSocket |
+| `setup/whiptail.py` | Dialog helpers | Whiptail menus + print/input fallback |
 | `SECURITY_REVIEW.md` | Security audit | 22 findings, severity-rated, remediation status |
 
 ## Testing
@@ -181,6 +183,7 @@ python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883
 - Main app in `tui/app.py`
 - Uses Rich library with fallback
 - 6 screens: Dashboard, Nodes, Messages, Alerts, Topology, Help
+- **Launcher menus** (in `mesh_client.py`) use `setup/whiptail.py` — not Rich
 
 ### Modifying the Web UI
 - FastAPI app in `web/app.py`
