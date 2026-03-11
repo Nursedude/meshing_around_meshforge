@@ -304,7 +304,7 @@ CORE_DEPS = [
 OPTIONAL_DEPS = {
     "web": ["fastapi", "uvicorn", "jinja2", "python-multipart"],
     "mqtt": ["paho-mqtt"],
-    "meshtastic": ["meshtastic", "pypubsub", "pyopenssl>=25.3.0", "cryptography>=45.0.7,<47"],
+    "meshtastic": ["meshtastic[cli]", "pypubsub", "pyopenssl>=25.3.0", "cryptography>=45.0.7,<47"],
     "ble": ["bleak"],
 }
 
