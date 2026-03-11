@@ -1,4 +1,4 @@
-# MeshForge
+# meshing_around_meshforge
 
 Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-around) - configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for your Meshtastic mesh network.
 
@@ -187,6 +187,8 @@ pip install rich paho-mqtt
 python3 mesh_client.py --demo
 ```
 
+> **PEP 668 Note:** If `pip install` fails with an *externally-managed-environment* error on newer systems (Debian 12+, Ubuntu 23.04+), use the [virtual environment](#recommended-virtual-environment) method below.
+
 ### Recommended: Virtual Environment
 
 ```bash
@@ -241,20 +243,29 @@ When you run `python3 mesh_client.py` with no flags, an interactive launcher men
 
 On **Raspberry Pi** (and any system with `whiptail` installed), the launcher uses raspi-config-style dialog menus — ideal for SSH and headless setups. On other systems, it falls back to a numbered text menu:
 
-```
-┌──────────── MeshForge Launcher ────────────┐
-│                                            │
-│  tui       TUI Client (Terminal UI)        │
-│  web       Web Dashboard                   │
-│  mqtt      MQTT Monitor                    │
-│  both      Both (TUI + Web)               │
-│  demo      Demo Mode                       │
-│  setup     Setup Wizard                    │
-│  config    Edit Configuration              │
-│  update    Update / Reinstall              │
-│  install   Install Everything              │
-│                                            │
-└────────────────────────────────────────────┘
+```mermaid
+graph LR
+    subgraph "MeshForge Launcher"
+        TUI["tui — TUI Client"]
+        WEB["web — Web Dashboard"]
+        MQTT["mqtt — MQTT Monitor"]
+        BOTH["both — TUI + Web"]
+        DEMO["demo — Demo Mode"]
+        SETUP["setup — Setup Wizard"]
+        CONFIG["config — Edit Configuration"]
+        UPDATE["update — Update / Reinstall"]
+        INSTALL["install — Install Everything"]
+    end
+
+    style TUI fill:#27ae60,color:#fff
+    style WEB fill:#27ae60,color:#fff
+    style MQTT fill:#27ae60,color:#fff
+    style BOTH fill:#27ae60,color:#fff
+    style DEMO fill:#9b59b6,color:#fff
+    style SETUP fill:#f39c12,color:#fff
+    style CONFIG fill:#f39c12,color:#fff
+    style UPDATE fill:#f39c12,color:#fff
+    style INSTALL fill:#f39c12,color:#fff
 ```
 
 This is the recommended way to start MeshForge — select your mode interactively without needing to remember CLI flags.
@@ -565,6 +576,7 @@ meshing_around_meshforge/
     │   ├── meshtastic_api.py  # Device API + MockAPI
     │   ├── mqtt_client.py  # MQTT broker connection
     │   ├── mesh_crypto.py  # AES-256-CTR (optional deps)
+    │   ├── callbacks.py    # Shared callback/cooldown mixin
     │   └── models.py       # Node, Message, Alert, MeshNetwork
     ├── setup/              # Setup-only (configure_bot.py)
     │   ├── cli_utils.py    # Terminal colors, input helpers
@@ -578,6 +590,7 @@ meshing_around_meshforge/
     │   └── helpers.py      # Shared formatting, safe panel rendering
     └── web/
         ├── app.py          # FastAPI server
+        ├── middleware.py   # CSRF, rate limiting, security
         ├── templates/
         └── static/
 ```
@@ -633,10 +646,10 @@ The automated tests cover code logic, but these areas need validation with actua
 
 | Area | What's Needed | How to Help |
 |------|--------------|-------------|
-| **Serial mode** | USB connection to any Meshtastic device | Run `python3 mesh_client.py --serial` and report results |
-| **TCP mode** | Network-connected Meshtastic device (port 4403) | Run `python3 mesh_client.py --tcp <hostname>` |
-| **BLE mode** | Bluetooth-capable device nearby | Run `python3 mesh_client.py` with BLE config |
-| **MQTT (live)** | Extended run against `mqtt.meshtastic.org` | Run `python3 mesh_client.py --mqtt` for 30+ minutes |
+| **Serial mode** | USB connection to any Meshtastic device | Run `python3 mesh_client.py`, select **tui** with a USB device connected |
+| **TCP mode** | Network-connected Meshtastic device (port 4403) | Set `type = tcp` and `hostname = <address>` in `mesh_client.ini`, then run launcher |
+| **BLE mode** | Bluetooth-capable device nearby | Set `type = ble` and `mac = <address>` in `mesh_client.ini`, then run launcher |
+| **MQTT (live)** | Extended run against `mqtt.meshtastic.org` | Run `python3 mesh_client.py`, select **mqtt** from the launcher for 30+ minutes |
 | **Email/SMS** | SMTP server credentials, carrier SMS gateway | Configure `[smtp]` and `[sms]` sections in config |
 | **Web UI** | Browser testing across Chrome/Firefox/Safari | Run `python3 mesh_client.py --web` and check all pages |
 
