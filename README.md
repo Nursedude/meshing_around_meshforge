@@ -183,6 +183,9 @@ cd meshing_around_meshforge
 # Install core dependencies (no radio hardware needed)
 pip install rich paho-mqtt
 
+# Optional: install Meshtastic library + CLI tool
+pip install "meshtastic[cli]"
+
 # Try it out — no hardware required
 python3 mesh_client.py --demo
 ```
@@ -616,9 +619,11 @@ meshing_around_meshforge/
 - `jinja2` - Templates
 - `python-multipart` - Form handling
 
-**Radio hardware (optional — only for Serial/TCP/BLE):**
-- `meshtastic` - Device API
+**Meshtastic radio support (optional — for Serial/TCP/BLE and CLI tools):**
+- `meshtastic[cli]` - Device API + [Meshtastic CLI](https://meshtastic.org/docs/software/python/cli/) for radio configuration
 - `pypubsub` - Event system
+
+> **Meshtastic CLI:** Installing `meshtastic[cli]` (instead of bare `meshtastic`) includes the `meshtastic` command-line tool for configuring radios — channel setup, firmware info, device settings, etc. This is useful even in MQTT-only setups when you need to pre-configure devices remotely.
 
 **System (pre-installed on Raspberry Pi OS):**
 - `whiptail` - Dialog menus for launcher (falls back to text menus if unavailable)
@@ -683,7 +688,7 @@ This repository (`meshing_around_meshforge`) is the **lightweight monitoring and
 |---|-----------|-----------|
 | **Scope** | Monitoring client + alerts | Full NOC platform |
 | **Includes** | TUI, Web dashboard, MQTT client, 12 alert types | Gateway bridges, RF tools, maps, tactical ops, AI diagnostics |
-| **Install** | `pip install rich paho-mqtt` | `./install.sh` (full system setup) |
+| **Install** | `pip install rich paho-mqtt "meshtastic[cli]"` | `./install.sh` (full system setup) |
 | **Use when** | You want lightweight mesh monitoring | You want a complete mesh operations center |
 
 Both projects share Meshtastic MQTT patterns and can run independently. If you're starting out or want a simple monitoring setup, start here. If you need gateway bridging, RF analysis, or multi-protocol support (Meshtastic + Reticulum + AREDN), use [meshforge](https://github.com/Nursedude/meshforge).
