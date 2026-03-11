@@ -36,6 +36,22 @@ def _can_use_whiptail() -> bool:
 _WHIPTAIL_TIMEOUT: int = 30  # seconds
 
 
+def _reset_terminal() -> None:
+    """Restore terminal to sane state after whiptail corruption.
+
+    Whiptail uses newt/ncurses which changes terminal mode.  If it is
+    killed (timeout) or crashes before restoring, \n no longer implies
+    \r and the fallback menus render garbled.  ``stty sane`` fixes this.
+    """
+    try:
+        tty_fd = os.open("/dev/tty", os.O_RDWR)
+        subprocess.run(["stty", "sane"], stdin=tty_fd, stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL)
+        os.close(tty_fd)
+    except OSError:
+        pass
+
+
 def _run_whiptail(cmd: List[str]) -> Optional[subprocess.CompletedProcess]:
     """Run a whiptail command safely.
 
@@ -54,8 +70,10 @@ def _run_whiptail(cmd: List[str]) -> Optional[subprocess.CompletedProcess]:
             timeout=_WHIPTAIL_TIMEOUT,
         )
     except subprocess.TimeoutExpired:
+        _reset_terminal()
         return None
     except OSError:
+        _reset_terminal()
         return None
 
 
@@ -134,7 +152,9 @@ def yesno(
     ]
     if not default_yes:
         cmd.append("--defaultno")
-    result = subprocess.run(cmd)
+    result = _run_whiptail(cmd)
+    if result is None:
+        return _fallback_yesno(question, default_yes)
     return result.returncode == 0
 
 
@@ -160,7 +180,9 @@ def msgbox(
         str(height),
         str(width),
     ]
-    subprocess.run(cmd)
+    result = _run_whiptail(cmd)
+    if result is None:
+        _fallback_msgbox(message, title)
 
 
 def inputbox(
@@ -247,11 +269,11 @@ def _fallback_menu(
     default: str = "",
 ) -> Optional[str]:
     """Numbered menu using print/input."""
-    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n")
+    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n", flush=True)
     for i, (tag, desc) in enumerate(items, 1):
         marker = f" {_DIM}(default){_RESET}" if tag == default else ""
-        print(f"  {i}. {desc}{marker}")
-    print("  0. Cancel / Back")
+        print(f"  {i}. {desc}{marker}", flush=True)
+    print("  0. Cancel / Back", flush=True)
 
     default_num = "0"
     for i, (tag, _) in enumerate(items, 1):
@@ -297,8 +319,8 @@ def _fallback_yesno(question: str, default_yes: bool = True) -> bool:
 
 def _fallback_msgbox(message: str, title: str = "Info") -> None:
     """Print a message."""
-    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}")
-    print(message)
+    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}", flush=True)
+    print(message, flush=True)
     try:
         input("\nPress Enter to continue...")
     except (KeyboardInterrupt, EOFError):
@@ -321,14 +343,14 @@ def _fallback_radiolist(
     items: List[Tuple[str, str, bool]],
 ) -> Optional[str]:
     """Radio list using numbered print/input."""
-    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n")
+    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n", flush=True)
     default_num = "1"
     for i, (tag, desc, selected) in enumerate(items, 1):
         marker = " *" if selected else ""
-        print(f"  {i}. {desc}{marker}")
+        print(f"  {i}. {desc}{marker}", flush=True)
         if selected:
             default_num = str(i)
-    print("  0. Cancel")
+    print("  0. Cancel", flush=True)
 
     try:
         raw = input(f"\n{_CYAN}Select [{default_num}]:{_RESET} ").strip()
