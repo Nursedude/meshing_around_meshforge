@@ -206,8 +206,18 @@ class DashboardScreen(Screen):
         messages = safe_panel_render(self._create_messages_panel, "messages")
         alerts = safe_panel_render(self._create_alerts_panel, "alerts")
 
-        # Combine into layout
-        layout.split_column(Layout(stats, name="stats", size=5), Layout(name="main"))
+        # Combine into layout — show connect hint when disconnected
+        if not self.app.api.is_connected:
+            hint = Text(
+                "Press [c] to connect  ·  [?] help  ·  [q] quit",
+                style="bold yellow",
+                justify="center",
+            )
+            layout.split_column(
+                Layout(stats, name="stats", size=5), Layout(hint, name="hint", size=1), Layout(name="main")
+            )
+        else:
+            layout.split_column(Layout(stats, name="stats", size=5), Layout(name="main"))
         layout["main"].split_row(Layout(name="left"), Layout(name="right", ratio=2))
         layout["left"].split_column(Layout(nodes, name="nodes"), Layout(alerts, name="alerts"))
         layout["right"].update(messages)
