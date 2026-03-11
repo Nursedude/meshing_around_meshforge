@@ -237,28 +237,29 @@ python3 mesh_client.py --demo
 
 ### Launcher Menu
 
-When you run `python3 mesh_client.py` with no flags, an interactive launcher menu is displayed:
+When you run `python3 mesh_client.py` with no flags, an interactive launcher menu is displayed.
+
+On **Raspberry Pi** (and any system with `whiptail` installed), the launcher uses raspi-config-style dialog menus — ideal for SSH and headless setups. On other systems, it falls back to a numbered text menu:
 
 ```
-MeshForge Launcher
-
-  1. TUI Client (Terminal UI)
-  2. Web Dashboard
-  3. MQTT Monitor
-  4. Both (TUI + Web)
-  5. Demo Mode
-  6. Setup Wizard
-  7. Edit Configuration  (nano)
-  8. Update / Reinstall
-  9. Install Everything  (standalone setup)
-  0. Exit
-
-Select [1]:
+┌──────────── MeshForge Launcher ────────────┐
+│                                            │
+│  tui       TUI Client (Terminal UI)        │
+│  web       Web Dashboard                   │
+│  mqtt      MQTT Monitor                    │
+│  both      Both (TUI + Web)               │
+│  demo      Demo Mode                       │
+│  setup     Setup Wizard                    │
+│  config    Edit Configuration              │
+│  update    Update / Reinstall              │
+│  install   Install Everything              │
+│                                            │
+└────────────────────────────────────────────┘
 ```
 
 This is the recommended way to start MeshForge — select your mode interactively without needing to remember CLI flags.
 
-Option **9** performs a full standalone install: installs all Python dependencies, generates a default config file, and creates log directories. After install, choose your connection mode (MQTT, Serial, TCP, etc.) at runtime via the TUI.
+**Install Everything** performs a full standalone install: installs all Python dependencies, generates a default config file, and creates log directories. After install, choose your connection mode (MQTT, Serial, TCP, etc.) at runtime via the TUI.
 
 ### Common Run Modes
 
@@ -568,6 +569,7 @@ meshing_around_meshforge/
     ├── setup/              # Setup-only (configure_bot.py)
     │   ├── cli_utils.py    # Terminal colors, input helpers
     │   ├── pi_utils.py     # Pi detection, serial ports
+    │   ├── whiptail.py     # Whiptail dialog helpers + fallback
     │   ├── system_maintenance.py
     │   ├── alert_configurators.py
     │   └── config_schema.py
@@ -604,6 +606,9 @@ meshing_around_meshforge/
 **Radio hardware (optional — only for Serial/TCP/BLE):**
 - `meshtastic` - Device API
 - `pypubsub` - Event system
+
+**System (pre-installed on Raspberry Pi OS):**
+- `whiptail` - Dialog menus for launcher (falls back to text menus if unavailable)
 
 ## Testing
 

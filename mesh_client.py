@@ -895,13 +895,22 @@ def import_upstream_config(source_path: str):
 
 
 def interactive_setup():
-    """Run interactive setup wizard."""
+    """Run interactive setup wizard.
+
+    Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
+    """
+    from meshing_around_clients.setup.whiptail import (
+        inputbox,
+        msgbox,
+        radiolist,
+    )
+
     print_banner()
-    print(f"{Colors.CYAN}Interactive Setup Wizard{Colors.RESET}\n")
 
     config = load_config()
 
     # Platform detection
+    pi_info = ""
     try:
         from meshing_around_clients.setup.pi_utils import (
             get_pi_model,
@@ -912,118 +921,114 @@ def interactive_setup():
         if is_raspberry_pi():
             model = get_pi_model()
             rec_mode = get_recommended_connection_mode()
-            print(f"{Colors.GREEN}Detected: {model}{Colors.RESET}")
-            print(f"Recommended connection: {rec_mode}\n")
+            pi_info = f"Detected: {model}\nRecommended connection: {rec_mode}"
+            log(pi_info, "INFO")
     except ImportError:
         pass
 
     # Hardware selection
-    print("Supported Radio Hardware:")
-    print("  1. LILYGO T-Beam        (ESP32, GPS built-in)")
-    print("  2. LILYGO T-Lora        (ESP32, compact)")
-    print("  3. LILYGO T-Echo        (nRF52840, e-ink, GPS)")
-    print("  4. LILYGO T-Deck        (ESP32-S3, keyboard)")
-    print("  5. Heltec LoRa 32       (ESP32, OLED)")
-    print("  6. RAK WisBlock 4631    (nRF52840, modular)")
-    print("  7. Station G2           (ESP32-S3, high-power)")
-    print("  8. No radio hardware    (MQTT or Demo only)")
-    print("  9. Other / not sure")
+    hw_items = [
+        ("TBEAM", "LILYGO T-Beam (ESP32, GPS)", False),
+        ("TLORA", "LILYGO T-Lora (ESP32, compact)", False),
+        ("TECHO", "LILYGO T-Echo (nRF52840, e-ink)", False),
+        ("TDECK", "LILYGO T-Deck (ESP32-S3, keyboard)", False),
+        ("HELTEC", "Heltec LoRa 32 (ESP32, OLED)", False),
+        ("RAK4631", "RAK WisBlock 4631 (nRF52840)", False),
+        ("STATION_G2", "Station G2 (ESP32-S3, high-power)", False),
+        ("none", "No radio hardware (MQTT/Demo)", False),
+        ("other", "Other / not sure", True),
+    ]
 
-    hw_choice = input("\nSelect your radio [9]: ").strip() or "9"
+    hw_choice = radiolist("Select Your Radio Hardware", hw_items)
+    if hw_choice is None:
+        return
 
-    hw_map = {
-        "1": "TBEAM",
-        "2": "TLORA",
-        "3": "TECHO",
-        "4": "TDECK",
-        "5": "HELTEC",
-        "6": "RAK4631",
-        "7": "STATION_G2",
-        "8": "",
-        "9": "",
-    }
-    hw_model = hw_map.get(hw_choice, "")
-    if hw_model:
-        config.set("interface", "hardware_model", hw_model)
+    if hw_choice not in ("none", "other"):
+        config.set("interface", "hardware_model", hw_choice)
 
     # Set connection type default based on hardware
-    if hw_choice == "8":
-        conn_default = "4"  # MQTT for no-hardware
-        conn_default_label = "4"
-    elif hw_choice in ("1", "2", "3", "4", "5", "6", "7"):
-        conn_default = "1"  # Serial for real hardware
-        conn_default_label = "1"
+    if hw_choice == "none":
+        conn_default = "mqtt"
+    elif hw_choice == "other":
+        conn_default = "auto"
     else:
-        conn_default = "5"  # Auto-detect
-        conn_default_label = "5"
+        conn_default = "serial"
 
     # Connection type
-    print("\nConnection Options:")
-    print("  1. Serial (USB radio connected)")
-    print("  2. TCP (Remote Meshtastic device, protobuf port)")
-    print("  3. HTTP (meshtasticd HTTP API)")
-    print("  4. MQTT (No radio, connect via broker)")
-    print("  5. Auto-detect")
+    conn_items = [
+        ("serial", "Serial (USB radio connected)", conn_default == "serial"),
+        ("tcp", "TCP (Remote device, protobuf port)", False),
+        ("http", "HTTP (meshtasticd HTTP API)", False),
+        ("mqtt", "MQTT (No radio, connect via broker)", conn_default == "mqtt"),
+        ("auto", "Auto-detect", conn_default == "auto"),
+    ]
 
-    choice = input(f"\nSelect connection type [{conn_default_label}]: ").strip() or conn_default
-
-    conn_map = {"1": "serial", "2": "tcp", "3": "http", "4": "mqtt", "5": "auto"}
-    conn_type = conn_map.get(choice, "auto")
+    conn_type = radiolist("Connection Type", conn_items)
+    if conn_type is None:
+        return
     config.set("interface", "type", conn_type)
 
     if conn_type == "serial":
         ports = detect_serial_ports()
         if ports:
-            print(f"\nDetected ports: {', '.join(ports)}")
-        port = input("Serial port [auto-detect]: ").strip()
-        if port:
+            log(f"Detected ports: {', '.join(ports)}", "INFO")
+        port = inputbox("Serial port", default="auto-detect")
+        if port and port != "auto-detect":
             config.set("interface", "port", port)
 
     elif conn_type == "tcp":
-        host = input("TCP host [192.168.1.1]: ").strip() or "192.168.1.1"
-        config.set("interface", "hostname", host)
+        host = inputbox("TCP host", default="192.168.1.1")
+        if host:
+            config.set("interface", "hostname", host)
 
     elif conn_type == "http":
-        url = input("meshtasticd HTTP URL [http://meshtastic.local]: ").strip() or "http://meshtastic.local"
-        config.set("interface", "http_url", url)
+        url = inputbox("meshtasticd HTTP URL", default="http://meshtastic.local")
+        if url:
+            config.set("interface", "http_url", url)
 
     elif conn_type == "mqtt":
         config.set("mqtt", "enabled", "true")
 
-        broker = input("MQTT broker [mqtt.meshtastic.org]: ").strip() or "mqtt.meshtastic.org"
-        config.set("mqtt", "broker", broker)
+        broker = inputbox("MQTT broker", default="mqtt.meshtastic.org")
+        if broker:
+            config.set("mqtt", "broker", broker)
 
-        topic = input("MQTT topic root [msh/US]: ").strip() or "msh/US"
-        config.set("mqtt", "topic_root", topic)
+        topic = inputbox("MQTT topic root", default="msh/US")
+        if topic:
+            config.set("mqtt", "topic_root", topic)
 
-        channels = input("MQTT channels (comma-separated) [LongFast]: ").strip() or "LongFast"
-        config.set("mqtt", "channels", channels)
-        # Set active (send) channel to the first one
-        first_channel = channels.split(",")[0].strip()
-        config.set("mqtt", "channel", first_channel)
+        channels = inputbox("MQTT channels (comma-separated)", default="LongFast")
+        if channels:
+            config.set("mqtt", "channels", channels)
+            first_channel = channels.split(",")[0].strip()
+            config.set("mqtt", "channel", first_channel)
 
     # Interface mode
-    print("\nInterface Mode:")
-    print("  1. TUI (Terminal)")
-    print("  2. Web (Browser)")
-    print("  3. Both")
-    print("  4. Headless (API only)")
+    mode_items = [
+        ("tui", "TUI (Terminal)", True),
+        ("web", "Web (Browser)", False),
+        ("both", "Both (TUI + Web)", False),
+        ("headless", "Headless (API only)", False),
+    ]
 
-    mode_choice = input("\nSelect mode [1]: ").strip() or "1"
-    mode_map = {"1": "tui", "2": "web", "3": "both", "4": "headless"}
-    mode = mode_map.get(mode_choice, "tui")
+    mode = radiolist("Interface Mode", mode_items)
+    if mode is None:
+        return
     config.set("features", "mode", mode)
 
-    if mode in ["web", "both"]:
+    if mode in ("web", "both"):
         config.set("features", "web_server", "true")
-        port = input("Web port [9090]: ").strip() or "9090"
-        config.set("features", "web_port", port)
+        port = inputbox("Web port", default="9090")
+        if port:
+            config.set("features", "web_port", port)
 
     # Save config with restrictive permissions
     save_config(config)
 
-    print(f"\n{Colors.GREEN}Configuration saved to {CONFIG_FILE}{Colors.RESET}")
-    print("Run 'python3 mesh_client.py' to start the client.")
+    msgbox(
+        f"Configuration saved to {CONFIG_FILE}\n\nRun 'python3 mesh_client.py' to start.",
+        title="Setup Complete",
+    )
 
 
 # =============================================================================
@@ -1040,39 +1045,35 @@ def _find_editor() -> str:
 
 
 def config_editor_menu() -> None:
-    """Interactive menu for editing configuration files with nano."""
+    """Interactive menu for editing configuration files with nano.
+
+    Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
+    """
+    from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
+
     editor = _find_editor()
     if not editor:
         log("No text editor found (nano, vi, vim). Install nano: sudo apt install nano", "ERROR")
         return
 
+    items = [
+        ("ini", "mesh_client.ini (Main configuration)"),
+        ("enhanced", "config.enhanced.ini (Alert reference)"),
+        ("systemd", "Systemd service file (Auto-start)"),
+        ("log", "mesh_client.log (View current log)"),
+    ]
+
     while True:
-        print(f"\n{Colors.CYAN}{Colors.BOLD}Configuration Files{Colors.RESET}\n")
-        print(f"  1. mesh_client.ini        {Colors.DIM}(Main configuration){Colors.RESET}")
-        print(f"  2. config.enhanced.ini    {Colors.DIM}(Alert reference template){Colors.RESET}")
-        print(f"  3. Systemd service file   {Colors.DIM}(Auto-start service){Colors.RESET}")
-        print(f"  4. mesh_client.log        {Colors.DIM}(View current log){Colors.RESET}")
-        print("  0. Back to launcher")
+        choice = wt_menu("Configuration Files", items)
 
-        try:
-            choice = input(f"\n{Colors.CYAN}Select file [0]:{Colors.RESET} ").strip() or "0"
-        except (KeyboardInterrupt, EOFError):
-            print()
+        if choice is None:
             return
 
-        if choice == "0":
-            return
-
-        if choice == "1":
+        if choice == "ini":
             ini_path = CONFIG_FILE
             if not ini_path.exists():
                 log(f"{ini_path} not found.", "WARN")
-                try:
-                    create = input("Create from default template? [Y/n]: ").strip().lower()
-                except (KeyboardInterrupt, EOFError):
-                    print()
-                    continue
-                if create in ("", "y", "yes"):
+                if yesno("Create from default template?"):
                     try:
                         ini_path.write_text(DEFAULT_CONFIG)
                         os.chmod(str(ini_path), 0o600)
@@ -1084,14 +1085,14 @@ def config_editor_menu() -> None:
                     continue
             subprocess.run([editor, str(ini_path)])
 
-        elif choice == "2":
+        elif choice == "enhanced":
             enhanced_path = SCRIPT_DIR / "config.enhanced.ini"
             if not enhanced_path.exists():
                 log(f"{enhanced_path} not found.", "ERROR")
                 continue
             subprocess.run([editor, str(enhanced_path)])
 
-        elif choice == "3":
+        elif choice == "systemd":
             service_path = Path("/etc/systemd/system/mesh-client.service")
             if not service_path.exists():
                 log("Systemd service not installed.", "WARN")
@@ -1100,12 +1101,11 @@ def config_editor_menu() -> None:
             log("Opening service file (sudo required)...", "INFO")
             subprocess.run(["sudo", editor, str(service_path)])
 
-        elif choice == "4":
+        elif choice == "log":
             log_path = LOG_FILE
             if not log_path.exists():
                 log("No log file found yet. Run the client first.", "WARN")
                 continue
-            # Open in read-only mode with nano -v, or use less
             if editor == "nano":
                 subprocess.run([editor, "-v", str(log_path)])
             else:
@@ -1115,33 +1115,31 @@ def config_editor_menu() -> None:
                 else:
                     subprocess.run([editor, str(log_path)])
 
-        else:
-            log(f"Invalid choice: {choice}", "WARN")
-
 
 def update_menu(config: ConfigParser) -> None:
-    """Interactive menu for updating/reinstalling MeshForge and meshing-around."""
+    """Interactive menu for updating/reinstalling MeshForge and meshing-around.
+
+    Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
+    """
+    from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
+
+    items = [
+        ("check", "Check for MeshForge updates"),
+        ("update", "Update MeshForge (git pull)"),
+        ("deps", "Reinstall dependencies"),
+        ("upstream", "Update meshing-around (upstream)"),
+        ("clone", "Install meshing-around (clone)"),
+        ("remove", "Remove meshing-around"),
+    ]
+
     while True:
-        print(f"\n{Colors.CYAN}{Colors.BOLD}Update / Reinstall{Colors.RESET}\n")
-        print("  1. Check for MeshForge updates")
-        print("  2. Update MeshForge (git pull)")
-        print("  3. Reinstall dependencies")
-        print(f"  4. Update meshing-around {Colors.DIM}(upstream){Colors.RESET}")
-        print(f"  5. Install meshing-around {Colors.DIM}(clone){Colors.RESET}")
-        print("  6. Remove meshing-around")
-        print("  0. Back to launcher")
+        choice = wt_menu("Update / Reinstall", items)
 
-        try:
-            choice = input(f"\n{Colors.CYAN}Select action [0]:{Colors.RESET} ").strip() or "0"
-        except (KeyboardInterrupt, EOFError):
-            print()
+        if choice is None:
             return
 
-        if choice == "0":
-            return
-
-        # Options 1, 2, 4, 5, 6 need system_maintenance imports
-        if choice in ("1", "2", "4", "5", "6"):
+        # Most options need system_maintenance imports
+        if choice in ("check", "update", "upstream", "clone", "remove"):
             try:
                 from meshing_around_clients.setup.system_maintenance import (
                     check_for_updates,
@@ -1152,10 +1150,10 @@ def update_menu(config: ConfigParser) -> None:
                 )
             except ImportError:
                 log("Cannot import update modules — dependencies may not be installed.", "ERROR")
-                log("Use option 3 to install dependencies first.", "INFO")
+                log("Use 'Reinstall dependencies' first.", "INFO")
                 continue
 
-        if choice == "1":
+        if choice == "check":
             log("Checking for updates...", "INFO")
             has_updates, message, commits = check_for_updates(SCRIPT_DIR)
             if has_updates:
@@ -1163,7 +1161,7 @@ def update_menu(config: ConfigParser) -> None:
             else:
                 log(message, "OK")
 
-        elif choice == "2":
+        elif choice == "update":
             log("Updating MeshForge...", "INFO")
             result = update_meshforge(SCRIPT_DIR)
             if result.success:
@@ -1175,7 +1173,7 @@ def update_menu(config: ConfigParser) -> None:
                 for err in result.errors:
                     log(f"  {err[:100]}", "ERROR")
 
-        elif choice == "3":
+        elif choice == "deps":
             missing = get_missing_deps(config)
             if missing:
                 log(f"Installing missing: {', '.join(missing)}", "INFO")
@@ -1185,12 +1183,7 @@ def update_menu(config: ConfigParser) -> None:
                 else:
                     log("Installation failed.", "ERROR")
             else:
-                try:
-                    reinstall = input("All dependencies present. Reinstall all? [y/N]: ").strip().lower()
-                except (KeyboardInterrupt, EOFError):
-                    print()
-                    continue
-                if reinstall in ("y", "yes"):
+                if yesno("All dependencies present. Reinstall all?", default_yes=False):
                     all_deps = list(CORE_DEPS)
                     for dep_list in OPTIONAL_DEPS.values():
                         all_deps.extend(dep_list)
@@ -1202,7 +1195,7 @@ def update_menu(config: ConfigParser) -> None:
                     else:
                         log("Reinstallation failed.", "ERROR")
 
-        elif choice == "4":
+        elif choice == "upstream":
             log("Updating meshing-around...", "INFO")
             result = update_upstream()
             if result.success:
@@ -1210,7 +1203,7 @@ def update_menu(config: ConfigParser) -> None:
             else:
                 log(result.message, "ERROR")
 
-        elif choice == "5":
+        elif choice == "clone":
             log("Installing meshing-around...", "INFO")
             result = clone_meshing_around()
             if result.success:
@@ -1218,26 +1211,18 @@ def update_menu(config: ConfigParser) -> None:
             else:
                 log(result.message, "ERROR")
 
-        elif choice == "6":
+        elif choice == "remove":
             ma_path = find_meshing_around()
             if ma_path is None:
                 log("meshing-around installation not found.", "WARN")
                 continue
             log(f"Found meshing-around at: {ma_path}", "INFO")
-            try:
-                confirm = input(f"Remove {ma_path}? This cannot be undone. [y/N]: ").strip().lower()
-            except (KeyboardInterrupt, EOFError):
-                print()
-                continue
-            if confirm in ("y", "yes"):
+            if yesno(f"Remove {ma_path}? This cannot be undone.", default_yes=False):
                 try:
                     shutil.rmtree(str(ma_path))
                     log("meshing-around removed.", "OK")
                 except OSError as e:
                     log(f"Failed to remove: {e}", "ERROR")
-
-        else:
-            log(f"Invalid choice: {choice}", "WARN")
 
 
 # =============================================================================
@@ -1285,60 +1270,55 @@ def standalone_install(config: ConfigParser) -> None:
 def launcher_menu(config: ConfigParser) -> bool:
     """Interactive launcher menu - shown when no mode flag is passed.
 
+    Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     Returns True if the user selected a mode and the app ran, False to exit.
     """
+    from meshing_around_clients.setup.whiptail import menu as wt_menu
+
+    items = [
+        ("tui", "TUI Client (Terminal UI)"),
+        ("web", "Web Dashboard"),
+        ("mqtt", "MQTT Monitor"),
+        ("both", "Both (TUI + Web)"),
+        ("demo", "Demo Mode"),
+        ("setup", "Setup Wizard"),
+        ("config", "Edit Configuration"),
+        ("update", "Update / Reinstall"),
+        ("install", "Install Everything"),
+    ]
+
     while True:
-        print(f"\n{Colors.CYAN}{Colors.BOLD}MeshForge Launcher{Colors.RESET}\n")
-        print("  1. TUI Client (Terminal UI)")
-        print("  2. Web Dashboard")
-        print("  3. MQTT Monitor")
-        print("  4. Both (TUI + Web)")
-        print("  5. Demo Mode")
-        print("  6. Setup Wizard")
-        print(f"  7. Edit Configuration  {Colors.DIM}(nano){Colors.RESET}")
-        print("  8. Update / Reinstall")
-        print(f"  9. Install Everything  {Colors.DIM}(standalone setup){Colors.RESET}")
-        print("  0. Exit")
+        choice = wt_menu("MeshForge Launcher", items, default="tui")
 
-        try:
-            choice = input(f"\n{Colors.CYAN}Select [1]:{Colors.RESET} ").strip() or "1"
-        except (KeyboardInterrupt, EOFError):
-            print()
+        if choice is None:
             return True
 
-        if choice == "0":
-            return True
-
-        if choice == "1":
+        if choice == "tui":
             config.set("features", "mode", "tui")
-        elif choice == "2":
+        elif choice == "web":
             config.set("features", "mode", "web")
             config.set("features", "web_server", "true")
-        elif choice == "3":
-            # MQTT Monitor: TUI mode with MQTT connection
+        elif choice == "mqtt":
             config.set("features", "mode", "tui")
             config.set("mqtt", "enabled", "true")
             config.set("interface", "type", "mqtt")
-        elif choice == "4":
+        elif choice == "both":
             config.set("features", "mode", "both")
             config.set("features", "web_server", "true")
-        elif choice == "5":
+        elif choice == "demo":
             config.set("advanced", "demo_mode", "true")
             config.set("features", "mode", "tui")
-        elif choice == "6":
+        elif choice == "setup":
             interactive_setup()
             return True
-        elif choice == "7":
+        elif choice == "config":
             config_editor_menu()
             continue
-        elif choice == "8":
+        elif choice == "update":
             update_menu(config)
             continue
-        elif choice == "9":
+        elif choice == "install":
             standalone_install(config)
-            continue
-        else:
-            log(f"Invalid choice: {choice}", "WARN")
             continue
 
         return run_application(config)
