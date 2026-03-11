@@ -205,9 +205,7 @@ class MeshtasticAPI(CallbackMixin):
         if interface_type == "serial":
             port = self.config.interface.port if self.config.interface.port else None
             self.connection_info.device_path = port or "auto"
-            return self._try_create(
-                mod.SerialInterface, port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-            )
+            return self._try_create(mod.SerialInterface, port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "tcp":
             hostname = self.config.interface.hostname
             if not hostname:
@@ -215,9 +213,7 @@ class MeshtasticAPI(CallbackMixin):
             if not _HOSTNAME_RE.match(hostname):
                 raise ValueError(f"Invalid TCP hostname: {hostname!r}")
             self.connection_info.device_path = hostname
-            return self._try_create(
-                mod.TCPInterface, hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-            )
+            return self._try_create(mod.TCPInterface, hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "http":
             base_url = self.config.interface.http_url
             if not base_url:
@@ -228,9 +224,7 @@ class MeshtasticAPI(CallbackMixin):
                     raise ValueError(f"Invalid HTTP hostname: {hostname!r}")
                 base_url = f"http://{hostname}"
             self.connection_info.device_path = base_url
-            return self._try_create(
-                mod.HTTPInterface, base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS
-            )
+            return self._try_create(mod.HTTPInterface, base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "ble":
             mac = self.config.interface.mac
             if not mac:
