@@ -41,7 +41,7 @@ from .models import (  # noqa: E402
 
 # Core meshtastic + pubsub (required for any hardware connection)
 try:
-    import meshtastic
+    importlib.import_module("meshtastic")
     from pubsub import pub
 
     MESHTASTIC_AVAILABLE = True
