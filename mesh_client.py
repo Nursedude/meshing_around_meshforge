@@ -79,11 +79,12 @@ class Colors:
     YELLOW = "\033[93m"
     BLUE = "\033[94m"
     CYAN = "\033[96m"
+    DIM = "\033[2m"
 
     @classmethod
     def disable(cls):
         """Disable colors for non-TTY output."""
-        for attr in ["RESET", "BOLD", "RED", "GREEN", "YELLOW", "BLUE", "CYAN"]:
+        for attr in ["RESET", "BOLD", "DIM", "RED", "GREEN", "YELLOW", "BLUE", "CYAN"]:
             setattr(cls, attr, "")
 
 
