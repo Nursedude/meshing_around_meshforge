@@ -1627,6 +1627,7 @@ Examples:
 
     # Show launcher menu if no mode flag was passed and we have a TTY
     if not has_mode_flag and sys.stdin.isatty():
+        log("Loading launcher menu...", "INFO")
         try:
             success = launcher_menu(config)
             sys.exit(0 if success else 1)

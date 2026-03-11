@@ -33,6 +33,32 @@ def _can_use_whiptail() -> bool:
     return HAS_WHIPTAIL and _is_tty()
 
 
+_WHIPTAIL_TIMEOUT: int = 30  # seconds
+
+
+def _run_whiptail(cmd: List[str]) -> Optional[subprocess.CompletedProcess]:
+    """Run a whiptail command safely.
+
+    Lets whiptail render its UI via /dev/tty (stdout not piped),
+    captures only stderr (where whiptail returns user selections),
+    and enforces a timeout to prevent hangs in broken terminal environments.
+
+    Returns the CompletedProcess on success, or None on timeout/error.
+    """
+    try:
+        return subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=_WHIPTAIL_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired:
+        return None
+    except OSError:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Whiptail wrappers
 # ---------------------------------------------------------------------------
@@ -77,7 +103,9 @@ def menu(
     for tag, desc in items:
         cmd.extend([tag, desc])
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_whiptail(cmd)
+    if result is None:
+        return _fallback_menu(title, items, default)
     if result.returncode != 0:
         return None
     return result.stderr.strip()
@@ -157,7 +185,9 @@ def inputbox(
         str(width),
         default,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_whiptail(cmd)
+    if result is None:
+        return _fallback_inputbox(prompt, default)
     if result.returncode != 0:
         return None
     return result.stderr.strip()
@@ -198,7 +228,9 @@ def radiolist(
     for tag, desc, selected in items:
         cmd.extend([tag, desc, "ON" if selected else "OFF"])
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_whiptail(cmd)
+    if result is None:
+        return _fallback_radiolist(title, items)
     if result.returncode != 0:
         return None
     return result.stderr.strip()
