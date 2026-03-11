@@ -3,6 +3,7 @@ Meshtastic API layer for Meshing-Around Clients.
 Provides interface to communicate with Meshtastic devices.
 """
 
+import importlib
 import logging
 import queue
 import random
@@ -56,13 +57,12 @@ def refresh_meshtastic_availability() -> bool:
     """Re-check whether the meshtastic library is importable (e.g. after pip install)."""
     global MESHTASTIC_AVAILABLE
     try:
-        import meshtastic
-        import meshtastic.ble_interface
-        import meshtastic.http_interface
-        import meshtastic.serial_interface
-        import meshtastic.tcp_interface
-        from pubsub import pub
-
+        importlib.import_module("meshtastic")
+        importlib.import_module("meshtastic.ble_interface")
+        importlib.import_module("meshtastic.http_interface")
+        importlib.import_module("meshtastic.serial_interface")
+        importlib.import_module("meshtastic.tcp_interface")
+        importlib.import_module("pubsub")
         MESHTASTIC_AVAILABLE = True
     except ImportError:
         MESHTASTIC_AVAILABLE = False
