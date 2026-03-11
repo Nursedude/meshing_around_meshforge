@@ -948,7 +948,7 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
 
         # Install core packages individually with fixes
         core_packages = [
-            "meshtastic",
+            "meshtastic[cli]",
             "PyPubSub",  # Instead of pubsub
             "ephem",  # Instead of pyephem
             "requests",
