@@ -39,18 +39,30 @@ from .models import (  # noqa: E402
     Position,
 )
 
-# Try to import meshtastic
+# Core meshtastic + pubsub (required for any hardware connection)
 try:
-    import meshtastic
-    import meshtastic.ble_interface
-    import meshtastic.http_interface
-    import meshtastic.serial_interface
-    import meshtastic.tcp_interface
+    importlib.import_module("meshtastic")
     from pubsub import pub
 
     MESHTASTIC_AVAILABLE = True
 except ImportError:
     MESHTASTIC_AVAILABLE = False
+
+# Interface sub-modules (each may have platform-specific deps, e.g. bleak for BLE)
+_INTERFACE_MODULES: dict = {}
+for _mod_name in ("serial_interface", "tcp_interface", "http_interface", "ble_interface"):
+    try:
+        _INTERFACE_MODULES[_mod_name] = importlib.import_module(f"meshtastic.{_mod_name}")
+    except ImportError:
+        _INTERFACE_MODULES[_mod_name] = None
+
+# Maps config interface type to sub-module name
+_INTERFACE_TYPE_MAP = {
+    "serial": "serial_interface",
+    "tcp": "tcp_interface",
+    "http": "http_interface",
+    "ble": "ble_interface",
+}
 
 
 def refresh_meshtastic_availability() -> bool:
@@ -58,14 +70,18 @@ def refresh_meshtastic_availability() -> bool:
     global MESHTASTIC_AVAILABLE
     try:
         importlib.import_module("meshtastic")
-        importlib.import_module("meshtastic.ble_interface")
-        importlib.import_module("meshtastic.http_interface")
-        importlib.import_module("meshtastic.serial_interface")
-        importlib.import_module("meshtastic.tcp_interface")
         importlib.import_module("pubsub")
         MESHTASTIC_AVAILABLE = True
     except ImportError:
         MESHTASTIC_AVAILABLE = False
+
+    # Re-probe interface sub-modules
+    for mod_name in ("serial_interface", "tcp_interface", "http_interface", "ble_interface"):
+        try:
+            _INTERFACE_MODULES[mod_name] = importlib.import_module(f"meshtastic.{mod_name}")
+        except ImportError:
+            _INTERFACE_MODULES[mod_name] = None
+
     return MESHTASTIC_AVAILABLE
 
 
@@ -169,10 +185,17 @@ class MeshtasticAPI(CallbackMixin):
 
     def _create_interface(self, interface_type: str):
         """Create and return the appropriate Meshtastic interface."""
+        mod_name = _INTERFACE_TYPE_MAP.get(interface_type)
+        if mod_name is None:
+            raise ValueError(f"Unknown interface type: {interface_type}")
+        mod = _INTERFACE_MODULES.get(mod_name)
+        if mod is None:
+            raise ImportError(f"meshtastic.{mod_name} not available — install its dependencies")
+
         if interface_type == "serial":
             port = self.config.interface.port if self.config.interface.port else None
             self.connection_info.device_path = port or "auto"
-            return meshtastic.serial_interface.SerialInterface(port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+            return mod.SerialInterface(port, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "tcp":
             hostname = self.config.interface.hostname
             if not hostname:
@@ -180,7 +203,7 @@ class MeshtasticAPI(CallbackMixin):
             if not _HOSTNAME_RE.match(hostname):
                 raise ValueError(f"Invalid TCP hostname: {hostname!r}")
             self.connection_info.device_path = hostname
-            return meshtastic.tcp_interface.TCPInterface(hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+            return mod.TCPInterface(hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "http":
             base_url = self.config.interface.http_url
             if not base_url:
@@ -191,15 +214,13 @@ class MeshtasticAPI(CallbackMixin):
                     raise ValueError(f"Invalid HTTP hostname: {hostname!r}")
                 base_url = f"http://{hostname}"
             self.connection_info.device_path = base_url
-            return meshtastic.http_interface.HTTPInterface(base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+            return mod.HTTPInterface(base_url, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
         elif interface_type == "ble":
             mac = self.config.interface.mac
             if not mac:
                 raise ValueError("BLE MAC address not configured")
             self.connection_info.device_path = mac
-            return meshtastic.ble_interface.BLEInterface(mac)
-        else:
-            raise ValueError(f"Unknown interface type: {interface_type}")
+            return mod.BLEInterface(mac)
 
     def _start_worker_thread(self) -> None:
         """Stop any previous worker thread and start a fresh one."""
@@ -335,7 +356,7 @@ class MeshtasticAPI(CallbackMixin):
                 self.network.connection_status = "error"
                 raise
 
-        except (OSError, ConnectionError, TimeoutError) as e:
+        except (OSError, ConnectionError, TimeoutError, ImportError) as e:
             self.connection_info.error_message = f"Connection failed ({type(e).__name__}): {e}"
             self.connection_info.connected = False
             self.network.connection_status = "error"
