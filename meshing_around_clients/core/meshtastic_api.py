@@ -52,6 +52,23 @@ except ImportError:
     MESHTASTIC_AVAILABLE = False
 
 
+def refresh_meshtastic_availability() -> bool:
+    """Re-check whether the meshtastic library is importable (e.g. after pip install)."""
+    global MESHTASTIC_AVAILABLE
+    try:
+        import meshtastic
+        import meshtastic.ble_interface
+        import meshtastic.http_interface
+        import meshtastic.serial_interface
+        import meshtastic.tcp_interface
+        from pubsub import pub
+
+        MESHTASTIC_AVAILABLE = True
+    except ImportError:
+        MESHTASTIC_AVAILABLE = False
+    return MESHTASTIC_AVAILABLE
+
+
 @dataclass
 class ConnectionInfo:
     """Connection information and status."""
