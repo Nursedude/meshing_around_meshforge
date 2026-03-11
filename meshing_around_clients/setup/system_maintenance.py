@@ -624,7 +624,7 @@ def install_python_dependencies(
         result.errors.append(f"pip install failed: {stderr[:100]}")
 
         # Try installing core packages individually
-        core_packages = ["meshtastic", "PyPubSub", "requests", "paho-mqtt", "rich", "fastapi", "uvicorn"]
+        core_packages = ["meshtastic[cli]", "PyPubSub", "requests", "paho-mqtt", "rich", "fastapi", "uvicorn"]
 
         report("Trying individual package installation...")
         for pkg in core_packages:

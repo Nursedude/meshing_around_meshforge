@@ -152,7 +152,7 @@ install_python_deps() {
 
     # Meshtastic (radio support)
     log_info "Installing meshtastic (this may take a few minutes)..."
-    pip install $PIP_OPTS meshtastic pypubsub -q
+    pip install $PIP_OPTS "meshtastic[cli]" pypubsub -q
     log_ok "Installed: meshtastic (Radio support)"
 
     # Cryptography / SSL (pin to resolve pyopenssl conflict)
