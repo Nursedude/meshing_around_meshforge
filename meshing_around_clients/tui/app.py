@@ -1656,7 +1656,11 @@ class MeshingAroundTUI:
             time.sleep(2)
             return self._connection_fallback_menu()
 
-        # Reload the meshtastic module
+        # Refresh the module-level MESHTASTIC_AVAILABLE flag now that pip install succeeded
+        from meshing_around_clients.core.meshtastic_api import refresh_meshtastic_availability
+
+        refresh_meshtastic_availability()
+
         self.console.print("[green]Meshtastic library installed successfully![/green]")
         time.sleep(1)
 
