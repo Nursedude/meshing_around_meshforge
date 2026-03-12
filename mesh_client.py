@@ -1346,7 +1346,12 @@ def launcher_menu(config: ConfigParser) -> bool:
             elif selected == "demo":
                 config.set("advanced", "demo_mode", "true")
 
-        return run_application(config)
+        # Run the selected mode, then loop back to the launcher menu.
+        try:
+            run_application(config)
+        except KeyboardInterrupt:
+            pass  # Ctrl+C from web/both returns to menu
+        continue
 
 
 # =============================================================================
@@ -1419,12 +1424,19 @@ def run_application(config: ConfigParser):
 
         def _open_browser(host: str, port: int, delay: float = 1.5):
             """Open browser to web dashboard after a short delay."""
-            import threading
-            import time
-            import webbrowser
+            import os
 
             browse_host = "localhost" if host in ("0.0.0.0", "::") else host
             url = f"http://{browse_host}:{port}"
+
+            # Skip on headless systems (no display server)
+            if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+                log(f"No display detected. Visit {url} manually.", "INFO")
+                return
+
+            import threading
+            import time
+            import webbrowser
 
             def _open():
                 time.sleep(delay)
@@ -1486,20 +1498,48 @@ def run_application(config: ConfigParser):
                 )
 
             if port_available:
+                # Suppress uvicorn's default logging config so it doesn't
+                # write to stdout while Rich controls the terminal.
+                _uvicorn_log_config = {
+                    "version": 1,
+                    "disable_existing_loggers": False,
+                    "handlers": {},
+                    "loggers": {
+                        "uvicorn": {"handlers": [], "level": "ERROR"},
+                        "uvicorn.access": {"handlers": [], "level": "ERROR"},
+                        "uvicorn.error": {"handlers": [], "level": "ERROR"},
+                    },
+                }
 
                 def run_web():
                     import uvicorn
 
                     try:
-                        uvicorn.run(web_app.app, host=host, port=port, log_level="error")
+                        uvicorn.run(
+                            web_app.app,
+                            host=host,
+                            port=port,
+                            log_level="error",
+                            access_log=False,
+                            log_config=_uvicorn_log_config,
+                        )
                     except (OSError, SystemExit):
-                        log(f"Web server failed to start on port {port}", "ERROR")
+                        pass  # logged via file handler, not stdout
 
                 web_thread = threading.Thread(target=run_web, daemon=True)
                 web_thread.start()
                 browse_host = "localhost" if host in ("0.0.0.0", "::") else host
                 log(f"Web server starting on http://{browse_host}:{port}", "OK")
                 _open_browser(host, port)
+
+            # Remove stdout StreamHandler before TUI takes over the terminal.
+            # File handlers are preserved so logs still go to disk.
+            root_logger = _logging.getLogger()
+            root_logger.handlers = [
+                h for h in root_logger.handlers
+                if not isinstance(h, _logging.StreamHandler)
+                or hasattr(h, "baseFilename")  # keep RotatingFileHandler
+            ]
 
             # Run TUI in main thread (shared API — TUI handles connect/disconnect)
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode, api=shared_api)
@@ -1707,7 +1747,10 @@ Examples:
     except (ValueError, OSError):
         is_interactive = False
 
-    if not has_mode_flag and is_interactive:
+    if is_interactive:
+        # Always show the launcher menu for interactive terminals.
+        # CLI flags (--tui, --web, --demo) pre-set config defaults but
+        # the menu still appears so users can change their mind.
         log("Loading launcher menu...", "INFO")
         try:
             success = launcher_menu(config)
@@ -1718,7 +1761,7 @@ Examples:
     else:
         if not has_mode_flag:
             log("No TTY detected — skipping launcher menu (use --tui, --web, or --demo)", "WARN")
-        # Direct launch with CLI-specified mode
+        # Non-interactive (piped, cron, systemd) — launch directly
         try:
             success = run_application(config)
             sys.exit(0 if success else 1)

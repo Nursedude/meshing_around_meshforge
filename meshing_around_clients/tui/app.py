@@ -178,6 +178,19 @@ class PlainTextTUI:
             print("\nGoodbye!")
 
 
+class TUILogHandler(logging.Handler):
+    """Captures log records in a circular buffer for the TUI log screen."""
+
+    def __init__(self, maxlen: int = 500):
+        super().__init__()
+        from collections import deque
+
+        self.records: deque = deque(maxlen=maxlen)
+
+    def emit(self, record: logging.LogRecord):
+        self.records.append(record)
+
+
 class Screen:
     """Base class for TUI screens."""
 
@@ -1165,6 +1178,7 @@ class HelpScreen(Screen):
 - **4** - Alerts view
 - **5** - Topology view
 - **6** - Devices view
+- **7** - Log / Diagnostics
 - **q** - Return to dashboard / Quit
 
 ## Actions
@@ -1222,6 +1236,81 @@ class HelpScreen(Screen):
         )
 
 
+class LogScreen(Screen):
+    """Diagnostic log viewer screen."""
+
+    _LEVEL_STYLES = {
+        "DEBUG": "dim",
+        "INFO": "cyan",
+        "WARNING": "yellow",
+        "ERROR": "red",
+        "CRITICAL": "bold red",
+    }
+
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
+        self._scroll_offset = 0
+
+    def render(self) -> Panel:
+        handler: Optional[TUILogHandler] = getattr(self.app, "_log_handler", None)
+        if handler is None or not handler.records:
+            return Panel(
+                "[dim]No log entries yet.[/dim]",
+                title="[bold cyan]Log / Diagnostics[/bold cyan]",
+                subtitle="[dim]j/k scroll · x clear · q back[/dim]",
+                border_style="green",
+            )
+
+        records = list(handler.records)
+        total = len(records)
+
+        # Show most recent entries, scrollable with j/k
+        visible_lines = 30
+        end = max(0, total - self._scroll_offset)
+        start = max(0, end - visible_lines)
+        page = records[start:end]
+
+        table = Table(box=box.SIMPLE, expand=True, show_header=True, padding=(0, 1))
+        table.add_column("Time", style="dim", width=8, no_wrap=True)
+        table.add_column("Level", width=8, no_wrap=True)
+        table.add_column("Source", style="dim", width=20, no_wrap=True)
+        table.add_column("Message", ratio=1)
+
+        for rec in page:
+            ts = datetime.fromtimestamp(rec.created).strftime("%H:%M:%S")
+            style = self._LEVEL_STYLES.get(rec.levelname, "")
+            level_text = f"[{style}]{rec.levelname}[/{style}]" if style else rec.levelname
+            msg = rec.getMessage()
+            if len(msg) > 120:
+                msg = msg[:117] + "..."
+            table.add_row(ts, level_text, rec.name[:20], msg)
+
+        position = f" ({total} entries, viewing {start + 1}-{end})" if total > visible_lines else f" ({total} entries)"
+
+        return Panel(
+            table,
+            title=f"[bold cyan]Log / Diagnostics{position}[/bold cyan]",
+            subtitle="[dim]j/k scroll · x clear · q back[/dim]",
+            border_style="green",
+        )
+
+    def handle_input(self, key: str) -> bool:
+        handler: Optional[TUILogHandler] = getattr(self.app, "_log_handler", None)
+        if key == "j":
+            self._scroll_offset = max(0, self._scroll_offset - 5)
+            return True
+        elif key == "k":
+            if handler:
+                self._scroll_offset = min(len(handler.records), self._scroll_offset + 5)
+            return True
+        elif key == "x":
+            if handler:
+                handler.records.clear()
+                self._scroll_offset = 0
+            return True
+        return False
+
+
 class MeshingAroundTUI:
     """
     Main TUI application for Meshing-Around.
@@ -1241,6 +1330,11 @@ class MeshingAroundTUI:
         else:
             self.api = MeshtasticAPI(self.config)
 
+        # In-memory log handler for the TUI log screen
+        self._log_handler = TUILogHandler(maxlen=500)
+        self._log_handler.setLevel(logging.DEBUG)
+        logging.getLogger().addHandler(self._log_handler)
+
         # Screens
         self.screens = {
             "dashboard": DashboardScreen(self),
@@ -1249,6 +1343,7 @@ class MeshingAroundTUI:
             "alerts": AlertsScreen(self),
             "topology": TopologyScreen(self),
             "devices": DevicesScreen(self),
+            "log": LogScreen(self),
             "help": HelpScreen(self),
         }
         self.current_screen = "dashboard"
@@ -1461,6 +1556,7 @@ class MeshingAroundTUI:
             ("3", "Messages", "messages"),
             ("4", "Alerts", "alerts"),
             ("5", "Topology", "topology"),
+            ("7", "Log", "log"),
         ]
 
         for key, label, screen_id in nav_items:
@@ -1842,6 +1938,9 @@ class MeshingAroundTUI:
             if old_settings is not None:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
             self._running = False
+            # Remove TUI log handler from root logger
+            if self._log_handler in logging.getLogger().handlers:
+                logging.getLogger().removeHandler(self._log_handler)
             self.disconnect()
             self.console.clear()
             self.console.print("[cyan]Goodbye![/cyan]")
@@ -1854,6 +1953,7 @@ class MeshingAroundTUI:
         "4": "alerts",
         "5": "topology",
         "6": "devices",
+        "7": "log",
         "?": "help",
         "h": "help",
     }
