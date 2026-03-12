@@ -166,6 +166,8 @@ class WebApplication:
         self._pending_coros: List = []
         # True once lifespan startup completes (distinguishes startup vs shutdown)
         self._started = False
+        # True while background device connection is in progress
+        self._connecting = False
 
         # Create FastAPI app
         self.app = self._create_app()
@@ -193,21 +195,11 @@ class WebApplication:
                         "Set enable_auth=True in mesh_client.ini [web] section.",
                         self.config.web.host,
                     )
-                logger.info("Web dashboard connecting to mesh device...")
-                success = self.api.connect()
-                if success:
-                    logger.info(
-                        "Web dashboard connected: %s via %s",
-                        self.api.connection_info.device_path,
-                        self.api.connection_info.interface_type,
-                    )
-                if not success and not self.demo_mode:
-                    logger.warning(
-                        "Device connection failed: %s. "
-                        "Dashboard will show no data until connection succeeds. "
-                        "Use POST /api/connect to retry or restart with --demo.",
-                        self.api.connection_info.error_message,
-                    )
+                # Connect in background so the web UI is accessible immediately
+                # (TCPInterface can block for up to 30s during sync)
+                self._connecting = True
+                logger.info("Web dashboard connecting to mesh device (background)...")
+                asyncio.create_task(self._background_connect())
             yield
             # Shutdown
             self._event_loop = None
@@ -360,6 +352,40 @@ class WebApplication:
                     # Post-startup (shutting down): discard safely
                     coro.close()
 
+    async def _background_connect(self):
+        """Connect to mesh device in background so web UI starts immediately."""
+        loop = asyncio.get_running_loop()
+        try:
+            success = await loop.run_in_executor(None, self.api.connect)
+            if success:
+                logger.info(
+                    "Web dashboard connected: %s via %s",
+                    self.api.connection_info.device_path,
+                    self.api.connection_info.interface_type,
+                )
+            elif not self.demo_mode:
+                logger.warning(
+                    "Device connection failed: %s. "
+                    "Dashboard will show no data until connection succeeds. "
+                    "Use POST /api/connect to retry or restart with --demo.",
+                    self.api.connection_info.error_message,
+                )
+            # Push status update to any connected WebSocket clients
+            await self.ws_manager.broadcast(
+                {
+                    "type": "connection_status",
+                    "data": {
+                        "connected": self.api.connection_info.connected,
+                        "device": self.api.connection_info.device_path,
+                        "interface_type": self.api.connection_info.interface_type,
+                    },
+                }
+            )
+        except Exception as e:
+            logger.error("Background connect error: %s", e)
+        finally:
+            self._connecting = False
+
     def _register_callbacks(self):
         """Register API callbacks for real-time updates."""
 
@@ -492,8 +518,10 @@ class WebApplication:
         @app.get("/api/status")
         async def api_status():
             """Get connection and network status."""
+            connected = self.api.is_connected
             return {
-                "connected": self.api.is_connected,
+                "connected": connected,
+                "connecting": self._connecting,
                 "interface_type": self.api.connection_info.interface_type,
                 "device_path": self.api.connection_info.device_path,
                 "my_node_id": self.api.network.my_node_id,
