@@ -1449,17 +1449,34 @@ def run_application(config: ConfigParser):
             host = app_config.web.host
             port = app_config.web.port
 
-            def run_web():
-                import uvicorn
+            # Check if port is available before starting web server
+            import socket
 
-                try:
-                    uvicorn.run(web_app.app, host=host, port=port, log_level="error")
-                except (OSError, SystemExit) as e:
-                    log(f"Web server failed to start: {e}", "ERROR")
+            port_available = True
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind((host, port))
+            except OSError:
+                port_available = False
+                log(
+                    f"Port {port} already in use — skipping web server. "
+                    f"Kill the old process or change port in mesh_client.ini",
+                    "WARN",
+                )
 
-            web_thread = threading.Thread(target=run_web, daemon=True)
-            web_thread.start()
-            log(f"Web server starting on http://{host}:{port}", "OK")
+            if port_available:
+
+                def run_web():
+                    import uvicorn
+
+                    try:
+                        uvicorn.run(web_app.app, host=host, port=port, log_level="error")
+                    except (OSError, SystemExit):
+                        log(f"Web server failed to start on port {port}", "ERROR")
+
+                web_thread = threading.Thread(target=run_web, daemon=True)
+                web_thread.start()
+                log(f"Web server starting on http://{host}:{port}", "OK")
 
             # Run TUI in main thread (shared API — TUI handles connect/disconnect)
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode, api=shared_api)
