@@ -1323,6 +1323,29 @@ def launcher_menu(config: ConfigParser) -> bool:
             standalone_install(config)
             continue
 
+        # For TUI/Web/Both: prompt for connection type when set to auto
+        if choice in ("tui", "web", "both"):
+            conn_type = config.get("interface", "type", fallback="auto")
+            if conn_type == "auto":
+                from meshing_around_clients.setup.whiptail import radiolist
+
+                conn_items = [
+                    ("auto", "Auto-detect", True),
+                    ("mqtt", "MQTT (No radio needed)", False),
+                    ("serial", "Serial (USB radio)", False),
+                    ("tcp", "TCP (Remote device)", False),
+                    ("demo", "Demo mode (simulated)", False),
+                ]
+                selected = radiolist("Connection Type", conn_items)
+                if selected is None:
+                    continue  # back to main menu
+                if selected != "auto":
+                    config.set("interface", "type", selected)
+                    if selected == "mqtt":
+                        config.set("mqtt", "enabled", "true")
+                    elif selected == "demo":
+                        config.set("advanced", "demo_mode", "true")
+
         return run_application(config)
 
 
@@ -1425,7 +1448,7 @@ def run_application(config: ConfigParser):
             def run_web():
                 import uvicorn
 
-                uvicorn.run(web_app.app, host=host, port=port, log_level="warning")
+                uvicorn.run(web_app.app, host=host, port=port, log_level="error")
 
             web_thread = threading.Thread(target=run_web, daemon=True)
             web_thread.start()
