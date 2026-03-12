@@ -1404,8 +1404,8 @@ def run_application(config: ConfigParser):
             from meshing_around_clients.web.app import WebApplication
 
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = config.get("features", "web_host", fallback="0.0.0.0")
-            port = config.getint("features", "web_port", fallback=9090)
+            host = app_config.web.host
+            port = app_config.web.port
             web_app.run(host=host, port=port)
 
         elif mode == "both":
@@ -1419,8 +1419,8 @@ def run_application(config: ConfigParser):
 
             # Start web server in thread
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = config.get("features", "web_host", fallback="0.0.0.0")
-            port = config.getint("features", "web_port", fallback=9090)
+            host = app_config.web.host
+            port = app_config.web.port
 
             def run_web():
                 import uvicorn
