@@ -1120,6 +1120,82 @@ def config_editor_menu() -> None:
                     subprocess.run([editor, str(log_path)])
 
 
+def logging_menu(config: ConfigParser) -> None:
+    """Interactive submenu for viewing and changing logging settings.
+
+    Changes are saved to mesh_client.ini and applied immediately.
+    """
+    from meshing_around_clients.setup.whiptail import menu as wt_menu, msgbox, radiolist, yesno
+
+    while True:
+        items = [
+            ("view", "View current logging settings"),
+            ("level", "Change log level"),
+            ("toggle", "Toggle logging on/off"),
+        ]
+        choice = wt_menu("Logging Settings", items)
+
+        if choice is None:
+            return
+
+        if choice == "view":
+            enabled = config.get("logging", "enabled", fallback="true")
+            level = config.get("logging", "level", fallback="INFO")
+            log_file = config.get("logging", "file", fallback="mesh_client.log")
+            max_size = config.get("logging", "max_size_mb", fallback="10")
+            backups = config.get("logging", "backup_count", fallback="3")
+            msg_enabled = config.get("logging", "message_log_enabled", fallback="true")
+            msg_file = config.get("logging", "message_log_file", fallback="mesh_messages.log")
+
+            info = (
+                f"Logging enabled:  {enabled}\n"
+                f"Log level:        {level}\n"
+                f"Log file:         {log_file}\n"
+                f"Max size:         {max_size} MB\n"
+                f"Backup count:     {backups}\n"
+                f"Message log:      {msg_enabled}\n"
+                f"Message log file: {msg_file}"
+            )
+            msgbox(info, title="Current Logging Settings")
+
+        elif choice == "level":
+            current = config.get("logging", "level", fallback="INFO").upper()
+            level_items = [
+                ("DEBUG", "Verbose debug output", current == "DEBUG"),
+                ("INFO", "Normal operation (default)", current == "INFO"),
+                ("WARNING", "Warnings and errors only", current == "WARNING"),
+                ("ERROR", "Errors only", current == "ERROR"),
+            ]
+            selected = radiolist("Log Level", level_items)
+            if selected is not None:
+                config.set("logging", "level", selected)
+                save_config(config)
+                setup_logging(config)
+                log(f"Log level changed to {selected}", "OK")
+
+        elif choice == "toggle":
+            current = config.getboolean("logging", "enabled", fallback=True)
+            result = yesno(
+                "Enable logging?" if not current else "Logging is currently ON. Disable it?",
+                default_yes=not current,
+            )
+            if result is not None:
+                new_value = "true" if result else "false"
+                # If logging was ON and user confirmed disable, turn off
+                # If logging was OFF and user confirmed enable, turn on
+                if current:
+                    # Question was "disable it?" — yes means disable
+                    new_value = "false" if result else "true"
+                else:
+                    # Question was "enable?" — yes means enable
+                    new_value = "true" if result else "false"
+                config.set("logging", "enabled", new_value)
+                save_config(config)
+                setup_logging(config)
+                state = "enabled" if new_value == "true" else "disabled"
+                log(f"Logging {state}", "OK")
+
+
 def update_menu(config: ConfigParser) -> None:
     """Interactive menu for updating/reinstalling MeshForge and meshing-around.
 
@@ -1289,6 +1365,7 @@ def launcher_menu(config: ConfigParser) -> bool:
         ("config", "Edit Configuration"),
         ("update", "Update / Reinstall"),
         ("install", "Install Everything"),
+        ("logging", "Logging Settings"),
     ]
 
     while True:
@@ -1324,6 +1401,9 @@ def launcher_menu(config: ConfigParser) -> bool:
         elif choice == "install":
             standalone_install(config)
             continue
+        elif choice == "logging":
+            logging_menu(config)
+            continue
 
         # For TUI/Web/Both: prompt for connection type
         if choice in ("tui", "web", "both"):
@@ -1349,8 +1429,8 @@ def launcher_menu(config: ConfigParser) -> bool:
         # Run the selected mode, then loop back to the launcher menu.
         try:
             run_application(config)
-        except KeyboardInterrupt:
-            pass  # Ctrl+C from web/both returns to menu
+        except (KeyboardInterrupt, SystemExit):
+            pass  # Ctrl+C or uvicorn exit returns to menu
         continue
 
 
@@ -1571,6 +1651,9 @@ def run_application(config: ConfigParser):
         else:
             log("Try running with --setup or --check", "INFO")
         return False
+    except SystemExit:
+        log(f"{mode} mode exited", "INFO")
+        return True
     except (OSError, ConnectionError, RuntimeError, ValueError, TypeError) as e:
         log(f"{mode} mode error: {e}", "ERROR")
         import traceback
@@ -1747,6 +1830,8 @@ Examples:
     except (ValueError, OSError):
         is_interactive = False
 
+    log(f"Terminal detection: stdin.isatty={is_interactive}", "INFO")
+
     if is_interactive:
         # Always show the launcher menu for interactive terminals.
         # CLI flags (--tui, --web, --demo) pre-set config defaults but
@@ -1759,9 +1844,25 @@ Examples:
             log("Interrupted by user", "INFO")
             sys.exit(0)
     else:
-        if not has_mode_flag:
-            log("No TTY detected — skipping launcher menu (use --tui, --web, or --demo)", "WARN")
         # Non-interactive (piped, cron, systemd) — launch directly
+        if not has_mode_flag:
+            # On Pi Zero 2W, auto-default to MQTT/TUI mode (recommended
+            # for resource-constrained boards without a display).
+            try:
+                from meshing_around_clients.setup.pi_utils import is_pi_zero_2w
+
+                if is_pi_zero_2w():
+                    log("Pi Zero 2W detected — defaulting to MQTT/TUI mode", "INFO")
+                    config.set("features", "mode", "tui")
+                    config.set("interface", "type", "mqtt")
+                    config.set("mqtt", "enabled", "true")
+                    has_mode_flag = True
+            except ImportError:
+                pass
+
+            if not has_mode_flag:
+                log("No TTY detected — skipping launcher menu (use --tui, --web, or --demo)", "WARN")
+
         try:
             success = run_application(config)
             sys.exit(0 if success else 1)
