@@ -1458,8 +1458,11 @@ def run_application(config: ConfigParser):
                     s.bind((host, port))
             except OSError:
                 port_available = False
-                log(f"Port {port} already in use — skipping web server. "
-                    f"Kill the old process or change port in mesh_client.ini", "WARN")
+                log(
+                    f"Port {port} already in use — skipping web server. "
+                    f"Kill the old process or change port in mesh_client.ini",
+                    "WARN",
+                )
 
             if port_available:
 
