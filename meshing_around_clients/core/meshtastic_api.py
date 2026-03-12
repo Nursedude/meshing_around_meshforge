@@ -330,6 +330,15 @@ class MeshtasticAPI(CallbackMixin):
             "messages_dropped": self._messages_dropped,
         }
 
+    def _close_interface(self) -> None:
+        """Close and discard the current interface if one exists."""
+        if self.interface:
+            try:
+                self.interface.close()
+            except (OSError, AttributeError, RuntimeError):
+                pass
+            self.interface = None
+
     def connect(self) -> bool:
         """Connect to the Meshtastic device."""
         if not MESHTASTIC_AVAILABLE:
@@ -337,12 +346,7 @@ class MeshtasticAPI(CallbackMixin):
             return False
 
         # Clean up any previous connection (e.g. from a failed retry)
-        if self.interface:
-            try:
-                self.interface.close()
-            except (OSError, AttributeError, RuntimeError):
-                pass
-            self.interface = None
+        self._close_interface()
 
         try:
             interface_type = self.config.interface.type
@@ -394,12 +398,7 @@ class MeshtasticAPI(CallbackMixin):
                         pub.unsubscribe(handler, topic)
                     except (ValueError, RuntimeError):
                         pass
-                if self.interface:
-                    try:
-                        self.interface.close()
-                    except (OSError, AttributeError, RuntimeError):
-                        pass
-                    self.interface = None
+                self._close_interface()
                 self.connection_info.connected = False
                 self.network.connection_status = "error"
                 raise
