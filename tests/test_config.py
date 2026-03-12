@@ -70,7 +70,7 @@ class TestWebConfig(unittest.TestCase):
 
     def test_default_values(self):
         cfg = WebConfig()
-        self.assertEqual(cfg.host, "127.0.0.1")
+        self.assertEqual(cfg.host, "0.0.0.0")
         self.assertEqual(cfg.port, 9090)
         self.assertFalse(cfg.debug)
         self.assertFalse(cfg.enable_auth)
@@ -274,11 +274,11 @@ class TestConfigDefaults(unittest.TestCase):
         for term in expected_terms:
             self.assertIn(term, cfg.emergency_keywords, f"Missing critical keyword: {term}")
 
-    def test_default_web_binds_localhost(self):
-        """Web server should default to localhost for security."""
+    def test_default_web_binds_all_interfaces(self):
+        """Web server should default to 0.0.0.0 for network/VPN access."""
         cfg = WebConfig()
-        self.assertEqual(cfg.host, "127.0.0.1")
-        self.assertFalse(cfg.enable_auth)  # Auth disabled when localhost only
+        self.assertEqual(cfg.host, "0.0.0.0")
+        self.assertFalse(cfg.enable_auth)
 
     def test_default_tui_reasonable_refresh(self):
         """TUI refresh rate should be reasonable (not too fast or slow)."""

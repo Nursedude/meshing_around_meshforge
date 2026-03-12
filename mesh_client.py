@@ -519,7 +519,7 @@ tui_color_scheme = default
 
 # Web server settings
 web_server = false
-web_host = 127.0.0.1
+web_host = 0.0.0.0
 web_port = 9090
 web_api_enabled = true
 web_auth_enabled = false
@@ -1358,6 +1358,7 @@ def check_system():
 def run_application(config: ConfigParser):
     """Run the main application."""
     mode = config.get("features", "mode", fallback="tui")
+    log(f"Starting in {mode} mode...", "INFO")
     demo_mode = config.getboolean("advanced", "demo_mode", fallback=False)
 
     # Detect connection type
@@ -1401,7 +1402,7 @@ def run_application(config: ConfigParser):
             from meshing_around_clients.web.app import WebApplication
 
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = config.get("features", "web_host", fallback="127.0.0.1")
+            host = config.get("features", "web_host", fallback="0.0.0.0")
             port = config.getint("features", "web_port", fallback=9090)
             web_app.run(host=host, port=port)
 
@@ -1416,7 +1417,7 @@ def run_application(config: ConfigParser):
 
             # Start web server in thread
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = config.get("features", "web_host", fallback="127.0.0.1")
+            host = config.get("features", "web_host", fallback="0.0.0.0")
             port = config.getint("features", "web_port", fallback=9090)
 
             def run_web():
@@ -1452,11 +1453,14 @@ def run_application(config: ConfigParser):
                 api.disconnect()
 
     except ImportError as e:
-        log(f"Import error: {e}", "ERROR")
-        log("Try running with --setup or --check", "INFO")
+        log(f"Missing dependency for {mode} mode: {e}", "ERROR")
+        if mode in ("web", "both"):
+            log("Install web deps: pip install fastapi uvicorn jinja2", "INFO")
+        else:
+            log("Try running with --setup or --check", "INFO")
         return False
     except (OSError, ConnectionError, RuntimeError, ValueError, TypeError) as e:
-        log(f"Application error: {e}", "ERROR")
+        log(f"{mode} mode error: {e}", "ERROR")
         import traceback
 
         traceback.print_exc()
@@ -1626,7 +1630,12 @@ Examples:
         sys.exit(1)
 
     # Show launcher menu if no mode flag was passed and we have a TTY
-    if not has_mode_flag and sys.stdin.isatty():
+    try:
+        is_interactive = sys.stdin.isatty()
+    except (ValueError, OSError):
+        is_interactive = False
+
+    if not has_mode_flag and is_interactive:
         log("Loading launcher menu...", "INFO")
         try:
             success = launcher_menu(config)
@@ -1635,6 +1644,8 @@ Examples:
             log("Interrupted by user", "INFO")
             sys.exit(0)
     else:
+        if not has_mode_flag:
+            log("No TTY detected — skipping launcher menu (use --tui, --web, or --demo)", "WARN")
         # Direct launch with CLI-specified mode
         try:
             success = run_application(config)

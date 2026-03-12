@@ -25,7 +25,10 @@ _RESET = "\033[0m"
 
 def _is_tty() -> bool:
     """Check if stdin/stdout are connected to a real terminal."""
-    return hasattr(sys.stdin, "fileno") and os.isatty(sys.stdin.fileno())
+    try:
+        return hasattr(sys.stdin, "fileno") and os.isatty(sys.stdin.fileno())
+    except (ValueError, OSError):
+        return False
 
 
 def _can_use_whiptail() -> bool:
