@@ -1432,16 +1432,20 @@ def run_application(config: ConfigParser):
             web_app.run(host=host, port=port)
 
         elif mode == "both":
-            # Run web in background, TUI in foreground
-            # NOTE: WebApplication and MeshingAroundTUI each create their own
-            # API instances internally. A shared API is not yet supported.
+            # Run web in background, TUI in foreground with a shared API
             import threading
 
             from meshing_around_clients.tui.app import MeshingAroundTUI
             from meshing_around_clients.web.app import WebApplication
 
-            # Start web server in thread
-            web_app = WebApplication(config=app_config, demo_mode=demo_mode)
+            # Create single shared API instance
+            if demo_mode:
+                shared_api = MockMeshtasticAPI(app_config)
+            else:
+                shared_api = MeshtasticAPI(app_config)
+
+            # Start web server in thread (shared API — web skips connect/disconnect)
+            web_app = WebApplication(config=app_config, demo_mode=demo_mode, api=shared_api)
             host = app_config.web.host
             port = app_config.web.port
 
@@ -1454,8 +1458,8 @@ def run_application(config: ConfigParser):
             web_thread.start()
             log(f"Web server started on http://{host}:{port}", "OK")
 
-            # Run TUI in main thread
-            tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
+            # Run TUI in main thread (shared API — TUI handles connect/disconnect)
+            tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode, api=shared_api)
             tui.run_interactive()
 
         elif mode == "headless":
