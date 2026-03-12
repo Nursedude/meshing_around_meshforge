@@ -1452,11 +1452,14 @@ def run_application(config: ConfigParser):
             def run_web():
                 import uvicorn
 
-                uvicorn.run(web_app.app, host=host, port=port, log_level="error")
+                try:
+                    uvicorn.run(web_app.app, host=host, port=port, log_level="error")
+                except (OSError, SystemExit) as e:
+                    log(f"Web server failed to start: {e}", "ERROR")
 
             web_thread = threading.Thread(target=run_web, daemon=True)
             web_thread.start()
-            log(f"Web server started on http://{host}:{port}", "OK")
+            log(f"Web server starting on http://{host}:{port}", "OK")
 
             # Run TUI in main thread (shared API — TUI handles connect/disconnect)
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode, api=shared_api)

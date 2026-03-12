@@ -164,6 +164,8 @@ class WebApplication:
         self._event_loop: Optional[asyncio.AbstractEventLoop] = None
         # Buffer for coroutines scheduled before event loop is available
         self._pending_coros: List = []
+        # True once lifespan startup completes (distinguishes startup vs shutdown)
+        self._started = False
 
         # Create FastAPI app
         self.app = self._create_app()
@@ -182,6 +184,7 @@ class WebApplication:
             for coro in self._pending_coros:
                 self._event_loop.create_task(coro)
             self._pending_coros.clear()
+            self._started = True
             # When API is shared (both mode), skip connect/disconnect — TUI handles it
             if not self._shared_api:
                 if self.config.web.host != "127.0.0.1" and not self.config.web.enable_auth:
@@ -343,8 +346,12 @@ class WebApplication:
             if self._event_loop and self._event_loop.is_running():
                 asyncio.run_coroutine_threadsafe(coro, self._event_loop)
             else:
-                # Event loop not ready yet — buffer for later
-                self._pending_coros.append(coro)
+                if not self._started:
+                    # Pre-startup: buffer for later
+                    self._pending_coros.append(coro)
+                else:
+                    # Post-startup (shutting down): discard safely
+                    coro.close()
 
     def _register_callbacks(self):
         """Register API callbacks for real-time updates."""
