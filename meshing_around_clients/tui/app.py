@@ -2162,12 +2162,15 @@ class MeshingAroundTUI:
                 if iface.type == "tcp" and iface.hostname:
                     import socket
 
+                    host, tcp_port = (
+                        iface.hostname.rsplit(":", 1) if ":" in iface.hostname else (iface.hostname, "4403")
+                    )
                     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     sock.settimeout(5)
                     try:
-                        sock.connect((iface.hostname, 4403))
+                        sock.connect((host, int(tcp_port)))
                         sock.close()
-                        self.console.print("[green]TCP connection successful![/green]")
+                        self.console.print(f"[green]TCP connection to {host}:{tcp_port} successful![/green]")
                     except (ConnectionRefusedError, TimeoutError, OSError) as e:
                         self.console.print(f"[red]TCP connection failed: {e}[/red]")
                 elif iface.type == "serial":
