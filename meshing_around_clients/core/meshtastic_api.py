@@ -190,8 +190,10 @@ class MeshtasticAPI(CallbackMixin):
         try:
             return cls(*args, **kwargs)
         except TypeError:
-            # Older/newer meshtastic versions may not accept connectTimeoutSeconds
-            kwargs.pop("connectTimeoutSeconds", None)
+            # Older/newer meshtastic versions may not accept all kwargs;
+            # drop optional kwargs and retry.
+            for key in ("connectTimeoutSeconds", "portNumber"):
+                kwargs.pop(key, None)
             return cls(*args, **kwargs)
 
     def _create_interface(self, interface_type: str):
@@ -222,7 +224,12 @@ class MeshtasticAPI(CallbackMixin):
             if not _HOSTNAME_RE.match(hostname):
                 raise ValueError(f"Invalid TCP hostname: {hostname!r}")
             self.connection_info.device_path = hostname
-            return self._try_create(mod.TCPInterface, hostname, connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS)
+            host, tcp_port = (hostname.rsplit(":", 1) if ":" in hostname else (hostname, "4403"))
+            return self._try_create(
+                mod.TCPInterface, host,
+                portNumber=int(tcp_port),
+                connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS,
+            )
         elif interface_type == "http":
             base_url = self.config.interface.http_url
             if not base_url:
@@ -328,6 +335,14 @@ class MeshtasticAPI(CallbackMixin):
             self.connection_info.error_message = "Meshtastic library not installed"
             return False
 
+        # Clean up any previous connection (e.g. from a failed retry)
+        if self.interface:
+            try:
+                self.interface.close()
+            except (OSError, AttributeError, RuntimeError):
+                pass
+            self.interface = None
+
         try:
             interface_type = self.config.interface.type
             self.interface = self._create_interface(interface_type)
@@ -424,6 +439,9 @@ class MeshtasticAPI(CallbackMixin):
 
             # Fail fast for non-transient errors (no point retrying)
             if not MESHTASTIC_AVAILABLE:
+                return False
+            err = self.connection_info.error_message
+            if "Configuration error" in err:
                 return False
 
             if attempt >= max_retries:
