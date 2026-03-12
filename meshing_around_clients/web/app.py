@@ -978,7 +978,7 @@ h1{{color:#00d4ff}}a{{color:#00d4ff}}</style></head>
 <p>Templates not found. Ensure the templates directory is present alongside app.py.</p>
 <p>API is still available at <a href="/api/status">/api/status</a></p></body></html>"""
 
-    def run(self, host: str = "127.0.0.1", port: int = 9090):
+    def run(self, host: str = "0.0.0.0", port: int = 9090):
         """Run the web application."""
         uvicorn.run(self.app, host=host, port=port)
 
@@ -994,7 +994,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="Meshing-Around Web Client")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind to")
+    parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to bind to")
     parser.add_argument("--port", type=int, default=9090, help="Port to listen on")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode without hardware")
     parser.add_argument("--config", type=str, help="Path to config file")

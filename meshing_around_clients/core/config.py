@@ -78,7 +78,7 @@ class AlertConfig:
 class WebConfig:
     """Web client configuration."""
 
-    host: str = "127.0.0.1"
+    host: str = "0.0.0.0"
     port: int = 9090
     debug: bool = False
     api_key: str = ""
