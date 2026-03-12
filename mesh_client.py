@@ -225,6 +225,8 @@ def setup_logging(config: ConfigParser) -> None:
         root_logger.addHandler(console_handler)
 
     _logging_configured = True
+    if enabled:
+        log(f"Logging to {log_path}", "OK")
 
 
 def print_banner():
@@ -1323,28 +1325,26 @@ def launcher_menu(config: ConfigParser) -> bool:
             standalone_install(config)
             continue
 
-        # For TUI/Web/Both: prompt for connection type when set to auto
+        # For TUI/Web/Both: prompt for connection type
         if choice in ("tui", "web", "both"):
-            conn_type = config.get("interface", "type", fallback="auto")
-            if conn_type == "auto":
-                from meshing_around_clients.setup.whiptail import radiolist
+            from meshing_around_clients.setup.whiptail import radiolist
 
-                conn_items = [
-                    ("auto", "Auto-detect", True),
-                    ("mqtt", "MQTT (No radio needed)", False),
-                    ("serial", "Serial (USB radio)", False),
-                    ("tcp", "TCP (Remote device)", False),
-                    ("demo", "Demo mode (simulated)", False),
-                ]
-                selected = radiolist("Connection Type", conn_items)
-                if selected is None:
-                    continue  # back to main menu
-                if selected != "auto":
-                    config.set("interface", "type", selected)
-                    if selected == "mqtt":
-                        config.set("mqtt", "enabled", "true")
-                    elif selected == "demo":
-                        config.set("advanced", "demo_mode", "true")
+            current_type = config.get("interface", "type", fallback="auto")
+            conn_items = [
+                ("auto", "Auto-detect", current_type == "auto"),
+                ("mqtt", "MQTT (No radio needed)", current_type == "mqtt"),
+                ("serial", "Serial (USB radio)", current_type == "serial"),
+                ("tcp", "TCP (Remote device)", current_type == "tcp"),
+                ("demo", "Demo mode (simulated)", False),
+            ]
+            selected = radiolist("Connection Type", conn_items)
+            if selected is None:
+                continue  # back to main menu
+            config.set("interface", "type", selected)
+            if selected == "mqtt":
+                config.set("mqtt", "enabled", "true")
+            elif selected == "demo":
+                config.set("advanced", "demo_mode", "true")
 
         return run_application(config)
 
