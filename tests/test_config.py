@@ -10,7 +10,38 @@ from pathlib import Path
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
-from meshing_around_clients.core.config import AlertConfig, Config, InterfaceConfig, LoggingConfig, TuiConfig, WebConfig
+from meshing_around_clients.core.config import (
+    AlertConfig,
+    Config,
+    InterfaceConfig,
+    LoggingConfig,
+    TuiConfig,
+    WebConfig,
+    _str_to_bool,
+)
+
+
+class TestStrToBool(unittest.TestCase):
+    """Test _str_to_bool() utility function."""
+
+    def test_true_string_values(self):
+        for val in ("true", "True", "TRUE", "yes", "Yes", "1", "on", "ON"):
+            self.assertTrue(_str_to_bool(val), f"Expected True for {val!r}")
+
+    def test_false_string_values(self):
+        for val in ("false", "False", "no", "0", "off", "", "random", "nope"):
+            self.assertFalse(_str_to_bool(val), f"Expected False for {val!r}")
+
+    def test_bool_passthrough(self):
+        self.assertTrue(_str_to_bool(True))
+        self.assertFalse(_str_to_bool(False))
+
+    def test_int_values(self):
+        self.assertTrue(_str_to_bool(1))
+        self.assertFalse(_str_to_bool(0))
+
+    def test_none_is_false(self):
+        self.assertFalse(_str_to_bool(None))
 
 
 class TestInterfaceConfig(unittest.TestCase):
