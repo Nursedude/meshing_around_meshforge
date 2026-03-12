@@ -588,6 +588,8 @@ node_name_style = long
 
 [web]
 # Web server configuration (overrides [features] web settings when present)
+# Bind address: 0.0.0.0 = all interfaces (network accessible), 127.0.0.1 = localhost only
+host = 0.0.0.0
 # CORS allowed origins (comma-separated, empty = same-origin only)
 # Example: http://localhost:3000,https://dashboard.example.com
 # Cross-origin clients should use X-API-Key header for authentication
