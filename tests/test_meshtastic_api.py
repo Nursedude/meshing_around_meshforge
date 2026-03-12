@@ -702,7 +702,8 @@ class TestTcpHostPortParsing(unittest.TestCase):
 
     def test_hostname_without_port_uses_default(self):
         """Hostname without port should default to 4403."""
-        from unittest.mock import MagicMock, patch as mock_patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as mock_patch
 
         from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
 
@@ -725,7 +726,8 @@ class TestTcpHostPortParsing(unittest.TestCase):
 
     def test_hostname_with_port_parses_correctly(self):
         """Hostname with :port should extract and pass portNumber."""
-        from unittest.mock import MagicMock, patch as mock_patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as mock_patch
 
         from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
 
@@ -748,7 +750,8 @@ class TestTcpHostPortParsing(unittest.TestCase):
 
     def test_device_path_preserves_full_hostname(self):
         """connection_info.device_path should keep the original host:port string."""
-        from unittest.mock import MagicMock, patch as mock_patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as mock_patch
 
         from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
 
@@ -772,7 +775,8 @@ class TestConnectCleansUpPreviousInterface(unittest.TestCase):
 
     def test_close_interface_called_from_real_connect(self):
         """MeshtasticAPI.connect() calls _close_interface before connecting."""
-        from unittest.mock import MagicMock, patch as mock_patch
+        from unittest.mock import MagicMock
+        from unittest.mock import patch as mock_patch
 
         from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
 
