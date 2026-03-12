@@ -193,7 +193,14 @@ class WebApplication:
                         "Set enable_auth=True in mesh_client.ini [web] section.",
                         self.config.web.host,
                     )
+                logger.info("Web dashboard connecting to mesh device...")
                 success = self.api.connect()
+                if success:
+                    logger.info(
+                        "Web dashboard connected: %s via %s",
+                        self.api.connection_info.device_path,
+                        self.api.connection_info.interface_type,
+                    )
                 if not success and not self.demo_mode:
                     logger.warning(
                         "Device connection failed: %s. "
