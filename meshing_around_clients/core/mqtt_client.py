@@ -150,6 +150,7 @@ class MQTTMeshtasticClient(CallbackMixin):
         # Persistence (mirrors MeshtasticAPI pattern)
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
+        self._last_logged_health: str = ""
         self._save_lock = threading.Lock()
 
         # Malformed message rejection rate tracking (SEC-14)
@@ -274,6 +275,12 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def connect(self) -> bool:
         """Connect to MQTT broker."""
+        logger.info(
+            "Connecting to MQTT broker %s:%d (TLS: %s)",
+            self.mqtt_config.broker,
+            self.mqtt_config.port,
+            self.mqtt_config.use_tls or self.mqtt_config.port == DEFAULT_PORT_TLS,
+        )
         try:
             with self._stats_lock:
                 self._intentional_disconnect = False
@@ -347,6 +354,12 @@ class MQTTMeshtasticClient(CallbackMixin):
                     return True
                 else:
                     # Connection timed out - stop the background loop thread
+                    logger.warning(
+                        "MQTT connection timed out after %ds to %s:%d",
+                        self.mqtt_config.connect_timeout,
+                        self.mqtt_config.broker,
+                        self.mqtt_config.port,
+                    )
                     self._client.loop_stop()
                     return False
             except (OSError, RuntimeError):
@@ -1306,6 +1319,14 @@ class MQTTMeshtasticClient(CallbackMixin):
             status = "slow"
         else:
             status = "healthy"
+
+        if status != self._last_logged_health:
+            old = self._last_logged_health or "initial"
+            self._last_logged_health = status
+            if status in ("disconnected", "stale"):
+                logger.warning("MQTT health: %s → %s", old, status)
+            else:
+                logger.info("MQTT health: %s → %s", old, status)
 
         return {
             "status": status,

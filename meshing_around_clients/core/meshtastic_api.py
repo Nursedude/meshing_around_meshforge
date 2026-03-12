@@ -118,6 +118,7 @@ class MeshtasticAPI(CallbackMixin):
         self._auto_save_thread: Optional[threading.Thread] = None
         self._last_save_time: Optional[datetime] = None
         self._save_lock = threading.Lock()  # Guard against overlapping saves
+        self._last_logged_health: str = ""
 
         # Load persisted state if enabled
         self._load_persisted_state()
@@ -195,6 +196,14 @@ class MeshtasticAPI(CallbackMixin):
 
     def _create_interface(self, interface_type: str):
         """Create and return the appropriate Meshtastic interface."""
+        target = (
+            self.config.interface.port
+            or self.config.interface.hostname
+            or self.config.interface.http_url
+            or self.config.interface.mac
+            or "auto"
+        )
+        logger.info("Creating %s interface (target: %s)", interface_type, target)
         mod_name = _INTERFACE_TYPE_MAP.get(interface_type)
         if mod_name is None:
             raise ValueError(f"Unknown interface type: {interface_type}")
@@ -295,6 +304,14 @@ class MeshtasticAPI(CallbackMixin):
         else:
             status = "healthy"
 
+        if status != self._last_logged_health:
+            old = self._last_logged_health or "initial"
+            self._last_logged_health = status
+            if status in ("disconnected", "degraded"):
+                logger.warning("Connection health: %s → %s", old, status)
+            else:
+                logger.info("Connection health: %s → %s", old, status)
+
         return {
             "status": status,
             "connected": connected,
@@ -343,6 +360,11 @@ class MeshtasticAPI(CallbackMixin):
                 self._start_auto_save()
 
                 self._trigger_callbacks("on_connect", self.connection_info)
+                logger.info(
+                    "Connected via %s to %s",
+                    self.connection_info.interface_type,
+                    self.connection_info.device_path,
+                )
                 return True
 
             except (OSError, ConnectionError, RuntimeError, AttributeError):
@@ -375,6 +397,7 @@ class MeshtasticAPI(CallbackMixin):
                 self.connection_info.error_message = f"Connection failed ({type(e).__name__}): {e}"
             self.connection_info.connected = False
             self.network.connection_status = "error"
+            logger.error("Interface connection failed: %s", self.connection_info.error_message)
             return False
 
     def connect_with_retry(
