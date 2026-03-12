@@ -137,12 +137,15 @@ class WebApplication:
     Provides REST API and WebSocket support.
     """
 
-    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False):
+    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False, api=None):
         self.config = config or Config()
         self.demo_mode = demo_mode
+        self._shared_api = api is not None
 
         # Initialize API
-        if demo_mode:
+        if api is not None:
+            self.api = api
+        elif demo_mode:
             self.api = MockMeshtasticAPI(self.config)
         else:
             self.api = MeshtasticAPI(self.config)
@@ -179,24 +182,27 @@ class WebApplication:
             for coro in self._pending_coros:
                 self._event_loop.create_task(coro)
             self._pending_coros.clear()
-            if self.config.web.host != "127.0.0.1" and not self.config.web.enable_auth:
-                logger.warning(
-                    "Web server binding to %s without authentication enabled. "
-                    "Set enable_auth=True in mesh_client.ini [web] section.",
-                    self.config.web.host,
-                )
-            success = self.api.connect()
-            if not success and not self.demo_mode:
-                logger.warning(
-                    "Device connection failed: %s. "
-                    "Dashboard will show no data until connection succeeds. "
-                    "Use POST /api/connect to retry or restart with --demo.",
-                    self.api.connection_info.error_message,
-                )
+            # When API is shared (both mode), skip connect/disconnect — TUI handles it
+            if not self._shared_api:
+                if self.config.web.host != "127.0.0.1" and not self.config.web.enable_auth:
+                    logger.warning(
+                        "Web server binding to %s without authentication enabled. "
+                        "Set enable_auth=True in mesh_client.ini [web] section.",
+                        self.config.web.host,
+                    )
+                success = self.api.connect()
+                if not success and not self.demo_mode:
+                    logger.warning(
+                        "Device connection failed: %s. "
+                        "Dashboard will show no data until connection succeeds. "
+                        "Use POST /api/connect to retry or restart with --demo.",
+                        self.api.connection_info.error_message,
+                    )
             yield
             # Shutdown
             self._event_loop = None
-            self.api.disconnect()
+            if not self._shared_api:
+                self.api.disconnect()
 
         app = FastAPI(
             title="Meshing-Around Web Client",

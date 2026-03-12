@@ -1228,13 +1228,15 @@ class MeshingAroundTUI:
     Provides an interactive terminal interface for mesh network management.
     """
 
-    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False):
+    def __init__(self, config: Optional[Config] = None, demo_mode: bool = False, api=None):
         self.console = Console()
         self.config = config or Config()
         self.demo_mode = demo_mode
 
         # Initialize API
-        if demo_mode:
+        if api is not None:
+            self.api = api
+        elif demo_mode:
             self.api = MockMeshtasticAPI(self.config)
         else:
             self.api = MeshtasticAPI(self.config)
