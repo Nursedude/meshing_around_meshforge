@@ -1417,6 +1417,24 @@ def run_application(config: ConfigParser):
         if demo_mode or conn_type == "demo":
             demo_mode = True
 
+        def _open_browser(host: str, port: int, delay: float = 1.5):
+            """Open browser to web dashboard after a short delay."""
+            import threading
+            import time
+            import webbrowser
+
+            browse_host = "localhost" if host in ("0.0.0.0", "::") else host
+            url = f"http://{browse_host}:{port}"
+
+            def _open():
+                time.sleep(delay)
+                try:
+                    webbrowser.open(url)
+                except Exception:
+                    log(f"Could not auto-open browser. Visit {url} manually.", "WARN")
+
+            threading.Thread(target=_open, daemon=True).start()
+
         if mode == "tui":
             from meshing_around_clients.tui.app import MeshingAroundTUI
 
@@ -1429,6 +1447,9 @@ def run_application(config: ConfigParser):
             web_app = WebApplication(config=app_config, demo_mode=demo_mode)
             host = app_config.web.host
             port = app_config.web.port
+            browse_host = "localhost" if host in ("0.0.0.0", "::") else host
+            log(f"Web server starting on http://{browse_host}:{port}", "OK")
+            _open_browser(host, port)
             web_app.run(host=host, port=port)
 
         elif mode == "both":
@@ -1476,7 +1497,9 @@ def run_application(config: ConfigParser):
 
                 web_thread = threading.Thread(target=run_web, daemon=True)
                 web_thread.start()
-                log(f"Web server starting on http://{host}:{port}", "OK")
+                browse_host = "localhost" if host in ("0.0.0.0", "::") else host
+                log(f"Web server starting on http://{browse_host}:{port}", "OK")
+                _open_browser(host, port)
 
             # Run TUI in main thread (shared API — TUI handles connect/disconnect)
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode, api=shared_api)
