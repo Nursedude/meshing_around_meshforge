@@ -1616,9 +1616,9 @@ def run_application(config: ConfigParser):
             # File handlers are preserved so logs still go to disk.
             root_logger = _logging.getLogger()
             root_logger.handlers = [
-                h for h in root_logger.handlers
-                if not isinstance(h, _logging.StreamHandler)
-                or hasattr(h, "baseFilename")  # keep RotatingFileHandler
+                h
+                for h in root_logger.handlers
+                if not isinstance(h, _logging.StreamHandler) or hasattr(h, "baseFilename")  # keep RotatingFileHandler
             ]
 
             # Run TUI in main thread (shared API — TUI handles connect/disconnect)
