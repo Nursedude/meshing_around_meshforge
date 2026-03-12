@@ -23,7 +23,53 @@ from meshing_around_clients.core.models import (
     NodeTelemetry,
     Position,
     RouteHop,
+    _parse_datetime,
+    _parse_enum,
 )
+
+
+class TestParseDatetime(unittest.TestCase):
+    """Test _parse_datetime() utility function."""
+
+    def test_valid_iso_string(self):
+        dt = _parse_datetime("2025-01-15T10:30:00+00:00")
+        self.assertIsNotNone(dt)
+        self.assertEqual(dt.year, 2025)
+        self.assertEqual(dt.hour, 10)
+
+    def test_naive_datetime_gets_utc(self):
+        dt = _parse_datetime("2025-01-15T10:30:00")
+        self.assertIsNotNone(dt)
+        self.assertEqual(dt.tzinfo, timezone.utc)
+
+    def test_none_returns_none(self):
+        self.assertIsNone(_parse_datetime(None))
+
+    def test_empty_string_returns_none(self):
+        self.assertIsNone(_parse_datetime(""))
+
+    def test_invalid_string_returns_none(self):
+        self.assertIsNone(_parse_datetime("not-a-date"))
+
+
+class TestParseEnum(unittest.TestCase):
+    """Test _parse_enum() utility function."""
+
+    def test_valid_value(self):
+        result = _parse_enum(NodeRole, "CLIENT", NodeRole.CLIENT)
+        self.assertEqual(result, NodeRole.CLIENT)
+
+    def test_invalid_value_returns_default(self):
+        result = _parse_enum(NodeRole, "INVALID", NodeRole.CLIENT)
+        self.assertEqual(result, NodeRole.CLIENT)
+
+    def test_none_returns_default(self):
+        result = _parse_enum(NodeRole, None, NodeRole.ROUTER)
+        self.assertEqual(result, NodeRole.ROUTER)
+
+    def test_empty_string_returns_default(self):
+        result = _parse_enum(NodeRole, "", NodeRole.REPEATER)
+        self.assertEqual(result, NodeRole.REPEATER)
 
 
 class TestEnums(unittest.TestCase):
