@@ -620,5 +620,223 @@ class TestMockAPIMessageCallbacks(unittest.TestCase):
         self.assertGreater(len(self.messages_received), 0)
 
 
+class TestCloseInterface(unittest.TestCase):
+    """Test _close_interface cleanup helper."""
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+
+    def tearDown(self):
+        self.api.disconnect()
+
+    def test_close_interface_when_none(self):
+        """_close_interface is safe when no interface exists."""
+        self.api.interface = None
+        self.api._close_interface()
+        self.assertIsNone(self.api.interface)
+
+    def test_close_interface_calls_close(self):
+        """_close_interface closes and discards a live interface."""
+        from unittest.mock import MagicMock
+
+        mock_iface = MagicMock()
+        self.api.interface = mock_iface
+        self.api._close_interface()
+        mock_iface.close.assert_called_once()
+        self.assertIsNone(self.api.interface)
+
+    def test_close_interface_handles_oserror(self):
+        """_close_interface suppresses OSError from close()."""
+        from unittest.mock import MagicMock
+
+        mock_iface = MagicMock()
+        mock_iface.close.side_effect = OSError("socket error")
+        self.api.interface = mock_iface
+        self.api._close_interface()  # Should not raise
+        self.assertIsNone(self.api.interface)
+
+    def test_close_interface_handles_runtime_error(self):
+        """_close_interface suppresses RuntimeError from close()."""
+        from unittest.mock import MagicMock
+
+        mock_iface = MagicMock()
+        mock_iface.close.side_effect = RuntimeError("already closed")
+        self.api.interface = mock_iface
+        self.api._close_interface()  # Should not raise
+        self.assertIsNone(self.api.interface)
+
+
+class TestTryCreate(unittest.TestCase):
+    """Test _try_create kwarg fallback logic."""
+
+    def test_try_create_passes_all_kwargs(self):
+        """When constructor accepts all kwargs, they are passed through."""
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        def mock_cls(host, portNumber=4403, connectTimeoutSeconds=30):
+            return {"host": host, "port": portNumber, "timeout": connectTimeoutSeconds}
+
+        result = MeshtasticAPI._try_create(mock_cls, "192.168.1.1", portNumber=9443, connectTimeoutSeconds=10)
+        self.assertEqual(result["host"], "192.168.1.1")
+        self.assertEqual(result["port"], 9443)
+        self.assertEqual(result["timeout"], 10)
+
+    def test_try_create_drops_unsupported_kwargs(self):
+        """When constructor raises TypeError, optional kwargs are dropped."""
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        call_count = [0]
+
+        def mock_cls(host):
+            call_count[0] += 1
+            return {"host": host}
+
+        result = MeshtasticAPI._try_create(mock_cls, "192.168.1.1", portNumber=9443, connectTimeoutSeconds=10)
+        self.assertEqual(result["host"], "192.168.1.1")
+        self.assertEqual(call_count[0], 1)  # Second call succeeded
+
+
+class TestTcpHostPortParsing(unittest.TestCase):
+    """Test TCP host:port parsing in _create_interface."""
+
+    def test_hostname_without_port_uses_default(self):
+        """Hostname without port should default to 4403."""
+        from unittest.mock import MagicMock, patch as mock_patch
+
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        config = Config()
+        config.interface.type = "tcp"
+        config.interface.hostname = "192.168.86.248"
+        api = MeshtasticAPI(config)
+
+        mock_tcp = MagicMock()
+        mock_mod = MagicMock()
+        mock_mod.TCPInterface = mock_tcp
+
+        with mock_patch.dict(
+            "meshing_around_clients.core.meshtastic_api._INTERFACE_MODULES",
+            {"tcp_interface": mock_mod},
+        ):
+            api._create_interface("tcp")
+
+        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=4403, connectTimeoutSeconds=30.0)
+
+    def test_hostname_with_port_parses_correctly(self):
+        """Hostname with :port should extract and pass portNumber."""
+        from unittest.mock import MagicMock, patch as mock_patch
+
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        config = Config()
+        config.interface.type = "tcp"
+        config.interface.hostname = "192.168.86.248:9443"
+        api = MeshtasticAPI(config)
+
+        mock_tcp = MagicMock()
+        mock_mod = MagicMock()
+        mock_mod.TCPInterface = mock_tcp
+
+        with mock_patch.dict(
+            "meshing_around_clients.core.meshtastic_api._INTERFACE_MODULES",
+            {"tcp_interface": mock_mod},
+        ):
+            api._create_interface("tcp")
+
+        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=9443, connectTimeoutSeconds=30.0)
+
+    def test_device_path_preserves_full_hostname(self):
+        """connection_info.device_path should keep the original host:port string."""
+        from unittest.mock import MagicMock, patch as mock_patch
+
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        config = Config()
+        config.interface.type = "tcp"
+        config.interface.hostname = "10.0.0.1:9443"
+        api = MeshtasticAPI(config)
+
+        mock_mod = MagicMock()
+        with mock_patch.dict(
+            "meshing_around_clients.core.meshtastic_api._INTERFACE_MODULES",
+            {"tcp_interface": mock_mod},
+        ):
+            api._create_interface("tcp")
+
+        self.assertEqual(api.connection_info.device_path, "10.0.0.1:9443")
+
+
+class TestConnectCleansUpPreviousInterface(unittest.TestCase):
+    """Test that connect() cleans up a stale interface via _close_interface."""
+
+    def test_close_interface_called_from_real_connect(self):
+        """MeshtasticAPI.connect() calls _close_interface before connecting."""
+        from unittest.mock import MagicMock, patch as mock_patch
+
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        config = Config()
+        api = MeshtasticAPI(config)
+        mock_iface = MagicMock()
+        api.interface = mock_iface
+
+        # Patch _close_interface to verify it's called, and _create_interface
+        # to avoid needing real meshtastic hardware
+        with (
+            mock_patch.object(api, "_close_interface") as mock_close,
+            mock_patch("meshing_around_clients.core.meshtastic_api.MESHTASTIC_AVAILABLE", True),
+            mock_patch.object(api, "_create_interface", side_effect=OSError("test")),
+        ):
+            api.connect()
+
+        mock_close.assert_called_once()
+
+
+class TestConnectWithRetryConfigError(unittest.TestCase):
+    """Test connect_with_retry bails on configuration errors."""
+
+    def test_config_error_stops_retry(self):
+        """Configuration errors should not be retried."""
+        config = Config()
+        api = MockMeshtasticAPI(config)
+
+        attempt_count = [0]
+
+        def mock_connect():
+            attempt_count[0] += 1
+            api.connection_info.error_message = "Configuration error (ValueError): bad hostname"
+            api.connection_info.connected = False
+            return False
+
+        api.connect = mock_connect
+        with patch("meshing_around_clients.core.meshtastic_api.MESHTASTIC_AVAILABLE", True):
+            result = api.connect_with_retry(max_retries=3)
+        self.assertFalse(result)
+        self.assertEqual(attempt_count[0], 1)  # Should not retry
+
+    def test_transient_error_retries(self):
+        """Transient errors should be retried."""
+        config = Config()
+        api = MockMeshtasticAPI(config)
+
+        attempt_count = [0]
+
+        def mock_connect():
+            attempt_count[0] += 1
+            if attempt_count[0] < 3:
+                api.connection_info.error_message = "Connection failed (OSError): timeout"
+                api.connection_info.connected = False
+                return False
+            api.connection_info.connected = True
+            return True
+
+        api.connect = mock_connect
+        with patch("meshing_around_clients.core.meshtastic_api.MESHTASTIC_AVAILABLE", True):
+            result = api.connect_with_retry(max_retries=3, base_delay=0.01)
+        self.assertTrue(result)
+        self.assertEqual(attempt_count[0], 3)
+
+
 if __name__ == "__main__":
     unittest.main()
