@@ -366,13 +366,13 @@ class MeshtasticAPI(CallbackMixin):
                 self.network.connection_status = "error"
                 raise
 
-        except (OSError, ConnectionError, TimeoutError, ImportError) as e:
-            self.connection_info.error_message = f"Connection failed ({type(e).__name__}): {e}"
-            self.connection_info.connected = False
-            self.network.connection_status = "error"
-            return False
-        except (ValueError, AttributeError) as e:
-            self.connection_info.error_message = f"Configuration error ({type(e).__name__}): {e}"
+        except Exception as e:
+            # Catch-all includes meshtastic's MeshInterfaceError (inherits
+            # directly from Exception, not from OSError/TimeoutError).
+            if isinstance(e, (ValueError, AttributeError)):
+                self.connection_info.error_message = f"Configuration error ({type(e).__name__}): {e}"
+            else:
+                self.connection_info.error_message = f"Connection failed ({type(e).__name__}): {e}"
             self.connection_info.connected = False
             self.network.connection_status = "error"
             return False
