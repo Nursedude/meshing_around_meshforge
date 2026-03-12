@@ -224,9 +224,10 @@ class MeshtasticAPI(CallbackMixin):
             if not _HOSTNAME_RE.match(hostname):
                 raise ValueError(f"Invalid TCP hostname: {hostname!r}")
             self.connection_info.device_path = hostname
-            host, tcp_port = (hostname.rsplit(":", 1) if ":" in hostname else (hostname, "4403"))
+            host, tcp_port = hostname.rsplit(":", 1) if ":" in hostname else (hostname, "4403")
             return self._try_create(
-                mod.TCPInterface, host,
+                mod.TCPInterface,
+                host,
                 portNumber=int(tcp_port),
                 connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS,
             )
