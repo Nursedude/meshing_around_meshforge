@@ -29,8 +29,10 @@ from meshing_around_clients.setup.system_maintenance import (
     git_pull,
     install_package,
     install_python_dependencies,
+    list_recent_versions,
     manage_service,
     perform_scheduled_update_check,
+    rollback_to_version,
     run_command,
     should_check_updates,
     system_update,
@@ -740,6 +742,120 @@ class TestGitHelpersExtended(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertTrue(result.requires_restart)
         self.assertIn("Updated", result.message)
+
+
+class TestListRecentVersions(unittest.TestCase):
+    """Test list_recent_versions()."""
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_returns_versions(self, mock_run):
+        mock_run.return_value = (
+            0,
+            "abc1234\t2026-03-10 12:00:00 +0000\tFirst commit\n"
+            "def5678\t2026-03-09 10:00:00 +0000\tSecond commit\n"
+            "ghi9012\t2026-03-08 08:00:00 +0000\tThird commit\n",
+            "",
+        )
+        versions = list_recent_versions(Path("/tmp"), count=3)
+        self.assertEqual(len(versions), 3)
+        self.assertEqual(versions[0], ("abc1234", "2026-03-10", "First commit"))
+        self.assertEqual(versions[1], ("def5678", "2026-03-09", "Second commit"))
+        self.assertEqual(versions[2], ("ghi9012", "2026-03-08", "Third commit"))
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_empty_on_failure(self, mock_run):
+        mock_run.return_value = (1, "", "not a git repo")
+        versions = list_recent_versions(Path("/tmp"))
+        self.assertEqual(versions, [])
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_empty_on_no_output(self, mock_run):
+        mock_run.return_value = (0, "", "")
+        versions = list_recent_versions(Path("/tmp"))
+        self.assertEqual(versions, [])
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_malformed_lines_skipped(self, mock_run):
+        mock_run.return_value = (
+            0,
+            "abc1234\t2026-03-10 12:00:00 +0000\tGood commit\n" "bad line without tabs\n",
+            "",
+        )
+        versions = list_recent_versions(Path("/tmp"))
+        self.assertEqual(len(versions), 1)
+        self.assertEqual(versions[0][0], "abc1234")
+
+
+class TestRollbackToVersion(unittest.TestCase):
+    """Test rollback_to_version()."""
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_success_no_local_changes(self, mock_run):
+        mock_run.side_effect = [
+            (0, "", ""),  # git status --porcelain (no changes)
+            (0, "", ""),  # git checkout <hash>
+        ]
+        result = rollback_to_version(Path("/tmp"), "abc1234")
+        self.assertTrue(result.success)
+        self.assertIn("abc1234", result.message)
+        self.assertTrue(result.requires_restart)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_success_with_stash(self, mock_run):
+        mock_run.side_effect = [
+            (0, "M file.txt\n", ""),  # git status (has changes)
+            (0, "", ""),  # git stash
+            (0, "", ""),  # git checkout <hash>
+            (0, "", ""),  # git stash pop
+        ]
+        result = rollback_to_version(Path("/tmp"), "abc1234")
+        self.assertTrue(result.success)
+        self.assertIn("abc1234", result.message)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_checkout_fails(self, mock_run):
+        mock_run.side_effect = [
+            (0, "", ""),  # git status (no changes)
+            (1, "", "error: pathspec 'bad' did not match"),  # checkout fails
+        ]
+        result = rollback_to_version(Path("/tmp"), "bad")
+        self.assertFalse(result.success)
+        self.assertIn("Rollback failed", result.message)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_checkout_fails_restores_stash(self, mock_run):
+        mock_run.side_effect = [
+            (0, "M file.txt\n", ""),  # has changes
+            (0, "", ""),  # git stash
+            (1, "", "checkout error"),  # checkout fails
+            (0, "", ""),  # git stash pop (restore)
+        ]
+        result = rollback_to_version(Path("/tmp"), "bad")
+        self.assertFalse(result.success)
+        # Verify stash pop was called (4 calls total)
+        self.assertEqual(mock_run.call_count, 4)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_with_callback(self, mock_run):
+        mock_run.side_effect = [
+            (0, "", ""),  # no changes
+            (0, "", ""),  # checkout success
+        ]
+        messages = []
+        rollback_to_version(Path("/tmp"), "abc1234", progress_callback=messages.append)
+        self.assertGreater(len(messages), 0)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_stash_fails_continues(self, mock_run):
+        mock_run.side_effect = [
+            (0, "M file.txt\n", ""),  # has changes
+            (1, "", "stash error"),  # stash fails
+            (0, "", ""),  # checkout succeeds anyway
+            (0, "", ""),  # stash pop
+        ]
+        result = rollback_to_version(Path("/tmp"), "abc1234")
+        self.assertTrue(result.success)
+        self.assertGreater(len(result.errors), 0)
 
 
 if __name__ == "__main__":
