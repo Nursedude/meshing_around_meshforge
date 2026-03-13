@@ -320,7 +320,7 @@ flowchart TD
 | **Demo** | No | **Working** | Test the UI with simulated nodes and messages |
 | **MQTT** | No | Partial | Join live mesh channels via broker — no radio needed |
 | **Serial** | Yes (USB) | Untested | Direct USB connection to a Meshtastic device |
-| **TCP** | No (network) | Untested | Connect to a remote device over WiFi/LAN (port 4403) |
+| **TCP** | No (network) | Untested | Connect to meshtasticd protobuf API (port 4403, not web port 9443) |
 | **BLE** | Yes (nearby) | Untested | Bluetooth Low Energy to a nearby device |
 | **Auto** | Depends | Working | Tries Serial → TCP → MQTT → Demo in order |
 
@@ -355,7 +355,7 @@ All settings live in `mesh_client.ini` (or `config.enhanced.ini` for full alert 
 [interface]
 type = mqtt                    # serial, tcp, ble, mqtt, auto, demo
 port = /dev/ttyUSB0            # Serial port (auto-detect if empty)
-hostname = 192.168.1.100       # TCP host address
+hostname = 127.0.0.1           # TCP host (127.0.0.1 for local, or remote_ip:4403)
 mac = AA:BB:CC:DD:EE:FF        # BLE MAC address
 baudrate = 115200              # Serial baud rate
 ```
@@ -598,7 +598,7 @@ The automated tests cover code logic, but these areas need validation with actua
 | Area | What's Needed | How to Help |
 |------|--------------|-------------|
 | **Serial mode** | USB connection to any Meshtastic device | Run `python3 mesh_client.py`, select **tui** with a USB device connected |
-| **TCP mode** | Network-connected Meshtastic device (port 4403) | Set `type = tcp` and `hostname = <address>` in `mesh_client.ini`, then run launcher |
+| **TCP mode** | meshtasticd protobuf API (port 4403, not web port 9443) | Set `type = tcp` and `hostname = 127.0.0.1` (local) or `hostname = <ip>:4403` (remote) in `mesh_client.ini` |
 | **BLE mode** | Bluetooth-capable device nearby | Set `type = ble` and `mac = <address>` in `mesh_client.ini`, then run launcher |
 | **MQTT (live)** | Extended run against `mqtt.meshtastic.org` | Run `python3 mesh_client.py`, select **mqtt** from the launcher for 30+ minutes |
 | **Email/SMS** | SMTP server credentials, carrier SMS gateway | Configure `[smtp]` and `[sms]` sections in config |

@@ -440,7 +440,8 @@ DEFAULT_CONFIG = """
 # Connection type: auto, serial, tcp, http, mqtt, ble
 # - auto: Try serial first, then tcp, then http, then mqtt
 # - serial: Direct USB/serial connection to radio
-# - tcp: TCP connection to remote Meshtastic device (protobuf port 4403)
+# - tcp: TCP connection to meshtasticd protobuf API (default port 4403)
+#   Use 127.0.0.1 for local meshtasticd, or host:port for remote
 # - http: HTTP connection to meshtasticd HTTP API
 # - mqtt: MQTT broker connection (no radio needed)
 # - ble: Bluetooth LE connection
@@ -454,6 +455,8 @@ port =
 baudrate = 115200
 
 # TCP hostname (for type=tcp)
+# Use 127.0.0.1 for local meshtasticd, host:port for remote (default port 4403)
+# Do NOT use the node's web interface port (9443) - that is for browsers only
 hostname =
 
 # HTTP URL for meshtasticd HTTP API (for type=http)
@@ -881,6 +884,7 @@ def interactive_setup():
     """
     from meshing_around_clients.setup.whiptail import (
         inputbox,
+        menu,
         msgbox,
         radiolist,
     )
@@ -957,7 +961,18 @@ def interactive_setup():
             config.set("interface", "port", port)
 
     elif conn_type == "tcp":
-        host = inputbox("TCP host", default="192.168.1.1")
+        tcp_items = [
+            ("local", "Local meshtasticd (127.0.0.1:4403)"),
+            ("remote", "Remote device (enter IP address)"),
+        ]
+        tcp_target = menu("TCP Target", tcp_items, default="local")
+        if tcp_target == "remote":
+            host = inputbox(
+                "TCP host (host or host:port, default port 4403)",
+                default="192.168.1.1",
+            )
+        else:
+            host = "127.0.0.1"
         if host:
             config.set("interface", "hostname", host)
 
