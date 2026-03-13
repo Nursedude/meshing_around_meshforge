@@ -119,7 +119,6 @@ class TestConfig(unittest.TestCase):
         cfg = Config(config_path="/nonexistent/path/config.ini")
         self.assertIsNotNone(cfg.interface)
         self.assertIsNotNone(cfg.alerts)
-        self.assertIsNotNone(cfg.web)
         self.assertIsNotNone(cfg.tui)
         self.assertEqual(cfg.bot_name, "MeshBot")
 

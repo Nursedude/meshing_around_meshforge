@@ -1027,9 +1027,7 @@ def _view_logs() -> None:
         log("Opening service logs via journalctl...", "INFO")
         less = shutil.which("less")
         if less:
-            subprocess.run(
-                ["bash", "-c", "journalctl -u mesh-client.service --no-pager -n 200 | less"]
-            )
+            subprocess.run(["bash", "-c", "journalctl -u mesh-client.service --no-pager -n 200 | less"])
         else:
             subprocess.run(["journalctl", "-u", "mesh-client.service", "--no-pager", "-n", "200"])
     else:
@@ -1404,6 +1402,7 @@ def launcher_menu(config: ConfigParser) -> bool:
                 ini_path = CONFIG_FILE
                 if not ini_path.exists():
                     from meshing_around_clients.setup.whiptail import yesno
+
                     log(f"{ini_path} not found.", "WARN")
                     if yesno("Create from default template?"):
                         try:

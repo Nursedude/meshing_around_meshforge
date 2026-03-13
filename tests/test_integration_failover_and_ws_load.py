@@ -279,6 +279,5 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
             client.disconnect()
 
 
-
 if __name__ == "__main__":
     unittest.main()
