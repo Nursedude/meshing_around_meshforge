@@ -841,6 +841,67 @@ class TestConnectWithRetryConfigError(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(attempt_count[0], 3)
 
+    def test_not_available_error_stops_retry(self):
+        """Import 'not available' errors should not be retried."""
+        config = Config()
+        api = MockMeshtasticAPI(config)
+
+        attempt_count = [0]
+
+        def mock_connect():
+            attempt_count[0] += 1
+            api.connection_info.error_message = (
+                "Connection failed (ImportError): meshtastic.http_interface "
+                "not available \u2014 install its dependencies"
+            )
+            api.connection_info.connected = False
+            return False
+
+        api.connect = mock_connect
+        with patch("meshing_around_clients.core.meshtastic_api.MESHTASTIC_AVAILABLE", True):
+            result = api.connect_with_retry(max_retries=3)
+        self.assertFalse(result)
+        self.assertEqual(attempt_count[0], 1)  # Should not retry
+
+
+class TestRefreshNonImportError(unittest.TestCase):
+    """Test refresh_meshtastic_availability handles non-ImportError exceptions."""
+
+    def test_runtime_error_sets_module_none_and_logs(self):
+        """Non-ImportError exceptions are caught and logged during refresh."""
+        import importlib
+        import logging
+
+        from meshing_around_clients.core.meshtastic_api import (
+            _INTERFACE_MODULES,
+            refresh_meshtastic_availability,
+        )
+
+        real_import = importlib.import_module
+
+        def side_effect(name, *args, **kwargs):
+            if name == "meshtastic.http_interface":
+                raise RuntimeError("native extension crash")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch("importlib.import_module", side_effect=side_effect),
+            patch.object(logging.getLogger("meshing_around_clients.core.meshtastic_api"), "info") as mock_info,
+        ):
+            refresh_meshtastic_availability()
+
+        self.assertIsNone(_INTERFACE_MODULES.get("http_interface"))
+        # Logger receives the exception object, not its string representation
+        found = any(
+            len(c.args) == 4
+            and c.args[0] == "meshtastic.%s import failed (%s): %s"
+            and c.args[1] == "http_interface"
+            and c.args[2] == "RuntimeError"
+            and isinstance(c.args[3], RuntimeError)
+            for c in mock_info.call_args_list
+        )
+        self.assertTrue(found, f"Expected log call not found in: {mock_info.call_args_list}")
+
 
 if __name__ == "__main__":
     unittest.main()
