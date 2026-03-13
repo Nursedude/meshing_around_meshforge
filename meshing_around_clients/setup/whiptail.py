@@ -165,8 +165,9 @@ def msgbox(
     title: str = "Info",
     height: int = 10,
     width: int = 60,
+    scrolltext: bool = False,
 ) -> None:
-    """Information dialog box."""
+    """Information dialog box. Set scrolltext=True for long content."""
     if not _can_use_whiptail():
         _fallback_msgbox(message, title)
         return
@@ -182,9 +183,37 @@ def msgbox(
         str(height),
         str(width),
     ]
+    if scrolltext:
+        cmd.append("--scrolltext")
     result = _run_whiptail(cmd)
     if result is None:
         _fallback_msgbox(message, title)
+
+
+def infobox(
+    message: str,
+    title: str = "Info",
+    height: int = 20,
+    width: int = 70,
+) -> None:
+    """Non-blocking info display (no OK button, returns immediately)."""
+    if not _can_use_whiptail():
+        print(f"\n{_BOLD}{title}{_RESET}")
+        print(message, flush=True)
+        return
+
+    cmd = [
+        "whiptail",
+        "--backtitle",
+        BACKTITLE,
+        "--title",
+        title,
+        "--infobox",
+        message,
+        str(height),
+        str(width),
+    ]
+    _run_whiptail(cmd)
 
 
 def inputbox(

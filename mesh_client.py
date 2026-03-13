@@ -1580,9 +1580,16 @@ def run_application(config: ConfigParser):
             demo_mode = True
 
         if mode == "tui":
-            from meshing_around_clients.tui.app import MeshingAroundTUI
+            from meshing_around_clients.setup.pi_utils import is_raspberry_pi
 
-            tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
+            if is_raspberry_pi():
+                from meshing_around_clients.tui.whiptail_tui import WhiptailTUI
+
+                tui = WhiptailTUI(config=app_config, demo_mode=demo_mode)
+            else:
+                from meshing_around_clients.tui.app import MeshingAroundTUI
+
+                tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
             tui.run_interactive()
 
         elif mode == "headless":
