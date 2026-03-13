@@ -103,7 +103,7 @@ class LoggingConfig:
 
     enabled: bool = True
     level: str = "INFO"
-    file: str = "mesh_client.log"
+    file: str = "logs/mesh_client.log"
     max_size_mb: int = 10
     backup_count: int = 3
 

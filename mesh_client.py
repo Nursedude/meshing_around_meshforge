@@ -62,7 +62,7 @@ VERSION = "0.5.0-beta"
 SCRIPT_DIR = Path(__file__).parent.absolute()
 CONFIG_FILE = SCRIPT_DIR / "mesh_client.ini"
 VENV_DIR = SCRIPT_DIR / ".venv"
-LOG_FILE = SCRIPT_DIR / "mesh_client.log"
+LOG_FILE = SCRIPT_DIR / "logs" / "mesh_client.log"
 
 # =============================================================================
 # ZERO-DEPENDENCY UTILITIES (stdlib only)
@@ -133,13 +133,13 @@ def setup_logging(config: ConfigParser) -> None:
 
     enabled = config.getboolean("logging", "enabled", fallback=True)
     level_str = config.get("logging", "level", fallback="INFO").upper()
-    log_file = config.get("logging", "file", fallback="mesh_client.log")
+    log_file = config.get("logging", "file", fallback="logs/mesh_client.log")
     max_size_mb = config.getint("logging", "max_size_mb", fallback=10)
     backup_count = config.getint("logging", "backup_count", fallback=3)
 
     # Message log settings
     msg_log_enabled = config.getboolean("logging", "message_log_enabled", fallback=True)
-    msg_log_file = config.get("logging", "message_log_file", fallback="mesh_messages.log")
+    msg_log_file = config.get("logging", "message_log_file", fallback="logs/mesh_messages.log")
     msg_log_backup_count = config.getint("logging", "message_log_backup_count", fallback=7)
 
     # Resolve relative paths against script directory
@@ -581,7 +581,7 @@ node_name_style = long
 enabled = true
 level = INFO
 # Levels: DEBUG, INFO, WARNING, ERROR
-file = mesh_client.log
+file = logs/mesh_client.log
 max_size_mb = 10
 backup_count = 3
 
@@ -1077,95 +1077,40 @@ def _follow_logs() -> None:
             pass
 
 
-def config_editor_menu() -> None:
-    """Interactive menu for editing configuration files.
-
-    Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
-    """
-    from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
-
-    editor = _find_editor()
-    if not editor:
-        log("No text editor found (nano, vi, vim). Install nano: sudo apt install nano", "ERROR")
-        return
-
-    items = [
-        ("ini", "mesh_client.ini (Main configuration)"),
-        ("enhanced", "config.enhanced.ini (Alert reference)"),
-        ("systemd", "Systemd service file (Auto-start)"),
-        ("log", "mesh_client.log (View current log)"),
-    ]
-
-    while True:
-        choice = wt_menu("Configuration Files", items)
-
-        if choice is None:
-            return
-
-        if choice == "ini":
-            ini_path = CONFIG_FILE
-            if not ini_path.exists():
-                log(f"{ini_path} not found.", "WARN")
-                if yesno("Create from default template?"):
-                    try:
-                        ini_path.write_text(DEFAULT_CONFIG)
-                        os.chmod(str(ini_path), 0o600)
-                        log(f"Created {ini_path}", "OK")
-                    except OSError as e:
-                        log(f"Failed to create config: {e}", "ERROR")
-                        continue
-                else:
-                    continue
-            subprocess.run([editor, str(ini_path)])
-
-        elif choice == "enhanced":
-            enhanced_path = SCRIPT_DIR / "config.enhanced.ini"
-            if not enhanced_path.exists():
-                log(f"{enhanced_path} not found.", "ERROR")
-                continue
-            subprocess.run([editor, str(enhanced_path)])
-
-        elif choice == "systemd":
-            service_path = Path("/etc/systemd/system/mesh-client.service")
-            if not service_path.exists():
-                log("Systemd service not installed.", "WARN")
-                log("Run setup_headless.sh to create one, or use the Update menu to install.", "INFO")
-                continue
-            log("Opening service file (sudo required)...", "INFO")
-            subprocess.run(["sudo", editor, str(service_path)])
-
-        elif choice == "log":
-            _view_logs()
-
-
-def logging_menu(config: ConfigParser) -> None:
-    """Interactive submenu for viewing and changing logging settings.
+def logs_menu(config: ConfigParser):
+    """Interactive submenu for log viewing and logging settings.
 
     Changes are saved to mesh_client.ini and applied immediately.
+    Returns "exit" if user chose exit, None otherwise.
     """
     from meshing_around_clients.setup.whiptail import menu as wt_menu, msgbox, radiolist, yesno
 
     while True:
         items = [
-            ("view", "View current logging settings"),
+            ("view", "View logging settings"),
             ("level", "Change log level"),
             ("toggle", "Toggle logging on/off"),
+            ("system", "View system log"),
+            ("messages", "View message log"),
             ("journal", "View service logs (journalctl)"),
             ("follow", "Follow live logs (journalctl -f)"),
+            ("e", "Exit"),
         ]
-        choice = wt_menu("Logging Settings", items)
+        choice = wt_menu("Logs", items)
 
         if choice is None:
-            return
+            return None
+        if choice == "e":
+            return "exit"
 
         if choice == "view":
             enabled = config.get("logging", "enabled", fallback="true")
             level = config.get("logging", "level", fallback="INFO")
-            log_file = config.get("logging", "file", fallback="mesh_client.log")
+            log_file = config.get("logging", "file", fallback="logs/mesh_client.log")
             max_size = config.get("logging", "max_size_mb", fallback="10")
             backups = config.get("logging", "backup_count", fallback="3")
             msg_enabled = config.get("logging", "message_log_enabled", fallback="true")
-            msg_file = config.get("logging", "message_log_file", fallback="mesh_messages.log")
+            msg_file = config.get("logging", "message_log_file", fallback="logs/mesh_messages.log")
 
             info = (
                 f"Logging enabled:  {enabled}\n"
@@ -1215,6 +1160,32 @@ def logging_menu(config: ConfigParser) -> None:
                 state = "enabled" if new_value == "true" else "disabled"
                 log(f"Logging {state}", "OK")
 
+        elif choice == "system":
+            log_path = Path(config.get("logging", "file", fallback="logs/mesh_client.log"))
+            if not log_path.is_absolute():
+                log_path = SCRIPT_DIR / log_path
+            if not log_path.exists():
+                log("No system log found yet. Run the client first.", "WARN")
+            else:
+                less = shutil.which("less")
+                if less:
+                    subprocess.run([less, str(log_path)])
+                else:
+                    subprocess.run(["tail", "-n", "200", str(log_path)])
+
+        elif choice == "messages":
+            msg_path = Path(config.get("logging", "message_log_file", fallback="logs/mesh_messages.log"))
+            if not msg_path.is_absolute():
+                msg_path = SCRIPT_DIR / msg_path
+            if not msg_path.exists():
+                log("No message log found yet. Run the client first.", "WARN")
+            else:
+                less = shutil.which("less")
+                if less:
+                    subprocess.run([less, str(msg_path)])
+                else:
+                    subprocess.run(["tail", "-n", "200", str(msg_path)])
+
         elif choice == "journal":
             _view_logs()
 
@@ -1222,10 +1193,11 @@ def logging_menu(config: ConfigParser) -> None:
             _follow_logs()
 
 
-def update_menu(config: ConfigParser) -> None:
+def update_menu(config: ConfigParser):
     """Interactive menu for updating/reinstalling meshing_around_meshforge and meshing-around.
 
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
+    Returns "exit" if user chose exit, None otherwise.
     """
     from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
 
@@ -1237,13 +1209,16 @@ def update_menu(config: ConfigParser) -> None:
         ("upstream", "Update meshing-around (upstream)"),
         ("clone", "Install meshing-around (clone)"),
         ("remove", "Remove meshing-around"),
+        ("e", "Exit"),
     ]
 
     while True:
         choice = wt_menu("Update / Reinstall", items)
 
         if choice is None:
-            return
+            return None
+        if choice == "e":
+            return "exit"
 
         # Most options need system_maintenance imports
         if choice in ("check", "update", "rollback", "upstream", "clone", "remove"):
@@ -1413,25 +1388,24 @@ def launcher_menu(config: ConfigParser) -> bool:
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     Returns True if the user selected a mode and the app ran, False to exit.
     """
-    from meshing_around_clients.setup.whiptail import menu as wt_menu
+    from meshing_around_clients.setup.whiptail import inputbox, menu as wt_menu
 
     items = [
         ("tui", "TUI Client (Terminal UI)"),
         ("mqtt", "MQTT Monitor"),
         ("demo", "Demo Mode"),
         ("ini", "Edit mesh_client.ini"),
-        ("config", "Configuration Files"),
-        ("logging", "Logging Settings"),
+        ("logs", "Logs"),
         ("setup", "Setup Wizard"),
         ("update", "Update / Reinstall"),
         ("install", "Install Everything"),
-        ("exit", "Exit"),
+        ("e", "Exit"),
     ]
 
     while True:
         choice = wt_menu("Meshing Around MeshForge", items, default="tui")
 
-        if choice is None or choice == "exit":
+        if choice is None or choice == "e":
             return True
 
         if choice == "tui":
@@ -1440,6 +1414,24 @@ def launcher_menu(config: ConfigParser) -> bool:
             config.set("features", "mode", "tui")
             config.set("mqtt", "enabled", "true")
             config.set("interface", "type", "mqtt")
+            broker = inputbox(
+                "MQTT broker",
+                default=config.get("mqtt", "broker", fallback="mqtt.meshtastic.org"),
+            )
+            if broker:
+                config.set("mqtt", "broker", broker)
+            topic = inputbox(
+                "Topic root",
+                default=config.get("mqtt", "topic_root", fallback="msh/US"),
+            )
+            if topic:
+                config.set("mqtt", "topic_root", topic)
+            channel = inputbox(
+                "Channel",
+                default=config.get("mqtt", "channel", fallback="LongFast"),
+            )
+            if channel:
+                config.set("mqtt", "channel", channel)
         elif choice == "demo":
             config.set("advanced", "demo_mode", "true")
             config.set("features", "mode", "tui")
@@ -1468,17 +1460,18 @@ def launcher_menu(config: ConfigParser) -> bool:
         elif choice == "setup":
             interactive_setup()
             return True
-        elif choice == "config":
-            config_editor_menu()
-            continue
         elif choice == "update":
-            update_menu(config)
+            result = update_menu(config)
+            if result == "exit":
+                return True
             continue
         elif choice == "install":
             standalone_install(config)
             continue
-        elif choice == "logging":
-            logging_menu(config)
+        elif choice == "logs":
+            result = logs_menu(config)
+            if result == "exit":
+                return True
             continue
 
         # For TUI modes: prompt for connection type
