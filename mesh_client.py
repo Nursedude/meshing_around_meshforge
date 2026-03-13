@@ -1581,17 +1581,20 @@ def run_application(config: ConfigParser):
             demo_mode = True
 
         if mode == "tui":
-            from meshing_around_clients.setup.pi_utils import is_raspberry_pi
-
             force_whiptail = config.getboolean("features", "force_whiptail", fallback=False)
-            if force_whiptail or is_raspberry_pi():
+            if force_whiptail:
                 from meshing_around_clients.tui.whiptail_tui import WhiptailTUI
 
                 tui = WhiptailTUI(config=app_config, demo_mode=demo_mode)
             else:
-                from meshing_around_clients.tui.app import MeshingAroundTUI
+                try:
+                    from meshing_around_clients.tui.app import MeshingAroundTUI
 
-                tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
+                    tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
+                except ImportError:
+                    from meshing_around_clients.tui.whiptail_tui import WhiptailTUI
+
+                    tui = WhiptailTUI(config=app_config, demo_mode=demo_mode)
             tui.run_interactive()
 
         elif mode == "headless":
