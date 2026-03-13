@@ -1649,7 +1649,7 @@ class MeshingAroundTUI:
             self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
             self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
             self.console.print("  [white]2)[/white] MQTT - Custom broker")
-            self.console.print("  [white]3)[/white] HTTP - Remote Meshtastic device")
+            self.console.print("  [white]3)[/white] TCP  - Remote Meshtastic device")
             self.console.print("  [white]4)[/white] Install Meshtastic library")
             self.console.print("  [white]5)[/white] Demo mode (simulated data)")
             self.console.print("  [white]6)[/white] Exit\n")
@@ -1705,11 +1705,10 @@ class MeshingAroundTUI:
                     return self._connection_fallback_menu()
 
             elif choice == "3":
-                # HTTP remote device (stateless, won't interfere with web UI)
+                # TCP remote device
                 hostname = Prompt.ask("Device hostname/IP")
-                self.config.interface.type = "http"
+                self.config.interface.type = "tcp"
                 self.config.interface.hostname = hostname
-                self.config.interface.http_url = f"http://{hostname}"
                 self.api = MeshtasticAPI(self.config)
                 self._register_dirty_callbacks()
                 return self.connect()
