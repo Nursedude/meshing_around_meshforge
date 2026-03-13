@@ -722,7 +722,7 @@ class TestTcpHostPortParsing(unittest.TestCase):
         ):
             api._create_interface("tcp")
 
-        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=4403, connectTimeoutSeconds=30.0)
+        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=4403, connectTimeoutSeconds=30.0, noNodes=True)
 
     def test_hostname_with_port_parses_correctly(self):
         """Hostname with :port should extract and pass portNumber."""
@@ -746,7 +746,7 @@ class TestTcpHostPortParsing(unittest.TestCase):
         ):
             api._create_interface("tcp")
 
-        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=9443, connectTimeoutSeconds=30.0)
+        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=9443, connectTimeoutSeconds=30.0, noNodes=True)
 
     def test_device_path_preserves_full_hostname(self):
         """connection_info.device_path should keep the original host:port string."""

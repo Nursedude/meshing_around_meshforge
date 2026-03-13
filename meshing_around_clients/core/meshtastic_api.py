@@ -192,7 +192,7 @@ class MeshtasticAPI(CallbackMixin):
         except TypeError:
             # Older/newer meshtastic versions may not accept all kwargs;
             # drop optional kwargs and retry.
-            for key in ("connectTimeoutSeconds", "portNumber"):
+            for key in ("connectTimeoutSeconds", "portNumber", "noNodes"):
                 kwargs.pop(key, None)
             return cls(*args, **kwargs)
 
@@ -230,6 +230,7 @@ class MeshtasticAPI(CallbackMixin):
                 host,
                 portNumber=int(tcp_port),
                 connectTimeoutSeconds=CONNECT_TIMEOUT_SECONDS,
+                noNodes=True,
             )
         elif interface_type == "http":
             base_url = self.config.interface.http_url
