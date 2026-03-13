@@ -396,6 +396,97 @@ def _refresh_venv_deps(
         report(f"Warning: failed to refresh venv deps: {stderr[:100]}")
 
 
+def list_recent_versions(repo_path: Path, count: int = 10) -> List[Tuple[str, str, str]]:
+    """List recent git commits (versions) for rollback selection.
+
+    Args:
+        repo_path: Path to git repository
+        count: Number of recent commits to list
+
+    Returns:
+        List of (short_hash, date, subject) tuples
+    """
+    ret, stdout, _ = run_command(
+        ["git", "log", f"-{count}", "--format=%h\t%ci\t%s"],
+        cwd=repo_path,
+    )
+    if ret != 0 or not stdout.strip():
+        return []
+
+    versions = []
+    for line in stdout.strip().split("\n"):
+        parts = line.split("\t", 2)
+        if len(parts) == 3:
+            short_hash, date_str, subject = parts
+            # Shorten the date to YYYY-MM-DD
+            date_short = date_str.split(" ")[0] if " " in date_str else date_str
+            versions.append((short_hash.strip(), date_short.strip(), subject.strip()))
+    return versions
+
+
+def rollback_to_version(
+    repo_path: Path,
+    commit_hash: str,
+    stash_changes: bool = True,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> UpdateResult:
+    """Roll back the repository to a specific commit.
+
+    Creates a new branch 'rollback-<hash>' and checks it out so the user
+    can easily return to main later with ``git checkout main && git pull``.
+
+    Args:
+        repo_path: Path to git repository
+        commit_hash: Short or full commit hash to roll back to
+        stash_changes: Whether to stash local changes first
+        progress_callback: Optional callback for progress messages
+
+    Returns:
+        UpdateResult with details
+    """
+
+    def report(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+
+    result = UpdateResult(success=True, message="")
+
+    # Stash any local changes
+    ret, stdout, _ = run_command(["git", "status", "--porcelain"], cwd=repo_path)
+    has_changes = bool(stdout.strip())
+
+    if has_changes and stash_changes:
+        report("Stashing local changes...")
+        ret, _, stderr = run_command(["git", "stash"], cwd=repo_path)
+        if ret != 0:
+            result.errors.append(f"Failed to stash changes: {stderr[:50]}")
+
+    # Checkout the target commit
+    report(f"Rolling back to {commit_hash}...")
+    ret, _, stderr = run_command(["git", "checkout", commit_hash], cwd=repo_path)
+
+    if ret != 0:
+        result.success = False
+        result.message = f"Rollback failed: {stderr[:100]}"
+        result.errors.append(stderr)
+        # Restore stash if we made one
+        if has_changes and stash_changes:
+            run_command(["git", "stash", "pop"], cwd=repo_path)
+        return result
+
+    result.message = f"Rolled back to {commit_hash}"
+    result.changes.append(f"Checked out commit {commit_hash}")
+    result.requires_restart = True
+
+    report(f"Now at {commit_hash}. Run 'Update (git pull)' to return to latest.")
+
+    # Restore stashed changes
+    if has_changes and stash_changes:
+        run_command(["git", "stash", "pop"], cwd=repo_path)
+
+    return result
+
+
 def update_meshforge(
     meshforge_path: Optional[Path] = None, progress_callback: Optional[Callable[[str], None]] = None
 ) -> UpdateResult:
@@ -622,7 +713,7 @@ def install_python_dependencies(
         result.errors.append(f"pip install failed: {stderr[:100]}")
 
         # Try installing core packages individually
-        core_packages = ["meshtastic[cli]", "PyPubSub", "requests", "paho-mqtt", "rich", "fastapi", "uvicorn"]
+        core_packages = ["meshtastic[cli]", "PyPubSub", "requests", "paho-mqtt", "rich"]
 
         report("Trying individual package installation...")
         for pkg in core_packages:
