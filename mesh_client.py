@@ -1487,7 +1487,8 @@ def launcher_menu(config: ConfigParser) -> bool:
                 ("auto", "Auto-detect", current_type == "auto"),
                 ("mqtt", "MQTT (No radio needed)", current_type == "mqtt"),
                 ("serial", "Serial (USB radio)", current_type == "serial"),
-                ("http", "HTTP (Remote device)", current_type == "http"),
+                ("tcp", "TCP (Remote device)", current_type == "tcp"),
+                ("http", "HTTP (Remote device API)", current_type == "http"),
                 ("demo", "Demo mode (simulated)", False),
             ]
             selected = radiolist("Connection Type", conn_items)
