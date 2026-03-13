@@ -1580,9 +1580,17 @@ def run_application(config: ConfigParser):
             demo_mode = True
 
         if mode == "tui":
-            from meshing_around_clients.tui.app import MeshingAroundTUI
+            from meshing_around_clients.setup.pi_utils import is_raspberry_pi
 
-            tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
+            force_whiptail = config.getboolean("features", "force_whiptail", fallback=False)
+            if force_whiptail or is_raspberry_pi():
+                from meshing_around_clients.tui.whiptail_tui import WhiptailTUI
+
+                tui = WhiptailTUI(config=app_config, demo_mode=demo_mode)
+            else:
+                from meshing_around_clients.tui.app import MeshingAroundTUI
+
+                tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
             tui.run_interactive()
 
         elif mode == "headless":
@@ -1642,6 +1650,7 @@ Examples:
     parser.add_argument("--setup", action="store_true", help="Run interactive setup")
     parser.add_argument("--check", action="store_true", help="Check dependencies only")
     parser.add_argument("--tui", action="store_true", help="Force TUI mode")
+    parser.add_argument("--whiptail", action="store_true", help="Force whiptail TUI mode (Pi-style)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
@@ -1755,13 +1764,16 @@ Examples:
         sys.exit(0)
 
     # Apply command line overrides
-    has_mode_flag = args.tui or args.demo
+    has_mode_flag = args.tui or args.whiptail or args.demo
 
     if args.demo:
         config.set("advanced", "demo_mode", "true")
 
-    if args.tui:
+    if args.tui or args.whiptail:
         config.set("features", "mode", "tui")
+
+    if args.whiptail:
+        config.set("features", "force_whiptail", "true")
 
     # Run system checks
     if not check_system():

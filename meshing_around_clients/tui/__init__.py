@@ -4,5 +4,6 @@ Provides a rich terminal interface for monitoring and interacting with the mesh 
 """
 
 from .app import MeshingAroundTUI
+from .whiptail_tui import WhiptailTUI
 
-__all__ = ["MeshingAroundTUI"]
+__all__ = ["MeshingAroundTUI", "WhiptailTUI"]
