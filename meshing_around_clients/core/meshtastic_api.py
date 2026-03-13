@@ -53,8 +53,10 @@ _INTERFACE_MODULES: dict = {}
 for _mod_name in ("serial_interface", "tcp_interface", "http_interface", "ble_interface"):
     try:
         _INTERFACE_MODULES[_mod_name] = importlib.import_module(f"meshtastic.{_mod_name}")
-    except ImportError:
+    except Exception as _exc:
         _INTERFACE_MODULES[_mod_name] = None
+        if not isinstance(_exc, ImportError):
+            logger.info("meshtastic.%s import failed (%s): %s", _mod_name, type(_exc).__name__, _exc)
 
 # Maps config interface type to sub-module name
 _INTERFACE_TYPE_MAP = {
@@ -79,8 +81,10 @@ def refresh_meshtastic_availability() -> bool:
     for mod_name in ("serial_interface", "tcp_interface", "http_interface", "ble_interface"):
         try:
             _INTERFACE_MODULES[mod_name] = importlib.import_module(f"meshtastic.{mod_name}")
-        except ImportError:
+        except Exception as exc:
             _INTERFACE_MODULES[mod_name] = None
+            if not isinstance(exc, ImportError):
+                logger.info("meshtastic.%s import failed (%s): %s", mod_name, type(exc).__name__, exc)
 
     return MESHTASTIC_AVAILABLE
 
@@ -442,7 +446,7 @@ class MeshtasticAPI(CallbackMixin):
             if not MESHTASTIC_AVAILABLE:
                 return False
             err = self.connection_info.error_message
-            if "Configuration error" in err:
+            if "Configuration error" in err or "not available" in err:
                 return False
 
             if attempt >= max_retries:
