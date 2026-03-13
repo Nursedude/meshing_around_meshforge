@@ -1938,6 +1938,12 @@ class MeshingAroundTUI:
             # Restore terminal settings if we saved them successfully
             if old_settings is not None:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+                # Flush stale input buffered during cbreak mode so the
+                # launcher menu doesn't consume leftover keystrokes.
+                try:
+                    termios.tcflush(sys.stdin, termios.TCIFLUSH)
+                except (OSError, ValueError):
+                    pass
             self._running = False
             # Remove TUI log handler from root logger
             if self._log_handler in logging.getLogger().handlers:
