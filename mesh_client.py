@@ -1217,6 +1217,7 @@ def update_menu(config: ConfigParser) -> None:
     items = [
         ("check", "Check for updates"),
         ("update", "Update (git pull)"),
+        ("rollback", "Rollback to previous version"),
         ("deps", "Reinstall dependencies"),
         ("upstream", "Update meshing-around (upstream)"),
         ("clone", "Install meshing-around (clone)"),
@@ -1230,12 +1231,14 @@ def update_menu(config: ConfigParser) -> None:
             return
 
         # Most options need system_maintenance imports
-        if choice in ("check", "update", "upstream", "clone", "remove"):
+        if choice in ("check", "update", "rollback", "upstream", "clone", "remove"):
             try:
                 from meshing_around_clients.setup.system_maintenance import (
                     check_for_updates,
                     clone_meshing_around,
                     find_meshing_around,
+                    list_recent_versions,
+                    rollback_to_version,
                     update_meshforge,
                     update_upstream,
                 )
@@ -1259,6 +1262,37 @@ def update_menu(config: ConfigParser) -> None:
                 log(result.message, "OK")
                 if result.requires_restart:
                     log("Restart recommended to apply changes.", "WARN")
+            else:
+                log(result.message, "ERROR")
+                for err in result.errors:
+                    log(f"  {err[:100]}", "ERROR")
+
+        elif choice == "rollback":
+            versions = list_recent_versions(SCRIPT_DIR, count=10)
+            if not versions:
+                log("Could not retrieve version history.", "ERROR")
+                continue
+            # Build menu items: hash — date — subject
+            ver_items = []
+            for short_hash, date_str, subject in versions:
+                label = short_hash
+                desc = f"{date_str}  {subject[:50]}"
+                ver_items.append((label, desc))
+            selected = wt_menu("Select version to rollback to", ver_items)
+            if selected is None:
+                continue
+            if not yesno(
+                f"Roll back to {selected}? You can return to latest with 'Update (git pull)'.",
+                default_yes=False,
+            ):
+                continue
+            log(f"Rolling back to {selected}...", "INFO")
+            result = rollback_to_version(SCRIPT_DIR, selected)
+            if result.success:
+                log(result.message, "OK")
+                if result.requires_restart:
+                    log("Restart recommended to apply changes.", "WARN")
+                log("To return to the latest version, use 'Update (git pull)'.", "INFO")
             else:
                 log(result.message, "ERROR")
                 for err in result.errors:

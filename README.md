@@ -217,6 +217,18 @@ pip install -r meshing_around_clients/requirements.txt    # Pick up new deps
 python3 mesh_client.py --install-deps
 ```
 
+### Rolling Back to a Previous Version
+
+If an update causes issues, you can roll back from the launcher menu:
+
+1. Run `python3 mesh_client.py` to open the launcher
+2. Select **Update / Reinstall**
+3. Select **Rollback to previous version**
+4. Choose a version from the list of recent commits
+5. Confirm the rollback
+
+To return to the latest version afterward, select **Update (git pull)** from the same menu.
+
 ### Verify Installation
 
 ```bash
