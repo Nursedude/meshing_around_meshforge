@@ -1487,28 +1487,58 @@ def launcher_menu(config: ConfigParser) -> bool:
                 ("auto", "Auto-detect", current_type == "auto"),
                 ("mqtt", "MQTT (No radio needed)", current_type == "mqtt"),
                 ("serial", "Serial (USB radio)", current_type == "serial"),
-                ("tcp", "TCP (Remote device)", current_type == "tcp"),
-                ("http", "HTTP (Remote device API)", current_type == "http"),
+                ("tcp", "TCP / HTTP (Remote or local device)", current_type in ("tcp", "http")),
                 ("demo", "Demo mode (simulated)", False),
             ]
             selected = radiolist("Connection Type", conn_items)
             if selected is None:
                 continue  # back to main menu
-            config.set("interface", "type", selected)
             if selected == "mqtt":
+                config.set("interface", "type", "mqtt")
                 config.set("mqtt", "enabled", "true")
-            elif selected == "http":
-                hostname = config.get("interface", "hostname", fallback="")
-                if hostname:
-                    config.set("interface", "http_url", f"http://{hostname}")
+            elif selected == "tcp":
+                # Sub-menu: local meshtasticd (TCP) vs remote device (HTTP)
+                from meshing_around_clients.setup.whiptail import menu as wt_sub_menu, inputbox
+
+                tcp_items = [
+                    ("local", "Local meshtasticd (127.0.0.1:4403)"),
+                    ("remote", "Remote device via HTTP (no interference with web UI)"),
+                ]
+                tcp_target = wt_sub_menu("TCP Target", tcp_items, default="local")
+                if tcp_target is None:
+                    continue  # cancelled, back to main menu
+                if tcp_target == "remote":
+                    host = inputbox(
+                        "Remote device IP or hostname",
+                        default=config.get("interface", "hostname", fallback="192.168.1.1"),
+                    )
+                    if not host:
+                        continue  # cancelled
+                    # HTTP is stateless — won't block the device's web UI on port 9443
+                    config.set("interface", "type", "http")
+                    config.set("interface", "hostname", host)
+                    config.set("interface", "http_url", f"http://{host}")
+                else:
+                    config.set("interface", "type", "tcp")
+                    config.set("interface", "hostname", "127.0.0.1:4403")
             elif selected == "demo":
+                config.set("interface", "type", "demo")
                 config.set("advanced", "demo_mode", "true")
+            else:
+                config.set("interface", "type", selected)
 
         # Run the selected mode, then loop back to the launcher menu.
         try:
             run_application(config)
         except (KeyboardInterrupt, SystemExit):
             pass  # Ctrl+C returns to menu
+        # Flush stale terminal input so the menu doesn't auto-select
+        try:
+            import termios as _termios
+
+            _termios.tcflush(sys.stdin, _termios.TCIFLUSH)
+        except (ImportError, OSError, ValueError):
+            pass
         continue
 
 
