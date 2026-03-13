@@ -295,7 +295,7 @@ class TestLoggingConfig(unittest.TestCase):
         cfg = LoggingConfig()
         self.assertTrue(cfg.enabled)
         self.assertEqual(cfg.level, "INFO")
-        self.assertEqual(cfg.file, "mesh_client.log")
+        self.assertEqual(cfg.file, "logs/mesh_client.log")
         self.assertEqual(cfg.max_size_mb, 10)
         self.assertEqual(cfg.backup_count, 3)
 
