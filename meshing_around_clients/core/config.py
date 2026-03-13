@@ -75,21 +75,6 @@ class AlertConfig:
 
 
 @dataclass
-class WebConfig:
-    """Web client configuration."""
-
-    host: str = "0.0.0.0"
-    port: int = 9090
-    debug: bool = False
-    api_key: str = ""
-    enable_auth: bool = False
-    username: str = "admin"
-    password_hash: str = ""
-    trust_proxy: bool = False  # Trust X-Forwarded-For for client IP (behind reverse proxy)
-    cors_origins: str = ""  # Comma-separated allowed origins, empty = same-origin only
-
-
-@dataclass
 class TuiConfig:
     """TUI client configuration."""
 
@@ -183,7 +168,6 @@ class Config:
 
         # Configuration sections
         self.alerts = AlertConfig()
-        self.web = WebConfig()
         self.tui = TuiConfig()
         self.mqtt = MQTTConfig()
         self.storage = StorageConfig()
@@ -325,18 +309,6 @@ class Config:
                 self.alerts.play_sound = self._parser.getboolean("emergencyHandler", "play_sound", fallback=False)
                 self.alerts.cooldown_period = self._parser.getint("emergencyHandler", "cooldown_period", fallback=300)
 
-            # Web
-            if self._parser.has_section("web"):
-                self.web.host = self._parser.get("web", "host", fallback="0.0.0.0")
-                raw_port = self._parser.getint("web", "port", fallback=9090)
-                self.web.port = max(1, min(raw_port, 65535))
-                self.web.debug = self._parser.getboolean("web", "debug", fallback=False)
-                self.web.api_key = self._parser.get("web", "api_key", fallback="")
-                self.web.enable_auth = self._parser.getboolean("web", "enable_auth", fallback=False)
-                self.web.username = self._parser.get("web", "username", fallback="admin")
-                self.web.trust_proxy = self._parser.getboolean("web", "trust_proxy", fallback=False)
-                self.web.cors_origins = self._parser.get("web", "cors_origins", fallback="")
-
             # TUI
             if self._parser.has_section("tui"):
                 self.tui.refresh_rate = self._parser.getfloat("tui", "refresh_rate", fallback=1.0)
@@ -420,11 +392,6 @@ class Config:
         "MESHFORGE_MQTT_TOPIC_ROOT": ("mqtt", "topic_root"),
         "MESHFORGE_MQTT_CHANNEL": ("mqtt", "channel"),
         "MESHFORGE_MQTT_ENCRYPTION_KEY": ("mqtt", "encryption_key"),
-        # [web]
-        "MESHFORGE_WEB_HOST": ("web", "host"),
-        "MESHFORGE_WEB_PORT": ("web", "port"),
-        "MESHFORGE_WEB_API_KEY": ("web", "api_key"),
-        "MESHFORGE_WEB_CORS_ORIGINS": ("web", "cors_origins"),
         # [tui]
         "MESHFORGE_TUI_REFRESH_RATE": ("tui", "refresh_rate"),
         # [logging]
@@ -441,7 +408,6 @@ class Config:
         section_map = {
             "interface": self.interface,
             "mqtt": self.mqtt,
-            "web": self.web,
             "tui": self.tui,
             "storage": self.storage,
             "logging": self.logging,
@@ -510,18 +476,6 @@ class Config:
             self._parser.set("emergencyHandler", "alert_channel", str(self.alerts.alert_channel))
             self._parser.set("emergencyHandler", "play_sound", str(self.alerts.play_sound))
             self._parser.set("emergencyHandler", "cooldown_period", str(self.alerts.cooldown_period))
-
-            # Web
-            if not self._parser.has_section("web"):
-                self._parser.add_section("web")
-            self._parser.set("web", "host", self.web.host)
-            self._parser.set("web", "port", str(self.web.port))
-            self._parser.set("web", "debug", str(self.web.debug))
-            self._parser.set("web", "api_key", self.web.api_key)
-            self._parser.set("web", "enable_auth", str(self.web.enable_auth))
-            self._parser.set("web", "username", self.web.username)
-            self._parser.set("web", "trust_proxy", str(self.web.trust_proxy))
-            self._parser.set("web", "cors_origins", self.web.cors_origins)
 
             # TUI
             if not self._parser.has_section("tui"):
@@ -620,13 +574,6 @@ class Config:
                 "play_sound": self.alerts.play_sound,
                 "cooldown_period": self.alerts.cooldown_period,
             },
-            "web": {
-                "host": self.web.host,
-                "port": self.web.port,
-                "debug": self.web.debug,
-                "enable_auth": self.web.enable_auth,
-                "cors_origins": self.web.cors_origins,
-            },
             "tui": {
                 "refresh_rate": self.tui.refresh_rate,
                 "color_scheme": self.tui.color_scheme,
@@ -716,16 +663,6 @@ class Config:
 
         # MQTT validation
         self._validate_mqtt(issues)
-
-        # Web validation
-        if self.web.port < 1 or self.web.port > 65535:
-            issues.append(f"Web port {self.web.port} out of valid range (1-65535)")
-        if self.web.enable_auth and not self.web.api_key and not self.web.password_hash:
-            issues.append("Web auth enabled but no api_key or password_hash configured")
-        if self.web.cors_origins == "*" and not self.web.enable_auth:
-            issues.append(
-                "CORS allows all origins (*) without authentication — " "consider restricting origins or enabling auth"
-            )
 
         return issues
 

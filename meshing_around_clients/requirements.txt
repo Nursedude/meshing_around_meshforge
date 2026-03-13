@@ -1,5 +1,5 @@
 # Meshing-Around Clients Requirements
-# Core dependencies for TUI and Web clients
+# Core dependencies for TUI client
 
 # =============================================================================
 # CORE (always required)
@@ -7,15 +7,6 @@
 
 # UI Libraries
 rich>=13.0.0,<14.0.0
-
-# =============================================================================
-# WEB SERVER (optional, for web interface)
-# =============================================================================
-
-fastapi>=0.100.0,<1.0.0
-uvicorn>=0.22.0,<1.0.0
-jinja2>=3.1.0,<4.0.0
-python-multipart>=0.0.6,<1.0.0
 
 # =============================================================================
 # MQTT (optional, for radio-less operation)

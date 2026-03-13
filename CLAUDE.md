@@ -1,4 +1,4 @@
-# CLAUDE.md - MeshForge Project Context
+# CLAUDE.md - meshing_around_meshforge Project Context
 
 ## Repository Ownership & Workflow
 
@@ -23,7 +23,7 @@
 
 ## Project Overview
 
-MeshForge is a companion toolkit for [meshing-around](https://github.com/SpudGunMan/meshing-around), providing configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for Meshtastic mesh networks.
+meshing_around_meshforge is a companion toolkit for [meshing-around](https://github.com/SpudGunMan/meshing-around), providing configuration wizards, TUI monitoring client, and headless deployment scripts for Meshtastic mesh networks.
 
 **Current Version:** 0.5.0-beta
 **License:** GPL-3.0
@@ -41,9 +41,8 @@ python3 mesh_client.py --demo
 # Interactive setup wizard
 python3 mesh_client.py --setup
 
-# Force specific interface
+# Force TUI mode
 python3 mesh_client.py --tui
-python3 mesh_client.py --web
 
 # Configure the meshing-around bot
 python3 configure_bot.py
@@ -76,12 +75,9 @@ meshing_around_meshforge/
     │   ├── system_maintenance.py # Updates, systemd
     │   ├── alert_configurators.py # Alert wizards
     │   └── config_schema.py    # Upstream format conversion
-    ├── tui/
-    │   ├── app.py              # Rich-based terminal UI (6 screens)
-    │   └── helpers.py          # TUI helper utilities
-    └── web/
-        ├── app.py              # FastAPI web dashboard
-        └── middleware.py       # CSRF, rate limiting, security middleware
+    └── tui/
+        ├── app.py              # Rich-based terminal UI (6 screens)
+        └── helpers.py          # TUI helper utilities
 ```
 
 ## Connection Modes
@@ -149,7 +145,6 @@ meshing_around_meshforge/
 | `core/meshtastic_api.py` | Device API | Serial/TCP/HTTP/BLE + MockAPI |
 | `core/mesh_crypto.py` | Encryption | AES-256-CTR, optional deps |
 | `tui/app.py` | Terminal UI | Rich-based, 6 screens |
-| `web/app.py` | Web UI | FastAPI + WebSocket |
 | `setup/whiptail.py` | Dialog helpers | Whiptail menus + print/input fallback |
 | `SECURITY_REVIEW.md` | Security audit | 22 findings, severity-rated, remediation status |
 
@@ -185,12 +180,6 @@ python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883
 - 6 screens: Dashboard, Nodes, Messages, Alerts, Topology, Help
 - **Launcher menus** (in `mesh_client.py`) use `setup/whiptail.py` — not Rich
 
-### Modifying the Web UI
-- FastAPI app in `web/app.py`
-- Templates in `web/templates/`
-- Static files in `web/static/`
-- WebSocket at `/ws`
-
 ## MQTT Default Credentials
 
 For mqtt.meshtastic.org (public broker):
@@ -211,11 +200,6 @@ Core:
 - `paho-mqtt` - MQTT client
 - `meshtastic` - Device API
 
-Web:
-- `fastapi` - Web framework
-- `uvicorn` - ASGI server
-- `jinja2` - Templates
-
 ## Links
 
 - [meshing-around](https://github.com/SpudGunMan/meshing-around) - Parent project
@@ -225,7 +209,7 @@ Web:
 ## Version History
 
 - **0.1.0-beta** (2025-01-25) - Initial beta release
-  - TUI and Web clients
+  - TUI client
   - MQTT support (no radio needed)
   - Multi-mode connection manager
   - Headless Pi setup
