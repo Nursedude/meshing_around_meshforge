@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from meshing_around_clients.core import Config, MeshtasticAPI
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
-from meshing_around_clients.core.models import Alert, Message, Node
+from meshing_around_clients.core.models import Node
 from meshing_around_clients.setup.whiptail import infobox, menu, msgbox
 
 logger = logging.getLogger(__name__)
