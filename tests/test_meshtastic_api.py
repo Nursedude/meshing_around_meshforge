@@ -841,7 +841,6 @@ class TestConnectWithRetryConfigError(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(attempt_count[0], 3)
 
-
     def test_not_available_error_stops_retry(self):
         """Import 'not available' errors should not be retried."""
         config = Config()
@@ -885,8 +884,10 @@ class TestRefreshNonImportError(unittest.TestCase):
                 raise RuntimeError("native extension crash")
             return real_import(name, *args, **kwargs)
 
-        with patch("importlib.import_module", side_effect=side_effect), \
-             patch.object(logging.getLogger("meshing_around_clients.core.meshtastic_api"), "info") as mock_info:
+        with (
+            patch("importlib.import_module", side_effect=side_effect),
+            patch.object(logging.getLogger("meshing_around_clients.core.meshtastic_api"), "info") as mock_info,
+        ):
             refresh_meshtastic_availability()
 
         self.assertIsNone(_INTERFACE_MODULES.get("http_interface"))
