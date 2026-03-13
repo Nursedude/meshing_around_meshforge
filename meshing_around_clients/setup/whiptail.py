@@ -14,7 +14,7 @@ import sys
 from typing import List, Optional, Tuple
 
 HAS_WHIPTAIL: bool = bool(shutil.which("whiptail"))
-BACKTITLE: str = "MeshForge"
+BACKTITLE: str = "Meshing Around MeshForge"
 
 # ANSI codes — duplicated here to avoid circular imports with mesh_client
 _CYAN = "\033[96m"

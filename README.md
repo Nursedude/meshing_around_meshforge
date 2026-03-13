@@ -1,24 +1,24 @@
 # meshing_around_meshforge
 
-Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-around) - configuration wizards, TUI/Web monitoring clients, and headless deployment scripts for your Meshtastic mesh network.
+Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-around) - configuration wizards, TUI monitoring client, and headless deployment scripts for your Meshtastic mesh network.
 
-> Alert layer for the [MeshForge ecosystem](https://github.com/Nursedude/meshforge/blob/main/.claude/foundations/meshforge_ecosystem.md)
+> Alert layer for the [meshforge ecosystem](https://github.com/Nursedude/meshforge/blob/main/.claude/foundations/meshforge_ecosystem.md) - note: this is `meshing_around_meshforge`, a separate project from [Nursedude/meshforge](https://github.com/Nursedude/meshforge)
 
 [![Version](https://img.shields.io/badge/version-0.5.0--beta-orange.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 
-> **EXTENSION MODULE** - This is a MeshForge extension module for [meshing-around](https://github.com/SpudGunMan/meshing-around). APIs and features are under active development and may change without notice. Not intended for production use.
+> **EXTENSION MODULE** - This is a meshing_around_meshforge extension module for [meshing-around](https://github.com/SpudGunMan/meshing-around). APIs and features are under active development and may change without notice. Not intended for production use.
 
 > **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
 > **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (768 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
 
-> **NO RADIO REQUIRED** - MeshForge can connect to the Meshtastic mesh via MQTT broker without any radio hardware. Use Demo mode to explore the interface with simulated data, or MQTT mode to participate in live mesh channels using only a network connection.
+> **NO RADIO REQUIRED** - meshing_around_meshforge can connect to the Meshtastic mesh via MQTT broker without any radio hardware. Use Demo mode to explore the interface with simulated data, or MQTT mode to participate in live mesh channels using only a network connection.
 
 ## Supported Hardware
 
-MeshForge works with any [Meshtastic-compatible device](https://meshtastic.org/docs/hardware/devices/). Tested and supported boards include:
+meshing_around_meshforge works with any [Meshtastic-compatible device](https://meshtastic.org/docs/hardware/devices/). Tested and supported boards include:
 
 | Device | Chipset | Connection Methods | Notes |
 |--------|---------|-------------------|-------|
@@ -35,7 +35,7 @@ MeshForge works with any [Meshtastic-compatible device](https://meshtastic.org/d
 
 | Platform | Recommended Mode | Notes |
 |----------|-----------------|-------|
-| **Desktop/Laptop** | Any | Full TUI or Web interface |
+| **Desktop/Laptop** | Any | Full TUI interface |
 | **Raspberry Pi 3/4/5** | Serial, MQTT | Full functionality |
 | **Raspberry Pi Zero 2W** | MQTT | Use MQTT mode (limited USB bandwidth) |
 | **Any Linux Server** | MQTT, TCP | Headless via systemd service |
@@ -56,7 +56,6 @@ graph LR
     end
 
     subgraph "Partial"
-        WEB[Web Client]
         MQTT[MQTT Mode]
         NOTIFY[Notifications]
         CMDS[Bot Commands]
@@ -75,7 +74,6 @@ graph LR
     style MODELS fill:#27ae60,color:#fff
     style ALERTS fill:#27ae60,color:#fff
     style LAUNCH fill:#27ae60,color:#fff
-    style WEB fill:#f39c12,color:#fff
     style MQTT fill:#f39c12,color:#fff
     style NOTIFY fill:#f39c12,color:#fff
     style CMDS fill:#f39c12,color:#fff
@@ -93,7 +91,6 @@ graph LR
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
 | **Alert Detection** | Working | Emergency keywords, proximity |
 | **Launcher Menu** | Working | Interactive mode selection, config editor, updater |
-| **Web Client** | Partial | API works, templates need testing |
 | **MQTT Mode** | Partial | Connects but limited testing |
 | **Notifications** | Partial | Email framework exists, untested |
 | **Bot Commands** | Partial | Parser exists, handlers incomplete |
@@ -130,12 +127,6 @@ graph TB
         subgraph "tui/"
             TUIAPP[app.py<br/>Rich Terminal UI]
         end
-
-        subgraph "web/"
-            WEBAPP[app.py<br/>FastAPI Server]
-            TPL[templates/]
-            STATIC[static/]
-        end
     end
 
     subgraph "Connections"
@@ -146,15 +137,12 @@ graph TB
     end
 
     MC --> TUIAPP
-    MC --> WEBAPP
     CB --> CLI
     CB --> PI
     SH --> MC
 
     TUIAPP --> API
     TUIAPP --> MQTT
-    WEBAPP --> API
-    WEBAPP --> MQTT
     API --> CFG
     MQTT --> CRYPTO
     MQTT --> MDL
@@ -166,7 +154,6 @@ graph TB
 
     style MC fill:#4a9eff,color:#fff
     style TUIAPP fill:#9b59b6,color:#fff
-    style WEBAPP fill:#27ae60,color:#fff
     style MQTT fill:#3498db,color:#fff
     style CRYPTO fill:#e67e22,color:#fff
 ```
@@ -248,30 +235,32 @@ On **Raspberry Pi** (and any system with `whiptail` installed), the launcher use
 
 ```mermaid
 graph LR
-    subgraph "MeshForge Launcher"
+    subgraph "Meshing Around MeshForge"
         TUI["tui — TUI Client"]
-        WEB["web — Web Dashboard"]
         MQTT["mqtt — MQTT Monitor"]
-        BOTH["both — TUI + Web"]
         DEMO["demo — Demo Mode"]
+        INI["ini — Edit mesh_client.ini"]
+        CONFIG["config — Configuration Files"]
+        LOG["logging — Logging Settings"]
         SETUP["setup — Setup Wizard"]
-        CONFIG["config — Edit Configuration"]
         UPDATE["update — Update / Reinstall"]
         INSTALL["install — Install Everything"]
+        EXIT["exit — Exit"]
     end
 
     style TUI fill:#27ae60,color:#fff
-    style WEB fill:#27ae60,color:#fff
     style MQTT fill:#27ae60,color:#fff
-    style BOTH fill:#27ae60,color:#fff
     style DEMO fill:#9b59b6,color:#fff
-    style SETUP fill:#f39c12,color:#fff
+    style INI fill:#f39c12,color:#fff
     style CONFIG fill:#f39c12,color:#fff
+    style LOG fill:#f39c12,color:#fff
+    style SETUP fill:#f39c12,color:#fff
     style UPDATE fill:#f39c12,color:#fff
     style INSTALL fill:#f39c12,color:#fff
+    style EXIT fill:#95a5a6,color:#fff
 ```
 
-This is the recommended way to start MeshForge — select your mode interactively without needing to remember CLI flags.
+This is the recommended way to start meshing_around_meshforge — select your mode interactively without needing to remember CLI flags.
 
 **Install Everything** performs a full standalone install: installs all Python dependencies, generates a default config file, and creates log directories. After install, choose your connection mode (MQTT, Serial, TCP, etc.) at runtime via the TUI.
 
@@ -282,7 +271,6 @@ python3 mesh_client.py             # Interactive launcher menu
 python3 mesh_client.py --demo      # Simulated data, no hardware
 python3 mesh_client.py --setup     # Interactive setup wizard
 python3 mesh_client.py --tui       # Force TUI mode
-python3 mesh_client.py --web       # Force Web mode
 ```
 
 ## Connection Modes
@@ -326,7 +314,7 @@ flowchart TD
 
 ### Running Without a Radio
 
-You do **not** need a Meshtastic radio to use MeshForge. Two modes work without any hardware:
+You do **not** need a Meshtastic radio to use meshing_around_meshforge. Two modes work without any hardware:
 
 - **MQTT Mode** — Connects to the public Meshtastic MQTT broker (`mqtt.meshtastic.org`) or your own private broker. You can monitor mesh traffic, see nodes, read and send messages, and receive alerts — all over the internet.
 - **Demo Mode** — Generates simulated nodes with realistic positions, telemetry, and messages. Use this to explore every screen and feature before connecting to a live mesh.
@@ -384,8 +372,7 @@ downlink_enabled = true        # Send messages to mesh
 
 ```ini
 [features]
-mode = tui                     # tui, web, or both
-web_port = 9090                # Web UI port
+mode = tui                     # tui or headless
 
 [general]
 bot_name = MeshBot             # Display name
@@ -475,7 +462,7 @@ The TUI works with or without the Rich library. When Rich is installed you get t
 
 ## Alert System
 
-MeshForge includes 12 configurable alert types. Each can be independently enabled, routed to different notification channels, and tuned with custom thresholds.
+meshing_around_meshforge includes 12 configurable alert types. Each can be independently enabled, routed to different notification channels, and tuned with custom thresholds.
 
 | Alert Type | Trigger | Default Severity | Configurable |
 |------------|---------|-----------------|--------------|
@@ -504,9 +491,6 @@ Options:
   --check              Check dependencies only
   --install-deps       Install dependencies and exit
   --tui                Force TUI mode
-  --web                Force Web mode
-  --host ADDR          Web server bind address (e.g. 0.0.0.0 for network access)
-  --port PORT          Web server port (default: 9090)
   --demo               Demo mode (no hardware)
   --no-venv            Don't use virtual environment
   --import-config PATH Import config from upstream meshing-around config.ini
@@ -515,43 +499,6 @@ Options:
 ```
 
 > **Note:** Connection modes (Serial, TCP, MQTT, BLE) are selected via the [Launcher Menu](#launcher-menu) or `mesh_client.ini` configuration, not CLI flags.
-
-## API Endpoints (Web)
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/status` | GET | Connection info |
-| `/api/network` | GET | Full network state |
-| `/api/nodes` | GET | Node list |
-| `/api/nodes/{id}` | GET | Specific node details |
-| `/api/messages` | GET | Message history |
-| `/api/messages/send` | POST | Send message |
-| `/api/alerts` | GET | All alerts |
-| `/api/alerts/acknowledge` | POST | Acknowledge alert |
-| `/api/connect` | POST | Connect to device |
-| `/api/disconnect` | POST | Disconnect |
-| `/ws` | WebSocket | Real-time updates |
-
-### WebSocket
-
-Real-time updates via WebSocket at `ws://host:port/ws`:
-
-```javascript
-const ws = new WebSocket('ws://localhost:9090/ws');
-
-ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
-    // msg.type: 'init', 'message', 'alert', 'node_update'
-};
-
-// Send message
-ws.send(JSON.stringify({
-    type: 'send_message',
-    text: 'Hello mesh!',
-    destination: '^all',
-    channel: 0
-}));
-```
 
 ## Systemd Service
 
@@ -588,36 +535,23 @@ meshing_around_meshforge/
     │   ├── system_maintenance.py
     │   ├── alert_configurators.py
     │   └── config_schema.py
-    ├── tui/
-    │   ├── app.py          # Rich terminal UI (7 screens + PlainTextTUI fallback)
-    │   └── helpers.py      # Shared formatting, safe panel rendering
-    └── web/
-        ├── app.py          # FastAPI server
-        ├── middleware.py   # CSRF, rate limiting, security
-        ├── templates/
-        └── static/
+    └── tui/
+        ├── app.py          # Rich terminal UI (7 screens + PlainTextTUI fallback)
+        └── helpers.py      # Shared formatting, safe panel rendering
 ```
 
 ## Known Issues
 
 - **Serial/TCP/BLE modes**: Not yet tested with real hardware — see [HARDWARE_TESTING.md](HARDWARE_TESTING.md) to contribute test results
-- **Web templates**: May have rendering issues — API endpoints work, frontend needs validation
 - **MQTT reconnection**: Auto-reconnect with exponential backoff (up to 300s), but limited real-world testing against live brokers
 - **Notifications**: Email/SMS framework exists but untested with live credentials
 - **Multi-interface**: Single connection at a time (upstream meshing-around supports up to 9)
-- **WebSocket middleware**: One known test failure in broadcast dead-connection cleanup (non-blocking)
 
 ## Dependencies
 
 **Core (no radio needed):**
 - `rich` - TUI interface (with plain-text fallback)
 - `paho-mqtt` - MQTT client (for radio-less mesh access)
-
-**Web UI (optional):**
-- `fastapi` - Web framework
-- `uvicorn` - ASGI server
-- `jinja2` - Templates
-- `python-multipart` - Form handling
 
 **Meshtastic radio support (optional — for Serial/TCP/BLE and CLI tools):**
 - `meshtastic[cli]` - Device API + [Meshtastic CLI](https://meshtastic.org/docs/software/python/cli/) for radio configuration
@@ -656,7 +590,6 @@ The automated tests cover code logic, but these areas need validation with actua
 | **BLE mode** | Bluetooth-capable device nearby | Set `type = ble` and `mac = <address>` in `mesh_client.ini`, then run launcher |
 | **MQTT (live)** | Extended run against `mqtt.meshtastic.org` | Run `python3 mesh_client.py`, select **mqtt** from the launcher for 30+ minutes |
 | **Email/SMS** | SMTP server credentials, carrier SMS gateway | Configure `[smtp]` and `[sms]` sections in config |
-| **Web UI** | Browser testing across Chrome/Firefox/Safari | Run `python3 mesh_client.py --web` and check all pages |
 
 See [HARDWARE_TESTING.md](HARDWARE_TESTING.md) for detailed testing procedures and how to submit results.
 
@@ -671,23 +604,23 @@ Issues and PRs welcome. Please:
 
 ## Upstream Compatibility
 
-MeshForge is designed to work with [meshing-around](https://github.com/SpudGunMan/meshing-around) (v1.9.9.x). Key differences:
+meshing_around_meshforge is designed to work with [meshing-around](https://github.com/SpudGunMan/meshing-around) (v1.9.9.x). Key differences:
 
-| Feature | meshing-around | MeshForge |
+| Feature | meshing-around | meshing_around_meshforge |
 |---------|---------------|-----------|
 | Purpose | Bot server | Monitoring client |
 | Interfaces | Up to 9 | Single |
 | Config | `config.ini` | `mesh_client.ini` |
 | Focus | Commands/games | Visualization |
 
-## Use with MeshForge
+## Use with meshforge
 
-This repository (`meshing_around_meshforge`) is the **lightweight monitoring and alert client** for Meshtastic mesh networks. It can be used standalone or alongside [Nursedude/meshforge](https://github.com/Nursedude/meshforge), which is the **full mesh network operations center**.
+This repository (`meshing_around_meshforge`) is the **lightweight monitoring and alert client** for Meshtastic mesh networks. It can be used standalone or alongside [Nursedude/meshforge](https://github.com/Nursedude/meshforge), which is the **full mesh network operations center** (a separate project).
 
-| | This Repo | MeshForge |
+| | This Repo (meshing_around_meshforge) | meshforge |
 |---|-----------|-----------|
 | **Scope** | Monitoring client + alerts | Full NOC platform |
-| **Includes** | TUI, Web dashboard, MQTT client, 12 alert types | Gateway bridges, RF tools, maps, tactical ops, AI diagnostics |
+| **Includes** | TUI, MQTT client, 12 alert types | Gateway bridges, RF tools, maps, tactical ops, AI diagnostics |
 | **Install** | `pip install rich paho-mqtt "meshtastic[cli]"` | `./install.sh` (full system setup) |
 | **Use when** | You want lightweight mesh monitoring | You want a complete mesh operations center |
 

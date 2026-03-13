@@ -16,7 +16,6 @@ from meshing_around_clients.core.config import (
     InterfaceConfig,
     LoggingConfig,
     TuiConfig,
-    WebConfig,
     _str_to_bool,
 )
 
@@ -96,24 +95,6 @@ class TestAlertConfig(unittest.TestCase):
         self.assertEqual(cfg.cooldown_period, 600)
 
 
-class TestWebConfig(unittest.TestCase):
-    """Test WebConfig dataclass."""
-
-    def test_default_values(self):
-        cfg = WebConfig()
-        self.assertEqual(cfg.host, "0.0.0.0")
-        self.assertEqual(cfg.port, 9090)
-        self.assertFalse(cfg.debug)
-        self.assertFalse(cfg.enable_auth)
-
-    def test_custom_values(self):
-        cfg = WebConfig(host="0.0.0.0", port=9000, debug=True, enable_auth=True)
-        self.assertEqual(cfg.host, "0.0.0.0")
-        self.assertEqual(cfg.port, 9000)
-        self.assertTrue(cfg.debug)
-        self.assertTrue(cfg.enable_auth)
-
-
 class TestTuiConfig(unittest.TestCase):
     """Test TuiConfig dataclass."""
 
@@ -138,7 +119,6 @@ class TestConfig(unittest.TestCase):
         cfg = Config(config_path="/nonexistent/path/config.ini")
         self.assertIsNotNone(cfg.interface)
         self.assertIsNotNone(cfg.alerts)
-        self.assertIsNotNone(cfg.web)
         self.assertIsNotNone(cfg.tui)
         self.assertEqual(cfg.bot_name, "MeshBot")
 
@@ -148,7 +128,6 @@ class TestConfig(unittest.TestCase):
         self.assertIn("interface", d)
         self.assertIn("general", d)
         self.assertIn("alerts", d)
-        self.assertIn("web", d)
         self.assertIn("tui", d)
         self.assertEqual(d["general"]["bot_name"], "MeshBot")
 
@@ -164,7 +143,6 @@ class TestConfig(unittest.TestCase):
             cfg1.interface.hostname = "192.168.1.100"
             cfg1.alerts.enabled = False
             cfg1.alerts.alert_channel = 5
-            cfg1.web.port = 9000
             cfg1.tui.refresh_rate = 0.5
             cfg1.admin_nodes = ["!node1", "!node2"]
             cfg1.favorite_nodes = ["!fav1"]
@@ -185,7 +163,6 @@ class TestConfig(unittest.TestCase):
             self.assertEqual(cfg2.interface.hostname, "192.168.1.100")
             self.assertFalse(cfg2.alerts.enabled)
             self.assertEqual(cfg2.alerts.alert_channel, 5)
-            self.assertEqual(cfg2.web.port, 9000)
             self.assertEqual(cfg2.tui.refresh_rate, 0.5)
             self.assertEqual(cfg2.admin_nodes, ["!node1", "!node2"])
             self.assertEqual(cfg2.favorite_nodes, ["!fav1"])
@@ -210,7 +187,6 @@ class TestConfig(unittest.TestCase):
             # Check defaults for missing sections
             self.assertEqual(cfg.interface.type, "serial")
             self.assertTrue(cfg.alerts.enabled)
-            self.assertEqual(cfg.web.port, 9090)
 
     def test_emergency_keywords_parsing(self):
         """Test parsing of emergency keywords from config."""
@@ -305,12 +281,6 @@ class TestConfigDefaults(unittest.TestCase):
         for term in expected_terms:
             self.assertIn(term, cfg.emergency_keywords, f"Missing critical keyword: {term}")
 
-    def test_default_web_binds_all_interfaces(self):
-        """Web server should default to 0.0.0.0 for network/VPN access."""
-        cfg = WebConfig()
-        self.assertEqual(cfg.host, "0.0.0.0")
-        self.assertFalse(cfg.enable_auth)
-
     def test_default_tui_reasonable_refresh(self):
         """TUI refresh rate should be reasonable (not too fast or slow)."""
         cfg = TuiConfig()
@@ -385,50 +355,6 @@ class TestLoggingConfigLoadSave(unittest.TestCase):
         self.assertEqual(d["logging"]["level"], "INFO")
 
 
-class TestWebConfigCorsOrigins(unittest.TestCase):
-    """Test cors_origins field in WebConfig."""
-
-    def test_default_empty(self):
-        cfg = WebConfig()
-        self.assertEqual(cfg.cors_origins, "")
-
-    def test_cors_origins_load_save(self):
-        """CORS origins should be loaded and saved correctly."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "cors.ini"
-            config_path.write_text("[web]\ncors_origins = http://localhost:3000,https://example.com\n")
-            cfg = Config(config_path=str(config_path))
-            self.assertEqual(cfg.web.cors_origins, "http://localhost:3000,https://example.com")
-
-            # Save and reload
-            cfg.save()
-            cfg2 = Config(config_path=str(config_path))
-            self.assertEqual(cfg2.web.cors_origins, "http://localhost:3000,https://example.com")
-
-    def test_to_dict_includes_cors_origins(self):
-        cfg = Config(config_path="/nonexistent/path.ini")
-        cfg.web.cors_origins = "http://localhost:8080"
-        d = cfg.to_dict()
-        self.assertEqual(d["web"]["cors_origins"], "http://localhost:8080")
-
-    def test_validate_wildcard_cors_without_auth(self):
-        """Wildcard CORS without auth should generate a validation warning."""
-        cfg = Config(config_path="/nonexistent/path.ini")
-        cfg.web.cors_origins = "*"
-        cfg.web.enable_auth = False
-        issues = cfg.validate()
-        self.assertTrue(any("CORS" in issue for issue in issues))
-
-    def test_validate_no_warning_with_auth(self):
-        """Wildcard CORS with auth should not generate a CORS warning."""
-        cfg = Config(config_path="/nonexistent/path.ini")
-        cfg.web.cors_origins = "*"
-        cfg.web.enable_auth = True
-        cfg.web.api_key = "test-key"
-        issues = cfg.validate()
-        self.assertFalse(any("CORS" in issue for issue in issues))
-
-
 class TestEnvVarOverrides(unittest.TestCase):
     """Test environment variable config overrides."""
 
@@ -456,13 +382,12 @@ class TestEnvVarOverrides(unittest.TestCase):
             cfg = Config(config_path=str(config_path))
             self.assertEqual(cfg.mqtt.broker, "override.broker.com")
 
-    def test_web_port_override_as_int(self):
-        """MESHFORGE_WEB_PORT should be converted to int."""
-        os.environ["MESHFORGE_WEB_PORT"] = "9090"
+    def test_interface_type_override(self):
+        """MESHFORGE_INTERFACE_TYPE should override interface type."""
+        os.environ["MESHFORGE_INTERFACE_TYPE"] = "tcp"
         cfg = Config(config_path="/nonexistent/path.ini")
-        # Need to manually call load with env override
         cfg._apply_env_overrides()
-        self.assertEqual(cfg.web.port, 9090)
+        self.assertEqual(cfg.interface.type, "tcp")
 
     def test_mqtt_enabled_as_bool(self):
         """MESHFORGE_MQTT_ENABLED should be converted to bool."""
@@ -475,22 +400,6 @@ class TestEnvVarOverrides(unittest.TestCase):
         """Config should use defaults when no env vars are set."""
         cfg = Config(config_path="/nonexistent/path.ini")
         self.assertEqual(cfg.mqtt.broker, "mqtt.meshtastic.org")
-        self.assertEqual(cfg.web.port, 9090)
-
-    def test_invalid_env_var_value_ignored(self):
-        """Invalid env var values (e.g., non-numeric port) should be ignored."""
-        os.environ["MESHFORGE_WEB_PORT"] = "not_a_number"
-        cfg = Config(config_path="/nonexistent/path.ini")
-        cfg._apply_env_overrides()
-        # Should remain at default
-        self.assertEqual(cfg.web.port, 9090)
-
-    def test_cors_origins_via_env(self):
-        """MESHFORGE_WEB_CORS_ORIGINS should override cors_origins."""
-        os.environ["MESHFORGE_WEB_CORS_ORIGINS"] = "http://localhost:3000"
-        cfg = Config(config_path="/nonexistent/path.ini")
-        cfg._apply_env_overrides()
-        self.assertEqual(cfg.web.cors_origins, "http://localhost:3000")
 
     def test_logging_level_override(self):
         """MESHFORGE_LOGGING_LEVEL should override logging level."""
@@ -505,16 +414,6 @@ class TestEnvVarOverrides(unittest.TestCase):
         cfg = Config(config_path="/nonexistent/path.ini")
         cfg._apply_env_overrides()
         self.assertEqual(cfg.tui.refresh_rate, 0.5)
-
-    def test_env_overrides_ini_value(self):
-        """Env var should override INI file value (higher priority)."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_path = Path(tmpdir) / "priority.ini"
-            config_path.write_text("[web]\nhost = 127.0.0.1\n")
-
-            os.environ["MESHFORGE_WEB_HOST"] = "0.0.0.0"
-            cfg = Config(config_path=str(config_path))
-            self.assertEqual(cfg.web.host, "0.0.0.0")
 
 
 if __name__ == "__main__":

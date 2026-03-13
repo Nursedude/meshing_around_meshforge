@@ -304,7 +304,6 @@ CORE_DEPS = [
 
 # Optional dependencies based on features
 OPTIONAL_DEPS = {
-    "web": ["fastapi", "uvicorn", "jinja2", "python-multipart"],
     "mqtt": ["paho-mqtt"],
     "meshtastic": ["meshtastic[cli]", "pypubsub", "pyopenssl>=25.3.0", "cryptography>=45.0.7,<47"],
     "ble": ["bleak"],
@@ -344,11 +343,6 @@ def get_missing_deps(config: ConfigParser) -> List[str]:
             missing.append(dep)
 
     # Check optional deps based on config
-    if config.getboolean("features", "web_server", fallback=False):
-        for dep in OPTIONAL_DEPS["web"]:
-            if not check_dependency(dep):
-                missing.append(dep)
-
     conn_type = config.get("interface", "type", fallback="auto")
 
     if conn_type == "mqtt" or config.getboolean("mqtt", "enabled", fallback=False):
@@ -510,7 +504,7 @@ reconnect_delay = 5
 max_reconnect_attempts = 10
 
 [features]
-# Main interface mode: tui, web, both, headless
+# Main interface mode: tui, headless
 mode = tui
 
 # TUI settings
@@ -518,15 +512,6 @@ tui_enabled = true
 tui_refresh_rate = 1.0
 tui_mouse_support = false
 tui_color_scheme = default
-
-# Web server settings
-web_server = false
-web_host = 0.0.0.0
-web_port = 9090
-web_api_enabled = true
-web_auth_enabled = false
-web_username = admin
-web_password =
 
 # Features to enable/disable
 messages_enabled = true
@@ -587,15 +572,6 @@ time_format = 24h
 
 # Node name display: short, long, both
 node_name_style = long
-
-[web]
-# Web server configuration (overrides [features] web settings when present)
-# Bind address: 0.0.0.0 = all interfaces (network accessible), 127.0.0.1 = localhost only
-host = 0.0.0.0
-# CORS allowed origins (comma-separated, empty = same-origin only)
-# Example: http://localhost:3000,https://dashboard.example.com
-# Cross-origin clients should use X-API-Key header for authentication
-cors_origins =
 
 [logging]
 # Logging configuration
@@ -1010,8 +986,6 @@ def interactive_setup():
     # Interface mode
     mode_items = [
         ("tui", "TUI (Terminal)", True),
-        ("web", "Web (Browser)", False),
-        ("both", "Both (TUI + Web)", False),
         ("headless", "Headless (API only)", False),
     ]
 
@@ -1019,12 +993,6 @@ def interactive_setup():
     if mode is None:
         return
     config.set("features", "mode", mode)
-
-    if mode in ("web", "both"):
-        config.set("features", "web_server", "true")
-        port = inputbox("Web port", default="9090")
-        if port:
-            config.set("features", "web_port", port)
 
     # Save config with restrictive permissions
     save_config(config)
@@ -1048,8 +1016,54 @@ def _find_editor() -> str:
     return ""
 
 
+def _has_systemd_service() -> bool:
+    """Check if mesh-client.service is installed in systemd."""
+    return Path("/etc/systemd/system/mesh-client.service").exists()
+
+
+def _view_logs() -> None:
+    """View logs using journalctl (preferred) or fall back to less/tail on log file."""
+    if _has_systemd_service() and shutil.which("journalctl"):
+        log("Opening service logs via journalctl...", "INFO")
+        less = shutil.which("less")
+        if less:
+            subprocess.run(["bash", "-c", "journalctl -u mesh-client.service --no-pager -n 200 | less"])
+        else:
+            subprocess.run(["journalctl", "-u", "mesh-client.service", "--no-pager", "-n", "200"])
+    else:
+        log_path = LOG_FILE
+        if not log_path.exists():
+            log("No log file found yet. Run the client first.", "WARN")
+            return
+        less = shutil.which("less")
+        if less:
+            subprocess.run([less, str(log_path)])
+        else:
+            subprocess.run(["tail", "-n", "200", str(log_path)])
+
+
+def _follow_logs() -> None:
+    """Follow live logs using journalctl -f or fall back to tail -f."""
+    if _has_systemd_service() and shutil.which("journalctl"):
+        log("Following service logs (Ctrl+C to stop)...", "INFO")
+        try:
+            subprocess.run(["journalctl", "-u", "mesh-client.service", "-f"])
+        except KeyboardInterrupt:
+            pass
+    else:
+        log_path = LOG_FILE
+        if not log_path.exists():
+            log("No log file found yet. Run the client first.", "WARN")
+            return
+        log("Following log file (Ctrl+C to stop)...", "INFO")
+        try:
+            subprocess.run(["tail", "-f", str(log_path)])
+        except KeyboardInterrupt:
+            pass
+
+
 def config_editor_menu() -> None:
-    """Interactive menu for editing configuration files with nano.
+    """Interactive menu for editing configuration files.
 
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     """
@@ -1106,18 +1120,7 @@ def config_editor_menu() -> None:
             subprocess.run(["sudo", editor, str(service_path)])
 
         elif choice == "log":
-            log_path = LOG_FILE
-            if not log_path.exists():
-                log("No log file found yet. Run the client first.", "WARN")
-                continue
-            if editor == "nano":
-                subprocess.run([editor, "-v", str(log_path)])
-            else:
-                less = shutil.which("less")
-                if less:
-                    subprocess.run([less, str(log_path)])
-                else:
-                    subprocess.run([editor, str(log_path)])
+            _view_logs()
 
 
 def logging_menu(config: ConfigParser) -> None:
@@ -1132,6 +1135,8 @@ def logging_menu(config: ConfigParser) -> None:
             ("view", "View current logging settings"),
             ("level", "Change log level"),
             ("toggle", "Toggle logging on/off"),
+            ("journal", "View service logs (journalctl)"),
+            ("follow", "Follow live logs (journalctl -f)"),
         ]
         choice = wt_menu("Logging Settings", items)
 
@@ -1195,17 +1200,23 @@ def logging_menu(config: ConfigParser) -> None:
                 state = "enabled" if new_value == "true" else "disabled"
                 log(f"Logging {state}", "OK")
 
+        elif choice == "journal":
+            _view_logs()
+
+        elif choice == "follow":
+            _follow_logs()
+
 
 def update_menu(config: ConfigParser) -> None:
-    """Interactive menu for updating/reinstalling MeshForge and meshing-around.
+    """Interactive menu for updating/reinstalling meshing_around_meshforge and meshing-around.
 
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     """
     from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
 
     items = [
-        ("check", "Check for MeshForge updates"),
-        ("update", "Update MeshForge (git pull)"),
+        ("check", "Check for updates"),
+        ("update", "Update (git pull)"),
         ("deps", "Reinstall dependencies"),
         ("upstream", "Update meshing-around (upstream)"),
         ("clone", "Install meshing-around (clone)"),
@@ -1242,7 +1253,7 @@ def update_menu(config: ConfigParser) -> None:
                 log(message, "OK")
 
         elif choice == "update":
-            log("Updating MeshForge...", "INFO")
+            log("Updating meshing_around_meshforge...", "INFO")
             result = update_meshforge(SCRIPT_DIR)
             if result.success:
                 log(result.message, "OK")
@@ -1357,38 +1368,54 @@ def launcher_menu(config: ConfigParser) -> bool:
 
     items = [
         ("tui", "TUI Client (Terminal UI)"),
-        ("web", "Web Dashboard"),
         ("mqtt", "MQTT Monitor"),
-        ("both", "Both (TUI + Web)"),
         ("demo", "Demo Mode"),
+        ("ini", "Edit mesh_client.ini"),
+        ("config", "Configuration Files"),
+        ("logging", "Logging Settings"),
         ("setup", "Setup Wizard"),
-        ("config", "Edit Configuration"),
         ("update", "Update / Reinstall"),
         ("install", "Install Everything"),
-        ("logging", "Logging Settings"),
+        ("exit", "Exit"),
     ]
 
     while True:
-        choice = wt_menu("MeshForge Launcher", items, default="tui")
+        choice = wt_menu("Meshing Around MeshForge", items, default="tui")
 
-        if choice is None:
+        if choice is None or choice == "exit":
             return True
 
         if choice == "tui":
             config.set("features", "mode", "tui")
-        elif choice == "web":
-            config.set("features", "mode", "web")
-            config.set("features", "web_server", "true")
         elif choice == "mqtt":
             config.set("features", "mode", "tui")
             config.set("mqtt", "enabled", "true")
             config.set("interface", "type", "mqtt")
-        elif choice == "both":
-            config.set("features", "mode", "both")
-            config.set("features", "web_server", "true")
         elif choice == "demo":
             config.set("advanced", "demo_mode", "true")
             config.set("features", "mode", "tui")
+        elif choice == "ini":
+            editor = _find_editor()
+            if not editor:
+                log("No text editor found (nano, vi, vim). Install nano: sudo apt install nano", "ERROR")
+            else:
+                ini_path = CONFIG_FILE
+                if not ini_path.exists():
+                    from meshing_around_clients.setup.whiptail import yesno
+
+                    log(f"{ini_path} not found.", "WARN")
+                    if yesno("Create from default template?"):
+                        try:
+                            ini_path.write_text(DEFAULT_CONFIG)
+                            os.chmod(str(ini_path), 0o600)
+                            log(f"Created {ini_path}", "OK")
+                        except OSError as e:
+                            log(f"Failed to create config: {e}", "ERROR")
+                            continue
+                    else:
+                        continue
+                subprocess.run([editor, str(ini_path)])
+            continue
         elif choice == "setup":
             interactive_setup()
             return True
@@ -1405,8 +1432,8 @@ def launcher_menu(config: ConfigParser) -> bool:
             logging_menu(config)
             continue
 
-        # For TUI/Web/Both: prompt for connection type
-        if choice in ("tui", "web", "both"):
+        # For TUI modes: prompt for connection type
+        if choice == "tui":
             from meshing_around_clients.setup.whiptail import radiolist
 
             current_type = config.get("interface", "type", fallback="auto")
@@ -1430,7 +1457,7 @@ def launcher_menu(config: ConfigParser) -> bool:
         try:
             run_application(config)
         except (KeyboardInterrupt, SystemExit):
-            pass  # Ctrl+C or uvicorn exit returns to menu
+            pass  # Ctrl+C returns to menu
         continue
 
 
@@ -1502,127 +1529,10 @@ def run_application(config: ConfigParser):
         if demo_mode or conn_type == "demo":
             demo_mode = True
 
-        def _open_browser(host: str, port: int, delay: float = 1.5):
-            """Open browser to web dashboard after a short delay."""
-            import os
-
-            browse_host = "localhost" if host in ("0.0.0.0", "::") else host
-            url = f"http://{browse_host}:{port}"
-
-            # Skip on headless systems (no display server)
-            if not os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
-                log(f"No display detected. Visit {url} manually.", "INFO")
-                return
-
-            import threading
-            import time
-            import webbrowser
-
-            def _open():
-                time.sleep(delay)
-                try:
-                    webbrowser.open(url)
-                except Exception:
-                    log(f"Could not auto-open browser. Visit {url} manually.", "WARN")
-
-            threading.Thread(target=_open, daemon=True).start()
-
         if mode == "tui":
             from meshing_around_clients.tui.app import MeshingAroundTUI
 
             tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode)
-            tui.run_interactive()
-
-        elif mode == "web":
-            from meshing_around_clients.web.app import WebApplication
-
-            web_app = WebApplication(config=app_config, demo_mode=demo_mode)
-            host = app_config.web.host
-            port = app_config.web.port
-            browse_host = "localhost" if host in ("0.0.0.0", "::") else host
-            log(f"Web server starting on http://{browse_host}:{port}", "OK")
-            _open_browser(host, port)
-            web_app.run(host=host, port=port)
-
-        elif mode == "both":
-            # Run web in background, TUI in foreground with a shared API
-            import threading
-
-            from meshing_around_clients.tui.app import MeshingAroundTUI
-            from meshing_around_clients.web.app import WebApplication
-
-            # Create single shared API instance
-            if demo_mode:
-                shared_api = MockMeshtasticAPI(app_config)
-            else:
-                shared_api = MeshtasticAPI(app_config)
-
-            # Start web server in thread (shared API — web skips connect/disconnect)
-            web_app = WebApplication(config=app_config, demo_mode=demo_mode, api=shared_api)
-            host = app_config.web.host
-            port = app_config.web.port
-
-            # Check if port is available before starting web server
-            import socket
-
-            port_available = True
-            try:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.bind((host, port))
-            except OSError:
-                port_available = False
-                log(
-                    f"Port {port} already in use — skipping web server. "
-                    f"Kill the old process or change port in mesh_client.ini",
-                    "WARN",
-                )
-
-            if port_available:
-                # Suppress uvicorn's default logging config so it doesn't
-                # write to stdout while Rich controls the terminal.
-                _uvicorn_log_config = {
-                    "version": 1,
-                    "disable_existing_loggers": False,
-                    "handlers": {},
-                    "loggers": {
-                        "uvicorn": {"handlers": [], "level": "ERROR"},
-                        "uvicorn.access": {"handlers": [], "level": "ERROR"},
-                        "uvicorn.error": {"handlers": [], "level": "ERROR"},
-                    },
-                }
-
-                def run_web():
-                    import uvicorn
-
-                    try:
-                        uvicorn.run(
-                            web_app.app,
-                            host=host,
-                            port=port,
-                            log_level="error",
-                            access_log=False,
-                            log_config=_uvicorn_log_config,
-                        )
-                    except (OSError, SystemExit):
-                        pass  # logged via file handler, not stdout
-
-                web_thread = threading.Thread(target=run_web, daemon=True)
-                web_thread.start()
-                browse_host = "localhost" if host in ("0.0.0.0", "::") else host
-                log(f"Web server starting on http://{browse_host}:{port}", "OK")
-                _open_browser(host, port)
-
-            # Remove stdout StreamHandler before TUI takes over the terminal.
-            # File handlers are preserved so logs still go to disk.
-            root_logger = _logging.getLogger()
-            root_logger.handlers = [
-                h
-                for h in root_logger.handlers
-                if not isinstance(h, _logging.StreamHandler) or hasattr(h, "baseFilename")  # keep RotatingFileHandler
-            ]
-
-            # Run TUI in main thread (shared API — TUI handles connect/disconnect)
-            tui = MeshingAroundTUI(config=app_config, demo_mode=demo_mode, api=shared_api)
             tui.run_interactive()
 
         elif mode == "headless":
@@ -1646,10 +1556,7 @@ def run_application(config: ConfigParser):
 
     except ImportError as e:
         log(f"Missing dependency for {mode} mode: {e}", "ERROR")
-        if mode in ("web", "both"):
-            log("Install web deps: pip install fastapi uvicorn jinja2", "INFO")
-        else:
-            log("Try running with --setup or --check", "INFO")
+        log("Try running with --setup or --check", "INFO")
         return False
     except SystemExit:
         log(f"{mode} mode exited", "INFO")
@@ -1675,7 +1582,6 @@ def main():
 Examples:
   python3 mesh_client.py              # Auto-detect and run
   python3 mesh_client.py --tui        # Force TUI mode
-  python3 mesh_client.py --web        # Force Web mode
   python3 mesh_client.py --setup      # Interactive setup
   python3 mesh_client.py --demo       # Demo mode (no hardware)
   python3 mesh_client.py --check      # Check dependencies only
@@ -1686,11 +1592,6 @@ Examples:
     parser.add_argument("--setup", action="store_true", help="Run interactive setup")
     parser.add_argument("--check", action="store_true", help="Check dependencies only")
     parser.add_argument("--tui", action="store_true", help="Force TUI mode")
-    parser.add_argument("--web", action="store_true", help="Force Web mode")
-    parser.add_argument(
-        "--host", type=str, default=None, help="Web server bind address (e.g. 0.0.0.0 for network access)"
-    )
-    parser.add_argument("--port", type=int, default=None, help="Web server port (default: 9090)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
@@ -1804,21 +1705,13 @@ Examples:
         sys.exit(0)
 
     # Apply command line overrides
-    has_mode_flag = args.tui or args.web or args.demo
+    has_mode_flag = args.tui or args.demo
 
     if args.demo:
         config.set("advanced", "demo_mode", "true")
 
     if args.tui:
         config.set("features", "mode", "tui")
-    elif args.web:
-        config.set("features", "mode", "web")
-        config.set("features", "web_server", "true")
-
-    if args.host is not None:
-        config.set("features", "web_host", args.host)
-    if args.port is not None:
-        config.set("features", "web_port", str(args.port))
 
     # Run system checks
     if not check_system():
@@ -1861,7 +1754,7 @@ Examples:
                 pass
 
             if not has_mode_flag:
-                log("No TTY detected — skipping launcher menu (use --tui, --web, or --demo)", "WARN")
+                log("No TTY detected — skipping launcher menu (use --tui or --demo)", "WARN")
 
         try:
             success = run_application(config)

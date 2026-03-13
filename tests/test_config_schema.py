@@ -38,7 +38,6 @@ from meshing_around_clients.setup.config_schema import (
     TUIConfig,
     UnifiedConfig,
     WeatherAlertConfig,
-    WebConfig,
     _str_to_bool,
     _str_to_int_list,
     _str_to_list,
@@ -349,10 +348,6 @@ topic_root = msh/US
 [tui]
 refresh_rate = 0.5
 color_scheme = dark
-
-[web]
-port = 9000
-enable_auth = true
 """)
             cfg = ConfigLoader.load(config_path)
 
@@ -364,7 +359,6 @@ enable_auth = true
             self.assertTrue(cfg.mqtt.enabled)
             self.assertEqual(cfg.mqtt.broker, "mqtt.meshtastic.org")
             self.assertEqual(cfg.tui.refresh_rate, 0.5)
-            self.assertEqual(cfg.web.port, 9000)
 
     def test_load_meshforge_multi_interface(self):
         """Test loading MeshForge config with multiple interfaces."""

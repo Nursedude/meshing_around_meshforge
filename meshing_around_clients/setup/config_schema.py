@@ -503,19 +503,6 @@ class TUIConfig:
     alert_sound: bool = True
 
 
-@dataclass
-class WebConfig:
-    """Web dashboard configuration."""
-
-    host: str = "127.0.0.1"
-    port: int = 9090
-    debug: bool = False
-    api_key: str = ""
-    enable_auth: bool = False
-    username: str = "admin"
-    password_hash: str = ""
-
-
 # =============================================================================
 # Unified Configuration
 # =============================================================================
@@ -555,7 +542,6 @@ class UnifiedConfig:
 
     # Client configurations
     tui: TUIConfig = field(default_factory=TUIConfig)
-    web: WebConfig = field(default_factory=WebConfig)
 
     # Auto-update
     auto_update: AutoUpdateConfig = field(default_factory=AutoUpdateConfig)
@@ -743,18 +729,6 @@ class ConfigLoader:
                 alert_sound=_str_to_bool(data.get("alert_sound", True)),
             )
 
-        # Load Web
-        if parser.has_section("web"):
-            data = dict(parser.items("web"))
-            config.web = WebConfig(
-                host=data.get("host", "127.0.0.1"),
-                port=int(data.get("port", 9090)),
-                debug=_str_to_bool(data.get("debug", False)),
-                api_key=data.get("api_key", ""),
-                enable_auth=_str_to_bool(data.get("enable_auth", False)),
-                username=data.get("username", "admin"),
-            )
-
         # Load auto-update
         if parser.has_section("auto_update"):
             data = dict(parser.items("auto_update"))
@@ -845,16 +819,6 @@ class ConfigLoader:
         parser.set("tui", "show_timestamps", str(config.tui.show_timestamps))
         parser.set("tui", "message_history", str(config.tui.message_history))
         parser.set("tui", "alert_sound", str(config.tui.alert_sound))
-
-        # Save Web config
-        parser.add_section("web")
-        parser.set("web", "host", config.web.host)
-        parser.set("web", "port", str(config.web.port))
-        parser.set("web", "debug", str(config.web.debug))
-        parser.set("web", "enable_auth", str(config.web.enable_auth))
-        parser.set("web", "username", config.web.username)
-        if config.web.api_key:
-            parser.set("web", "api_key", config.web.api_key)
 
         # Save auto-update
         parser.add_section("auto_update")

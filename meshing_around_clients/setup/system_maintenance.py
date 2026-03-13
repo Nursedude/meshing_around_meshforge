@@ -441,9 +441,7 @@ def update_meshforge(
 
 # Each entry: (section, key, old_value, new_value)
 # Only applied when the INI still has the exact old default value.
-CONFIG_MIGRATIONS: List[Tuple[str, str, str, str]] = [
-    ("features", "web_port", "8080", "9090"),
-]
+CONFIG_MIGRATIONS: List[Tuple[str, str, str, str]] = []
 
 
 def migrate_config(config_path: Path, progress_callback: Optional[Callable[[str], None]] = None) -> List[str]:
