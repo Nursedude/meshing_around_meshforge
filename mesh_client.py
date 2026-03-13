@@ -440,9 +440,9 @@ DEFAULT_CONFIG = """
 # Connection type: auto, serial, tcp, http, mqtt, ble
 # - auto: Try serial first, then tcp, then http, then mqtt
 # - serial: Direct USB/serial connection to radio
-# - tcp: TCP connection to meshtasticd protobuf API (default port 4403)
-#   Use 127.0.0.1 for local meshtasticd, or host:port for remote
-# - http: HTTP connection to meshtasticd HTTP API
+# - tcp: TCP connection to local meshtasticd only (127.0.0.1:4403)
+#   WARNING: TCP to a remote node interferes with its web UI — use http instead
+# - http: HTTP connection to remote Meshtastic device (stateless, no web UI interference)
 # - mqtt: MQTT broker connection (no radio needed)
 # - ble: Bluetooth LE connection
 type = auto
@@ -963,17 +963,21 @@ def interactive_setup():
     elif conn_type == "tcp":
         tcp_items = [
             ("local", "Local meshtasticd (127.0.0.1:4403)"),
-            ("remote", "Remote device (enter IP address)"),
+            ("remote", "Remote device via HTTP (no interference with web UI)"),
         ]
         tcp_target = menu("TCP Target", tcp_items, default="local")
         if tcp_target == "remote":
             host = inputbox(
-                "TCP host (host or host:port, default port 4403)",
+                "Remote device IP or hostname",
                 default="192.168.1.1",
             )
+            if host:
+                # Use HTTP for remote nodes — stateless, won't interfere with web UI
+                config.set("interface", "type", "http")
+                config.set("interface", "hostname", host)
+                config.set("interface", "http_url", f"http://{host}")
         else:
             host = "127.0.0.1"
-        if host:
             config.set("interface", "hostname", host)
 
     elif conn_type == "http":
@@ -1483,7 +1487,7 @@ def launcher_menu(config: ConfigParser) -> bool:
                 ("auto", "Auto-detect", current_type == "auto"),
                 ("mqtt", "MQTT (No radio needed)", current_type == "mqtt"),
                 ("serial", "Serial (USB radio)", current_type == "serial"),
-                ("tcp", "TCP (Remote device)", current_type == "tcp"),
+                ("http", "HTTP (Remote device)", current_type == "http"),
                 ("demo", "Demo mode (simulated)", False),
             ]
             selected = radiolist("Connection Type", conn_items)
@@ -1492,6 +1496,10 @@ def launcher_menu(config: ConfigParser) -> bool:
             config.set("interface", "type", selected)
             if selected == "mqtt":
                 config.set("mqtt", "enabled", "true")
+            elif selected == "http":
+                hostname = config.get("interface", "hostname", fallback="")
+                if hostname:
+                    config.set("interface", "http_url", f"http://{hostname}")
             elif selected == "demo":
                 config.set("advanced", "demo_mode", "true")
 

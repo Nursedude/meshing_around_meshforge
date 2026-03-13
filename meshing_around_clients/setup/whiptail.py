@@ -274,7 +274,9 @@ def _fallback_menu(
     print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n", flush=True)
     for i, (tag, desc) in enumerate(items, 1):
         marker = f" {_DIM}(default){_RESET}" if tag == default else ""
-        print(f"  {i}. {desc}{marker}", flush=True)
+        # Use tag as label for single-char non-digit tags (e.g. 'e' for Exit)
+        label = tag if len(tag) == 1 and not tag.isdigit() else str(i)
+        print(f"  {label}. {desc}{marker}", flush=True)
     print("  0. Cancel / Back", flush=True)
 
     default_num = "0"
