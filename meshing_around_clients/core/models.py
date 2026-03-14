@@ -116,6 +116,18 @@ class ChannelRole(Enum):
 
 
 @dataclass
+class ConnectionInfo:
+    """Connection information and status."""
+
+    connected: bool = False
+    interface_type: str = ""
+    device_path: str = ""
+    error_message: str = ""
+    my_node_id: str = ""
+    my_node_num: int = 0
+
+
+@dataclass
 class Channel:
     """Represents a Meshtastic channel configuration."""
 

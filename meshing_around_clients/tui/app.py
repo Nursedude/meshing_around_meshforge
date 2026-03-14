@@ -1649,12 +1649,13 @@ class MeshingAroundTUI:
             self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
             self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
             self.console.print("  [white]2)[/white] MQTT - Custom broker")
-            self.console.print("  [white]3)[/white] TCP  - Remote Meshtastic device")
-            self.console.print("  [white]4)[/white] Install Meshtastic library")
-            self.console.print("  [white]5)[/white] Demo mode (simulated data)")
-            self.console.print("  [white]6)[/white] Exit\n")
+            self.console.print("  [white]3)[/white] MQTT - Local broker (no auth)")
+            self.console.print("  [white]4)[/white] TCP  - Remote Meshtastic device")
+            self.console.print("  [white]5)[/white] Install Meshtastic library")
+            self.console.print("  [white]6)[/white] Demo mode (simulated data)")
+            self.console.print("  [white]7)[/white] Exit\n")
 
-            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6"], default="5")
+            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6", "7"], default="6")
 
             if choice == "1":
                 # MQTT public broker
@@ -1682,7 +1683,16 @@ class MeshingAroundTUI:
                 # MQTT custom broker — pre-fill from config
                 mqtt = self.config.mqtt
                 broker = Prompt.ask("Broker hostname", default=mqtt.broker or "localhost")
-                port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                # Parse embedded port from hostname (e.g. "host:1884")
+                if ":" in broker:
+                    _parts = broker.rsplit(":", 1)
+                    try:
+                        port = int(_parts[1])
+                        broker = _parts[0]
+                    except ValueError:
+                        port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                else:
+                    port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
                 username = Prompt.ask("Username", default=mqtt.username or "meshdev")
                 password = Prompt.ask("Password", default=mqtt.password or "large4cats")
                 topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
@@ -1705,6 +1715,28 @@ class MeshingAroundTUI:
                     return self._connection_fallback_menu()
 
             elif choice == "3":
+                # MQTT local broker — no auth, no TLS
+                self.config.mqtt.enabled = True
+                self.config.mqtt.broker = "localhost"
+                self.config.mqtt.port = 1883
+                self.config.mqtt.use_tls = False
+                self.config.mqtt.username = ""
+                self.config.mqtt.password = ""
+                topic = Prompt.ask("Topic root", default="msh/local")
+                channel = Prompt.ask("Channel", default="meshforge")
+                self.config.mqtt.topic_root = topic
+                self.config.mqtt.channel = channel
+                try:
+                    from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+                    self.api = MQTTMeshtasticClient(self.config)
+                    self._register_dirty_callbacks()
+                    return self.connect()
+                except ImportError:
+                    self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                    return self._connection_fallback_menu()
+
+            elif choice == "4":
                 # TCP remote device
                 hostname = Prompt.ask("Device hostname/IP")
                 self.config.interface.type = "tcp"
@@ -1713,11 +1745,11 @@ class MeshingAroundTUI:
                 self._register_dirty_callbacks()
                 return self.connect()
 
-            elif choice == "4":
+            elif choice == "5":
                 # Install Meshtastic library
                 return self._install_meshtastic_library()
 
-            elif choice == "5":
+            elif choice == "6":
                 # Demo mode
                 self.demo_mode = True
                 self.api = MockMeshtasticAPI(self.config)

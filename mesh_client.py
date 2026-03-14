@@ -1396,6 +1396,7 @@ def launcher_menu(config: ConfigParser) -> bool:
     items = [
         ("tui", "TUI Client (Terminal UI)"),
         ("mqtt", "MQTT Monitor"),
+        ("mqtt-local", "MQTT Local Broker (no auth)"),
         ("demo", "Demo Mode"),
         ("ini", "Edit mesh_client.ini"),
         ("logs", "Logs"),
@@ -1422,7 +1423,17 @@ def launcher_menu(config: ConfigParser) -> bool:
                 default=config.get("mqtt", "broker", fallback="mqtt.meshtastic.org"),
             )
             if broker:
-                config.set("mqtt", "broker", broker)
+                # Parse embedded port from hostname (e.g. "host:1884")
+                if ":" in broker:
+                    parts = broker.rsplit(":", 1)
+                    try:
+                        port = int(parts[1])
+                        config.set("mqtt", "broker", parts[0])
+                        config.set("mqtt", "port", str(port))
+                    except ValueError:
+                        config.set("mqtt", "broker", broker)
+                else:
+                    config.set("mqtt", "broker", broker)
             topic = inputbox(
                 "Topic root",
                 default=config.get("mqtt", "topic_root", fallback="msh/US"),
@@ -1433,6 +1444,34 @@ def launcher_menu(config: ConfigParser) -> bool:
                 "Channel",
                 default=config.get("mqtt", "channel", fallback="LongFast"),
             )
+            if channel:
+                config.set("mqtt", "channel", channel)
+        elif choice == "mqtt-local":
+            config.set("features", "mode", "tui")
+            config.set("mqtt", "enabled", "true")
+            config.set("interface", "type", "mqtt")
+            config.set("mqtt", "use_tls", "false")
+            config.set("mqtt", "username", "")
+            config.set("mqtt", "password", "")
+            broker = inputbox("MQTT broker", default="localhost")
+            if broker:
+                if ":" in broker:
+                    parts = broker.rsplit(":", 1)
+                    try:
+                        port = int(parts[1])
+                        config.set("mqtt", "broker", parts[0])
+                        config.set("mqtt", "port", str(port))
+                    except ValueError:
+                        config.set("mqtt", "broker", broker)
+                else:
+                    config.set("mqtt", "broker", broker)
+            port_str = inputbox("Port", default="1883")
+            if port_str:
+                config.set("mqtt", "port", port_str)
+            topic = inputbox("Topic root", default="msh/local")
+            if topic:
+                config.set("mqtt", "topic_root", topic)
+            channel = inputbox("Channel", default="meshforge")
             if channel:
                 config.set("mqtt", "channel", channel)
         elif choice == "demo":

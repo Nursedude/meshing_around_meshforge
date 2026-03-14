@@ -35,6 +35,7 @@ from .models import (
     VALID_SNR_RANGE,
     Alert,
     AlertType,
+    ConnectionInfo,
     MeshNetwork,
     MeshRoute,
     Message,
@@ -111,6 +112,12 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self.config = config
         self.mqtt_config = mqtt_config or config.mqtt
+
+        # Connection info (mirrors MeshtasticAPI interface)
+        self.connection_info = ConnectionInfo(
+            interface_type="mqtt",
+            device_path=f"{self.mqtt_config.broker}:{self.mqtt_config.port}",
+        )
 
         # MQTT client
         self._client: Optional[mqtt.Client] = None
@@ -324,8 +331,19 @@ class MQTTMeshtasticClient(CallbackMixin):
                 max_delay=self.mqtt_config.max_reconnect_delay,
             )
 
+            # Parse embedded port from broker hostname (e.g. "host:1884")
+            broker = self.mqtt_config.broker
+            port = self.mqtt_config.port
+            if ":" in broker:
+                parts = broker.rsplit(":", 1)
+                try:
+                    port = int(parts[1])
+                    broker = parts[0]
+                except ValueError:
+                    pass  # Not a port number, keep as-is
+
             # Connect
-            self._client.connect(self.mqtt_config.broker, self.mqtt_config.port, keepalive=60)
+            self._client.connect(broker, port, keepalive=60)
 
             # Start network loop in background
             self._client.loop_start()
@@ -348,12 +366,20 @@ class MQTTMeshtasticClient(CallbackMixin):
                     with self._stats_lock:
                         self._stats["messages_received"] = 0
                         self._stats["messages_rejected"] = 0
+                    self.connection_info.connected = True
+                    self.connection_info.error_message = ""
+                    self.connection_info.my_node_id = self.mqtt_config.node_id or "mqtt-client"
                     # Start background threads
                     self._start_cleanup_thread()
                     self._start_auto_save()
                     return True
                 else:
                     # Connection timed out - stop the background loop thread
+                    self.connection_info.connected = False
+                    self.connection_info.error_message = (
+                        f"Connection timed out after {self.mqtt_config.connect_timeout}s "
+                        f"to {self.mqtt_config.broker}:{self.mqtt_config.port}"
+                    )
                     logger.warning(
                         "MQTT connection timed out after %ds to %s:%d",
                         self.mqtt_config.connect_timeout,
@@ -368,9 +394,13 @@ class MQTTMeshtasticClient(CallbackMixin):
                 raise
 
         except (OSError, ConnectionError, TimeoutError) as e:
+            self.connection_info.connected = False
+            self.connection_info.error_message = f"MQTT connection error ({type(e).__name__}): {e}"
             logger.error("MQTT connection error (%s): %s", type(e).__name__, e)
             return False
         except ValueError as e:
+            self.connection_info.connected = False
+            self.connection_info.error_message = f"MQTT config error: {e}"
             logger.error("MQTT config error: %s", e)
             return False
 
@@ -431,6 +461,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             except (OSError, RuntimeError):
                 pass  # Already disconnected or broken pipe
         self.network.connection_status = "disconnected"
+        self.connection_info.connected = False
         self._trigger_callbacks("on_disconnect")
 
     def _on_connect(self, client, userdata, flags, rc):
@@ -448,6 +479,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                 logger.info("Connected to MQTT broker: %s", self.mqtt_config.broker)
 
             self.network.connection_status = "connected (MQTT)"
+            self.connection_info.connected = True
+            self.connection_info.error_message = ""
 
             # Re-subscribe on every connect (handles reconnection)
             self._subscribe_topics()
@@ -462,6 +495,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                 5: "not authorized",
             }
             reason = rc_messages.get(rc, f"unknown code {rc}")
+            self.connection_info.connected = False
+            self.connection_info.error_message = f"MQTT connection refused: {reason}"
             logger.error("MQTT connection refused: %s", reason)
 
             # Permanent auth failures: stop reconnecting to avoid hammering broker
@@ -488,6 +523,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             self._connected = False
             intentional = self._intentional_disconnect
         self.network.connection_status = "disconnected"
+        self.connection_info.connected = False
 
         if rc == 0 or intentional:
             logger.info("Disconnected from MQTT broker (clean)")

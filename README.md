@@ -7,12 +7,16 @@ Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-aroun
 [![Version](https://img.shields.io/badge/version-0.5.0--beta-orange.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Tests](https://img.shields.io/badge/tests-743-brightgreen.svg)](tests/)
+[![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
+
+> **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
 
 > **EXTENSION MODULE** - This is a meshing_around_meshforge extension module for [meshing-around](https://github.com/SpudGunMan/meshing-around). APIs and features are under active development and may change without notice. Not intended for production use.
 
 > **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
-> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (768 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
+> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (743 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
 
 > **NO RADIO REQUIRED** - meshing_around_meshforge can connect to the Meshtastic mesh via MQTT broker without any radio hardware. Use Demo mode to explore the interface with simulated data, or MQTT mode to participate in live mesh channels using only a network connection.
 
@@ -85,7 +89,7 @@ graph LR
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **TUI Client** | Working | 7 screens, search, export, plain-text fallback |
+| **TUI Client** | Working | 8 screens, search, export, plain-text fallback |
 | **Demo Mode** | Working | Simulated data for testing |
 | **Config System** | Working | INI-based configuration |
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
@@ -548,7 +552,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py
     │   └── config_schema.py
     └── tui/
-        ├── app.py          # Rich terminal UI (7 screens + PlainTextTUI fallback)
+        ├── app.py          # Rich terminal UI (8 screens + PlainTextTUI fallback)
         └── helpers.py      # Shared formatting, safe panel rendering
 ```
 
@@ -578,7 +582,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **768 automated tests** across 18 test files covering core models, config, TUI rendering, MQTT client, crypto, API, middleware, and more.
+The project has **743 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, middleware, and more.
 
 ```bash
 # Run all tests

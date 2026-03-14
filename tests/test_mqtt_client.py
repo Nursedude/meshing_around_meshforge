@@ -665,6 +665,7 @@ class TestMQTTDecodedPacketPaths(unittest.TestCase):
         self.assertIsNotNone(client.network.get_node("!bbbb0002"))
 
 
+@unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
 class TestMQTTSendMessageValidation(unittest.TestCase):
     """Test send_message() byte-length validation."""
 
@@ -713,6 +714,7 @@ class TestMQTTSendMessageValidation(unittest.TestCase):
         self.assertFalse(result)
 
 
+@unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
 @patch("meshing_around_clients.core.mqtt_client.mqtt")
 class TestMQTTStatsLockConsistency(unittest.TestCase):
     """Test that stats fields are consistently protected by lock."""

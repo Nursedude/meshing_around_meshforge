@@ -76,7 +76,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py # Alert wizards
     │   └── config_schema.py    # Upstream format conversion
     └── tui/
-        ├── app.py              # Rich-based terminal UI (6 screens)
+        ├── app.py              # Rich-based terminal UI (8 screens)
         └── helpers.py          # TUI helper utilities
 ```
 
@@ -144,7 +144,7 @@ meshing_around_meshforge/
 | `core/mqtt_client.py` | MQTT connection | Broker connection, packet decode |
 | `core/meshtastic_api.py` | Device API | Serial/TCP/HTTP/BLE + MockAPI |
 | `core/mesh_crypto.py` | Encryption | AES-256-CTR, optional deps |
-| `tui/app.py` | Terminal UI | Rich-based, 6 screens |
+| `tui/app.py` | Terminal UI | Rich-based, 8 screens |
 | `setup/whiptail.py` | Dialog helpers | Whiptail menus + print/input fallback |
 | `SECURITY_REVIEW.md` | Security audit | 22 findings, severity-rated, remediation status |
 
@@ -177,7 +177,7 @@ python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883
 ### Modifying the TUI
 - Main app in `tui/app.py`
 - Uses Rich library with fallback
-- 6 screens: Dashboard, Nodes, Messages, Alerts, Topology, Help
+- 8 screens: Dashboard, Nodes, Messages, Alerts, Topology, Help
 - **Launcher menus** (in `mesh_client.py`) use `setup/whiptail.py` — not Rich
 
 ## MQTT Default Credentials

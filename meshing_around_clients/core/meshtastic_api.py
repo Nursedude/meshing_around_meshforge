@@ -11,7 +11,6 @@ import re
 import threading
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -30,6 +29,7 @@ from .models import (  # noqa: E402
     MAX_MESSAGE_BYTES,
     Alert,
     AlertType,
+    ConnectionInfo,
     MeshNetwork,
     Message,
     MessageType,
@@ -87,18 +87,6 @@ def refresh_meshtastic_availability() -> bool:
                 logger.info("meshtastic.%s import failed (%s): %s", mod_name, type(exc).__name__, exc)
 
     return MESHTASTIC_AVAILABLE
-
-
-@dataclass
-class ConnectionInfo:
-    """Connection information and status."""
-
-    connected: bool = False
-    interface_type: str = ""
-    device_path: str = ""
-    error_message: str = ""
-    my_node_id: str = ""
-    my_node_num: int = 0
 
 
 class MeshtasticAPI(CallbackMixin):

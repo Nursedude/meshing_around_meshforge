@@ -325,6 +325,14 @@ class Config:
                 self.mqtt.enabled = self._parser.getboolean("mqtt", "enabled", fallback=False)
                 self.mqtt.broker = self._parser.get("mqtt", "broker", fallback="mqtt.meshtastic.org")
                 self.mqtt.port = self._parser.getint("mqtt", "port", fallback=1883)
+                # Parse embedded port from broker (e.g. "host:1884")
+                if ":" in self.mqtt.broker:
+                    _parts = self.mqtt.broker.rsplit(":", 1)
+                    try:
+                        self.mqtt.port = int(_parts[1])
+                        self.mqtt.broker = _parts[0]
+                    except ValueError:
+                        pass  # Not a port number, keep as-is
                 self.mqtt.use_tls = self._parser.getboolean("mqtt", "use_tls", fallback=False)
                 self.mqtt.username = self._parser.get("mqtt", "username", fallback="meshdev")
                 self.mqtt.password = self._parser.get("mqtt", "password", fallback="large4cats")
@@ -387,6 +395,7 @@ class Config:
         "MESHFORGE_MQTT_ENABLED": ("mqtt", "enabled"),
         "MESHFORGE_MQTT_BROKER": ("mqtt", "broker"),
         "MESHFORGE_MQTT_PORT": ("mqtt", "port"),
+        "MESHFORGE_MQTT_USE_TLS": ("mqtt", "use_tls"),
         "MESHFORGE_MQTT_USERNAME": ("mqtt", "username"),
         "MESHFORGE_MQTT_PASSWORD": ("mqtt", "password"),
         "MESHFORGE_MQTT_TOPIC_ROOT": ("mqtt", "topic_root"),

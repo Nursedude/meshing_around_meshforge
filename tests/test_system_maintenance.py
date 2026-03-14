@@ -357,11 +357,10 @@ class TestFindMeshingAround(unittest.TestCase):
     """Test find_meshing_around()."""
 
     @patch("meshing_around_clients.setup.system_maintenance.subprocess.run")
-    def test_not_found_find_fails(self, mock_subproc):
+    @patch.object(Path, "exists", return_value=False)
+    def test_not_found_find_fails(self, mock_exists, mock_subproc):
         """When find command returns nothing."""
         mock_subproc.return_value = MagicMock(returncode=1, stdout="", stderr="")
-        # This relies on none of the common_paths existing with mesh_bot.py,
-        # which is true in the test environment
         result = find_meshing_around()
         self.assertIsNone(result)
 
