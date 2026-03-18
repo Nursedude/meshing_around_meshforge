@@ -28,6 +28,18 @@ SEVERITY_COLORS = {1: "blue", 2: "yellow", 3: "orange1", 4: "red bold"}
 SEVERITY_ICONS = {1: "i", 2: "!", 3: "!!", 4: "!!!"}
 
 
+def format_time_ago(seconds: float) -> str:
+    """Return a human-readable 'time ago' string from a delta in seconds."""
+    if seconds < 60:
+        return f"{int(seconds)}s ago"
+    elif seconds < 3600:
+        return f"{int(seconds / 60)}m ago"
+    elif seconds < 86400:
+        return f"{int(seconds / 3600)}h ago"
+    else:
+        return f"{int(seconds / 86400)}d ago"
+
+
 def format_battery(level: Optional[int]) -> str:
     """Return a Rich-markup string for a battery percentage.
 
@@ -76,7 +88,9 @@ def safe_panel_render(func: Callable, fallback_title: str = "") -> Any:
         return func()
     except Exception as e:
         logger.debug("Panel render error in %s: %s", fallback_title, e)
-        # Import here to avoid circular import; Panel is only available when Rich is loaded
-        from rich.panel import Panel
+        try:
+            from rich.panel import Panel
 
-        return Panel(f"[dim]Error loading {fallback_title}[/dim]", border_style="dim")
+            return Panel(f"[dim]Error loading {fallback_title}[/dim]", border_style="dim")
+        except ImportError:
+            return None

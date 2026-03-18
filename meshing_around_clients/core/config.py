@@ -5,9 +5,22 @@ Handles loading and saving client configuration.
 
 import configparser
 import os
+import pathlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+
+def get_user_home() -> Path:
+    """Return the real user's home directory, even under sudo.
+
+    When running with ``sudo``, ``Path.home()`` returns ``/root`` instead of
+    the invoking user's home.  This checks ``SUDO_USER`` first (MF001).
+    """
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user:
+        return pathlib.Path(f"/home/{sudo_user}")
+    return pathlib.Path.home()
 
 
 @dataclass
@@ -146,7 +159,7 @@ class Config:
     """
 
     DEFAULT_CONFIG_PATHS = [
-        Path.home() / ".config" / "meshing-around-clients" / "config.ini",
+        get_user_home() / ".config" / "meshing-around-clients" / "config.ini",
         Path.cwd() / "client_config.ini",
         Path.cwd() / "mesh_client.ini",
         Path("/etc/meshing-around-clients/config.ini"),
@@ -154,7 +167,7 @@ class Config:
 
     # Upstream meshing-around config paths
     UPSTREAM_CONFIG_PATHS = [
-        Path.home() / "meshing-around" / "config.ini",
+        get_user_home() / "meshing-around" / "config.ini",
         Path.cwd() / "config.ini",
         Path("/opt/meshing-around/config.ini"),
     ]
@@ -680,4 +693,4 @@ class Config:
         if self.storage.state_file:
             return Path(self.storage.state_file)
         # Default: ~/.config/meshing-around-clients/network_state.json
-        return Path.home() / ".config" / "meshing-around-clients" / "network_state.json"
+        return get_user_home() / ".config" / "meshing-around-clients" / "network_state.json"

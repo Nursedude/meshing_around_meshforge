@@ -21,6 +21,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
+from meshing_around_clients.core.config import get_user_home
+
 from .pi_utils import (
     get_pip_command,
     get_pip_install_flags,
@@ -193,8 +195,8 @@ def check_required_packages(packages: List[str]) -> List[str]:
 def find_meshing_around() -> Optional[Path]:
     """Find the meshing-around installation directory."""
     common_paths = [
-        Path.home() / "meshing-around",
-        Path.home() / "mesh-bot",
+        get_user_home() / "meshing-around",
+        get_user_home() / "mesh-bot",
         Path("/opt/meshing-around"),
         Path("/opt/mesh-bot"),
         Path.cwd().parent / "meshing-around",
@@ -208,7 +210,7 @@ def find_meshing_around() -> Optional[Path]:
     # Try to find with locate
     try:
         result = subprocess.run(
-            ["find", str(Path.home()), "-name", "mesh_bot.py", "-type", "f", "-maxdepth", "4"],
+            ["find", str(get_user_home()), "-name", "mesh_bot.py", "-type", "f", "-maxdepth", "4"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -590,7 +592,7 @@ def _find_config(meshforge_path: Path) -> Optional[Path]:
     """Locate mesh_client.ini relative to the repo root."""
     candidates = [
         meshforge_path / "mesh_client.ini",
-        Path.home() / ".config" / "meshing-around-clients" / "config.ini",
+        get_user_home() / ".config" / "meshing-around-clients" / "config.ini",
         Path("/etc/meshing-around-clients/config.ini"),
     ]
     for p in candidates:
@@ -874,7 +876,7 @@ def clone_meshing_around(
             progress_callback(msg)
 
     if install_path is None:
-        install_path = Path.home() / "meshing-around"
+        install_path = get_user_home() / "meshing-around"
 
     result = UpdateResult(success=True, message="")
 

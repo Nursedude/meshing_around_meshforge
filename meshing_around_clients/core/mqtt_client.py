@@ -1116,7 +1116,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                 )
                 with self._stats_lock:
                     self._stats["telemetry_updates"] += 1
-                self._trigger_callbacks("on_telemetry", sender_id)
+                self._trigger_callbacks("on_telemetry", sender_id, node.telemetry)
 
                 self._check_battery_alert(node, sender_id)
 

@@ -29,14 +29,19 @@ from .models import (  # noqa: E402
     MAX_MESSAGE_BYTES,
     Alert,
     AlertType,
+    Channel,
+    ChannelRole,
     ConnectionInfo,
+    LinkQuality,
     MeshNetwork,
+    MeshRoute,
     Message,
     MessageType,
     Node,
     NodeRole,
     NodeTelemetry,
     Position,
+    RouteHop,
 )
 
 # Core meshtastic + pubsub (required for any hardware connection)
@@ -882,29 +887,93 @@ class MockMeshtasticAPI(MeshtasticAPI):
         self.network.connection_status = "connected (demo)"
         self.network.my_node_id = self.connection_info.my_node_id
 
-        # Generate demo nodes
+        now = datetime.now(timezone.utc)
+
+        # Generate demo nodes with positions (Hawaiian coordinates for realism)
         demo_nodes = [
-            ("!abc12345", 0xABC12345, "BaseStation", "HQ Base Station", "TBEAM"),
-            ("!def67890", 0xDEF67890, "Mobile1", "Field Unit Alpha", "TLORA"),
-            ("!fed98765", 0xFED98765, "Relay", "Mountain Repeater", "HELTEC"),
-            ("!123abcde", 0x123ABCDE, "Solar1", "Solar Powered Node", "RAK4631"),
-            ("!456f0e1a", 0x456F0E1A, "Router", "Community Router", "TBEAM"),
+            ("!abc12345", 0xABC12345, "BaseStation", "HQ Base Station", "TBEAM",
+             21.3069, -157.8583, 15, NodeRole.CLIENT),
+            ("!def67890", 0xDEF67890, "Mobile1", "Field Unit Alpha", "TLORA",
+             21.2770, -157.8260, 5, NodeRole.CLIENT),
+            ("!fed98765", 0xFED98765, "Relay", "Mountain Repeater", "HELTEC",
+             21.3310, -157.8000, 450, NodeRole.ROUTER),
+            ("!123abcde", 0x123ABCDE, "Solar1", "Solar Powered Node", "RAK4631",
+             21.2900, -157.8450, 30, NodeRole.CLIENT),
+            ("!456f0e1a", 0x456F0E1A, "Router", "Community Router", "TBEAM",
+             21.3150, -157.8150, 120, NodeRole.ROUTER),
         ]
 
-        for node_id, node_num, short, long, hw in demo_nodes:
+        node_ids = []
+        for node_id, node_num, short, long, hw, lat, lon, alt, role in demo_nodes:
             node = Node(
                 node_id=node_id,
                 node_num=node_num,
                 short_name=short,
                 long_name=long,
                 hardware_model=hw,
-                role=NodeRole.CLIENT if "Router" not in short else NodeRole.ROUTER,
-                last_heard=datetime.now(timezone.utc),
+                role=role,
+                last_heard=now,
                 is_online=True,
+                position=Position(latitude=lat, longitude=lon, altitude=alt, time=now),
             )
             node.telemetry.battery_level = 75 + (node_num % 25)
             node.telemetry.snr = 5.0 + (node_num % 10)
+            # Populate link quality
+            node.link_quality = LinkQuality(
+                snr=node.telemetry.snr,
+                rssi=-70 - (node_num % 30),
+                hop_count=node_num % 3,
+                last_seen=now,
+                packet_count=10 + (node_num % 20),
+            )
+            node.link_quality.snr_avg = node.telemetry.snr
+            node_ids.append(node_id)
             self.network.add_node(node)
+
+        # Populate neighbor/heard_by relationships
+        for i, nid in enumerate(node_ids):
+            node = self.network.nodes[nid]
+            # Each node hears its neighbors
+            for j in range(max(0, i - 2), min(len(node_ids), i + 3)):
+                if j != i:
+                    neighbor_id = node_ids[j]
+                    node.neighbors.append(neighbor_id)
+                    self.network.nodes[neighbor_id].heard_by.append(nid)
+
+        # Create demo routes
+        self.network.routes[node_ids[1]] = MeshRoute(
+            destination_id=node_ids[1],
+            hops=[
+                RouteHop(node_id=node_ids[0], snr=8.5, timestamp=now),
+                RouteHop(node_id=node_ids[1], snr=6.2, timestamp=now),
+            ],
+            discovered=now,
+            last_used=now,
+            is_preferred=True,
+        )
+        self.network.routes[node_ids[4]] = MeshRoute(
+            destination_id=node_ids[4],
+            hops=[
+                RouteHop(node_id=node_ids[0], snr=7.0, timestamp=now),
+                RouteHop(node_id=node_ids[2], snr=4.5, timestamp=now),
+                RouteHop(node_id=node_ids[4], snr=5.8, timestamp=now),
+            ],
+            discovered=now,
+            last_used=now,
+            is_preferred=True,
+        )
+
+        # Configure demo channels with realistic settings
+        self.network.channels[0] = Channel(
+            index=0, name="LongFast", role=ChannelRole.PRIMARY,
+            psk="AQ==", uplink_enabled=True, downlink_enabled=True,
+            message_count=42, last_activity=now,
+        )
+        self.network.channels[1] = Channel(
+            index=1, name="MeshForge", role=ChannelRole.SECONDARY,
+            psk="meshforge-key", uplink_enabled=False, downlink_enabled=False,
+            message_count=7, last_activity=now,
+        )
 
         self._running.set()
         self._trigger_callbacks("on_connect", self.connection_info)
@@ -1004,7 +1073,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
             node.telemetry.channel_utilization = round(max(0.0, min(100.0, random.uniform(5.0, 35.0))), 1)
             node.telemetry.last_updated = now
             node.last_heard = now
-            self._trigger_callbacks("on_telemetry", node)
+            self._trigger_callbacks("on_telemetry", node.node_id, node.telemetry)
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
         """Simulate sending a message with byte-length validation."""

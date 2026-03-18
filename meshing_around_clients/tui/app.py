@@ -32,6 +32,7 @@ from meshing_around_clients.tui.helpers import (  # noqa: E402
     SEVERITY_ICONS,
     format_battery,
     format_snr,
+    format_time_ago,
     safe_panel_render,
 )
 
@@ -134,8 +135,8 @@ class PlainTextTUI:
 
         try:
             while True:
-                clear_cmd = "cls" if os.name == "nt" else "clear"
-                os.system(clear_cmd)  # noqa: S605
+                # ANSI escape to clear screen and home cursor (no shell invocation)
+                print("\033[2J\033[H", end="", flush=True)
 
                 health = self.api.connection_health
                 status = health.get("status", "unknown").upper()
@@ -995,13 +996,8 @@ class TopologyScreen(Screen):
 
             last_activity = "-"
             if channel.last_activity:
-                delta = datetime.now(timezone.utc) - channel.last_activity
-                if delta.total_seconds() < 60:
-                    last_activity = f"{int(delta.total_seconds())}s ago"
-                elif delta.total_seconds() < 3600:
-                    last_activity = f"{int(delta.total_seconds() / 60)}m ago"
-                else:
-                    last_activity = f"{int(delta.total_seconds() / 3600)}h ago"
+                delta = (datetime.now(timezone.utc) - channel.last_activity).total_seconds()
+                last_activity = format_time_ago(delta)
 
             uplink = "[green]Y[/green]" if channel.uplink_enabled else "[dim]N[/dim]"
             downlink = "[green]Y[/green]" if channel.downlink_enabled else "[dim]N[/dim]"
@@ -1115,12 +1111,7 @@ class DevicesScreen(Screen):
                 last_heard = "-"
                 if node.last_heard:
                     delta = (datetime.now(timezone.utc) - node.last_heard).total_seconds()
-                    if delta < 60:
-                        last_heard = f"{int(delta)}s ago"
-                    elif delta < 3600:
-                        last_heard = f"{int(delta / 60)}m ago"
-                    else:
-                        last_heard = f"{int(delta / 3600)}h ago"
+                    last_heard = format_time_ago(delta)
 
                 nodes_table.add_row(name, node_id, hw, role, batt, last_heard)
 
@@ -1354,6 +1345,7 @@ class MeshingAroundTUI:
         self._dirty = True  # Render flag — set on data changes or user input
         self._last_refresh = datetime.now()
         self._unread_messages = 0  # Incoming messages while not on messages screen
+        self._unread_lock = threading.Lock()
 
         # Space weather (RF propagation) — cached, fetched in background
         self._space_weather: Optional[Dict[str, Any]] = None
@@ -1391,7 +1383,8 @@ class MeshingAroundTUI:
     def _on_message_received(self, *args, **kwargs) -> None:
         """Increment unread counter for incoming messages when not on messages screen."""
         if self.current_screen != "messages":
-            self._unread_messages += 1
+            with self._unread_lock:
+                self._unread_messages += 1
 
     # ------------------------------------------------------------------
     # Space weather (RF propagation) — NOAA SWPC public API
@@ -1521,8 +1514,10 @@ class MeshingAroundTUI:
             title.append(f"  {msg_rate:.1f} msg/min", style="dim")
 
         # Unread message counter
-        if self._unread_messages > 0:
-            title.append(f"  {self._unread_messages} new", style="green bold")
+        with self._unread_lock:
+            unread = self._unread_messages
+        if unread > 0:
+            title.append(f"  {unread} new", style="green bold")
 
         # Show queue metrics when relevant (>50% full or drops occurred)
         q_size = health.get("queue_size")
@@ -1556,6 +1551,7 @@ class MeshingAroundTUI:
             ("3", "Messages", "messages"),
             ("4", "Alerts", "alerts"),
             ("5", "Topology", "topology"),
+            ("6", "Devices", "devices"),
             ("7", "Log", "log"),
         ]
 
@@ -1635,131 +1631,132 @@ class MeshingAroundTUI:
         """Disconnect from the device."""
         self.api.disconnect()
 
+    def _connect_mqtt(self, broker: str, port: int, username: str, password: str,
+                      topic: str, channel: str, use_tls: bool = False) -> bool:
+        """Configure MQTT settings, create client, and connect.
+
+        Raises ImportError if paho-mqtt is not installed.
+        """
+        self.config.mqtt.enabled = True
+        self.config.mqtt.broker = broker
+        self.config.mqtt.port = port
+        self.config.mqtt.username = username
+        self.config.mqtt.password = password
+        self.config.mqtt.topic_root = topic
+        self.config.mqtt.channel = channel
+        self.config.mqtt.use_tls = use_tls
+
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        self.api = MQTTMeshtasticClient(self.config)
+        self._register_dirty_callbacks()
+        return self.connect()
+
     def _connection_fallback_menu(self) -> bool:
         """Show connection type selection menu after a connection failure.
 
         Returns True if a connection was established, False to exit.
+        Uses a loop instead of recursion to prevent stack overflow on repeated failures.
         """
-        with self._prompt_mode():
-            error_msg = ""
-            if hasattr(self.api, "connection_info"):
-                error_msg = getattr(self.api.connection_info, "error_message", "")
+        while True:
+            with self._prompt_mode():
+                error_msg = ""
+                if hasattr(self.api, "connection_info"):
+                    error_msg = getattr(self.api.connection_info, "error_message", "")
 
-            self.console.print(f"\n[red]Connection failed: {error_msg}[/red]\n" if error_msg else "")
-            self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
-            self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
-            self.console.print("  [white]2)[/white] MQTT - Custom broker")
-            self.console.print("  [white]3)[/white] MQTT - Local broker (no auth)")
-            self.console.print("  [white]4)[/white] TCP  - Remote Meshtastic device")
-            self.console.print("  [white]5)[/white] Install Meshtastic library")
-            self.console.print("  [white]6)[/white] Demo mode (simulated data)")
-            self.console.print("  [white]7)[/white] Exit\n")
+                self.console.print(f"\n[red]Connection failed: {error_msg}[/red]\n" if error_msg else "")
+                self.console.print("[bold cyan]Select a connection option:[/bold cyan]\n")
+                self.console.print("  [white]1)[/white] MQTT - Public broker (mqtt.meshtastic.org)")
+                self.console.print("  [white]2)[/white] MQTT - Custom broker")
+                self.console.print("  [white]3)[/white] MQTT - Local broker (no auth)")
+                self.console.print("  [white]4)[/white] TCP  - Remote Meshtastic device")
+                self.console.print("  [white]5)[/white] Install Meshtastic library")
+                self.console.print("  [white]6)[/white] Demo mode (simulated data)")
+                self.console.print("  [white]7)[/white] Exit\n")
 
-            choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6", "7"], default="6")
+                choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6", "7"], default="6")
 
-            if choice == "1":
-                # MQTT public broker
-                self.config.mqtt.enabled = True
-                self.config.mqtt.broker = "mqtt.meshtastic.org"
-                self.config.mqtt.port = 1883
-                self.config.mqtt.username = "meshdev"
-                self.config.mqtt.password = "large4cats"
-                # Allow customizing topic/channel even on public broker
-                topic = Prompt.ask("Topic root", default=self.config.mqtt.topic_root or "msh/US")
-                channel = Prompt.ask("Channel", default=self.config.mqtt.channel or "LongFast")
-                self.config.mqtt.topic_root = topic
-                self.config.mqtt.channel = channel
-                try:
-                    from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-                    self.api = MQTTMeshtasticClient(self.config)
-                    self._register_dirty_callbacks()
-                    return self.connect()
-                except ImportError:
-                    self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
-                    return self._connection_fallback_menu()
-
-            elif choice == "2":
-                # MQTT custom broker — pre-fill from config
-                mqtt = self.config.mqtt
-                broker = Prompt.ask("Broker hostname", default=mqtt.broker or "localhost")
-                # Parse embedded port from hostname (e.g. "host:1884")
-                if ":" in broker:
-                    _parts = broker.rsplit(":", 1)
+                if choice == "1":
+                    # MQTT public broker — credentials come from config defaults
+                    mqtt = self.config.mqtt
+                    topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
+                    channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
                     try:
-                        port = int(_parts[1])
-                        broker = _parts[0]
-                    except ValueError:
+                        return self._connect_mqtt(
+                            broker="mqtt.meshtastic.org", port=1883,
+                            username=mqtt.username, password=mqtt.password,
+                            topic=topic, channel=channel,
+                        )
+                    except ImportError:
+                        self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                        continue
+
+                elif choice == "2":
+                    # MQTT custom broker — pre-fill from config
+                    mqtt = self.config.mqtt
+                    broker = Prompt.ask("Broker hostname", default=mqtt.broker or "localhost")
+                    # Parse embedded port from hostname (e.g. "host:1884")
+                    if ":" in broker:
+                        _parts = broker.rsplit(":", 1)
+                        try:
+                            port = int(_parts[1])
+                            broker = _parts[0]
+                        except ValueError:
+                            port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                    else:
                         port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                    username = Prompt.ask("Username", default=mqtt.username or "")
+                    password = Prompt.ask("Password", default=mqtt.password or "")
+                    topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
+                    channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
+                    try:
+                        return self._connect_mqtt(
+                            broker=broker, port=port,
+                            username=username, password=password,
+                            topic=topic, channel=channel,
+                        )
+                    except ImportError:
+                        self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                        continue
+
+                elif choice == "3":
+                    # MQTT local broker — no auth, no TLS
+                    topic = Prompt.ask("Topic root", default="msh/local")
+                    channel = Prompt.ask("Channel", default="meshforge")
+                    try:
+                        return self._connect_mqtt(
+                            broker="localhost", port=1883,
+                            username="", password="",
+                            topic=topic, channel=channel, use_tls=False,
+                        )
+                    except ImportError:
+                        self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
+                        continue
+
+                elif choice == "4":
+                    # TCP remote device
+                    hostname = Prompt.ask("Device hostname/IP")
+                    self.config.interface.type = "tcp"
+                    self.config.interface.hostname = hostname
+                    self.api = MeshtasticAPI(self.config)
+                    self._register_dirty_callbacks()
+                    return self.connect()
+
+                elif choice == "5":
+                    # Install Meshtastic library
+                    return self._install_meshtastic_library()
+
+                elif choice == "6":
+                    # Demo mode
+                    self.demo_mode = True
+                    self.api = MockMeshtasticAPI(self.config)
+                    self._register_dirty_callbacks()
+                    self.api.connect()
+                    return True
+
                 else:
-                    port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
-                username = Prompt.ask("Username", default=mqtt.username or "meshdev")
-                password = Prompt.ask("Password", default=mqtt.password or "large4cats")
-                topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
-                channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
-                self.config.mqtt.enabled = True
-                self.config.mqtt.broker = broker
-                self.config.mqtt.port = port
-                self.config.mqtt.username = username
-                self.config.mqtt.password = password
-                self.config.mqtt.topic_root = topic
-                self.config.mqtt.channel = channel
-                try:
-                    from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-                    self.api = MQTTMeshtasticClient(self.config)
-                    self._register_dirty_callbacks()
-                    return self.connect()
-                except ImportError:
-                    self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
-                    return self._connection_fallback_menu()
-
-            elif choice == "3":
-                # MQTT local broker — no auth, no TLS
-                self.config.mqtt.enabled = True
-                self.config.mqtt.broker = "localhost"
-                self.config.mqtt.port = 1883
-                self.config.mqtt.use_tls = False
-                self.config.mqtt.username = ""
-                self.config.mqtt.password = ""
-                topic = Prompt.ask("Topic root", default="msh/local")
-                channel = Prompt.ask("Channel", default="meshforge")
-                self.config.mqtt.topic_root = topic
-                self.config.mqtt.channel = channel
-                try:
-                    from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
-
-                    self.api = MQTTMeshtasticClient(self.config)
-                    self._register_dirty_callbacks()
-                    return self.connect()
-                except ImportError:
-                    self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
-                    return self._connection_fallback_menu()
-
-            elif choice == "4":
-                # TCP remote device
-                hostname = Prompt.ask("Device hostname/IP")
-                self.config.interface.type = "tcp"
-                self.config.interface.hostname = hostname
-                self.api = MeshtasticAPI(self.config)
-                self._register_dirty_callbacks()
-                return self.connect()
-
-            elif choice == "5":
-                # Install Meshtastic library
-                return self._install_meshtastic_library()
-
-            elif choice == "6":
-                # Demo mode
-                self.demo_mode = True
-                self.api = MockMeshtasticAPI(self.config)
-                self._register_dirty_callbacks()
-                self.api.connect()
-                return True
-
-            else:
-                # Exit
-                return False
+                    # Exit
+                    return False
 
     def _install_meshtastic_library(self) -> bool:
         """Install the Meshtastic library and dependencies, then reconnect."""
@@ -1768,14 +1765,14 @@ class MeshingAroundTUI:
         except ImportError:
             self.console.print("[red]Cannot import installer (mesh_client.py not found)[/red]")
             time.sleep(2)
-            return self._connection_fallback_menu()
+            return False
 
         # Pre-flight internet check
         self.console.print("[cyan]Checking internet connectivity...[/cyan]")
         if not check_internet():
             self.console.print("[red]No internet connection. Cannot install packages.[/red]")
             time.sleep(2)
-            return self._connection_fallback_menu()
+            return False
 
         deps = OPTIONAL_DEPS.get("meshtastic", [])
         self.console.print(f"[cyan]Installing: {', '.join(deps)}[/cyan]")
@@ -1794,7 +1791,7 @@ class MeshingAroundTUI:
         if not success:
             self.console.print("[red]Failed to install Meshtastic library. Check logs for details.[/red]")
             time.sleep(2)
-            return self._connection_fallback_menu()
+            return False
 
         # Refresh the module-level MESHTASTIC_AVAILABLE flag now that pip install succeeded
         from meshing_around_clients.core.meshtastic_api import refresh_meshtastic_availability
@@ -1869,6 +1866,9 @@ class MeshingAroundTUI:
             pass
         finally:
             self._running = False
+            # Remove TUI log handler from root logger (matches run_interactive cleanup)
+            if self._log_handler in logging.getLogger().handlers:
+                logging.getLogger().removeHandler(self._log_handler)
             self.disconnect()
             self.console.clear()
             self.console.print("[cyan]Goodbye![/cyan]")
@@ -2007,7 +2007,8 @@ class MeshingAroundTUI:
         if key in self._SCREEN_KEYS:
             self.current_screen = self._SCREEN_KEYS[key]
             if key == "3":
-                self._unread_messages = 0
+                with self._unread_lock:
+                    self._unread_messages = 0
         elif key == "q":
             if self.current_screen != "dashboard":
                 self.current_screen = "dashboard"
@@ -2027,8 +2028,13 @@ class MeshingAroundTUI:
     @contextmanager
     def _prompt_mode(self):
         """Temporarily suspend Live display and restore cooked terminal for prompts."""
-        import termios
-        import tty
+        try:
+            import termios
+            import tty
+
+            _has_termios = True
+        except ImportError:
+            _has_termios = False
 
         live = self._live
         saved = self._old_terminal_settings
@@ -2041,7 +2047,7 @@ class MeshingAroundTUI:
                 logger.debug("Failed to stop Live display for prompt mode")
 
         # Restore cooked terminal mode so input()/Prompt.ask() works
-        if saved is not None:
+        if _has_termios and saved is not None:
             try:
                 termios.tcsetattr(sys.stdin, termios.TCSADRAIN, saved)
             except (termios.error, OSError) as e:
@@ -2051,7 +2057,7 @@ class MeshingAroundTUI:
             yield
         finally:
             # Re-enter cbreak mode
-            if saved is not None:
+            if _has_termios and saved is not None:
                 try:
                     tty.setcbreak(sys.stdin.fileno())
                 except (termios.error, OSError) as e:

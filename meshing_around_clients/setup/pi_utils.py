@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from meshing_around_clients.core.config import get_user_home
+
 # POSIX username: starts with lowercase letter or underscore, then lowercase
 # alphanumeric, hyphens, or underscores.  Max 32 chars (Linux default).
 _USERNAME_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
@@ -271,7 +273,7 @@ def add_user_to_dialout(username: Optional[str] = None) -> Tuple[bool, str]:
 
 def get_default_venv_path() -> Path:
     """Get default virtual environment path for MeshForge."""
-    return Path.home() / "meshing-around-venv"
+    return get_user_home() / "meshing-around-venv"
 
 
 def check_venv_exists(venv_path: Optional[Path] = None) -> bool:
