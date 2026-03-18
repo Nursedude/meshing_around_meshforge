@@ -344,6 +344,36 @@ SVCEOF
     fi
 }
 
+install_local_broker() {
+    echo ""
+    read -p "Install local MQTT broker (Mosquitto)? Recommended for MQTT mode [y/N]: " INSTALL_MOSQUITTO
+
+    if [[ "$INSTALL_MOSQUITTO" =~ ^[Yy]$ ]]; then
+        log_info "Installing Mosquitto MQTT broker..."
+
+        if command -v apt-get &> /dev/null; then
+            if ! sudo apt-get install -y -qq mosquitto mosquitto-clients; then
+                log_error "Failed to install mosquitto"
+                return
+            fi
+
+            # Enable and start the service
+            sudo systemctl enable mosquitto
+            sudo systemctl start mosquitto
+
+            if systemctl is-active --quiet mosquitto; then
+                log_ok "Mosquitto installed and running on port 1883"
+            else
+                log_warn "Mosquitto installed but failed to start — check: sudo systemctl status mosquitto"
+            fi
+        else
+            log_warn "apt-get not found — install mosquitto manually"
+        fi
+    else
+        log_info "Skipping local MQTT broker"
+    fi
+}
+
 setup_serial_permissions() {
     if [ "$CONN_TYPE" = "serial" ] || [ "$CONN_TYPE" = "auto" ]; then
         log_info "Setting up serial port permissions..."
@@ -424,6 +454,7 @@ main() {
     mkdir -p "$SCRIPT_DIR/logs"
     log_ok "Log directory created"
 
+    install_local_broker
     setup_serial_permissions
     setup_systemd_service
     print_summary

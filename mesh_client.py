@@ -1348,6 +1348,68 @@ def update_menu(config: ConfigParser):
 # =============================================================================
 
 
+def _ensure_local_broker() -> None:
+    """Check if a local MQTT broker (Mosquitto) is running; offer to install."""
+    # Quick connectivity check on localhost:1883
+    try:
+        with socket.create_connection(("localhost", 1883), timeout=2):
+            return  # Broker is already running
+    except (ConnectionRefusedError, OSError):
+        pass
+
+    log("No local MQTT broker detected on localhost:1883", "WARN")
+
+    # Check if mosquitto is installed but not running
+    mosquitto_bin = shutil.which("mosquitto")
+    if mosquitto_bin:
+        log("Mosquitto is installed but not running", "INFO")
+        try:
+            from meshing_around_clients.setup.whiptail import yesno
+
+            if yesno("Start Mosquitto service?"):
+                subprocess.run(
+                    ["sudo", "systemctl", "start", "mosquitto"], timeout=30
+                )
+                time.sleep(1)
+                try:
+                    with socket.create_connection(("localhost", 1883), timeout=2):
+                        log("Mosquitto started", "OK")
+                        return
+                except (ConnectionRefusedError, OSError):
+                    log("Mosquitto started but port not ready — check config", "WARN")
+        except ImportError:
+            log("Run: sudo systemctl start mosquitto", "INFO")
+        return
+
+    # Not installed — offer to install (Debian/Ubuntu only)
+    if not shutil.which("apt-get"):
+        log("Install a MQTT broker (e.g. mosquitto) to use local mode", "INFO")
+        return
+
+    try:
+        from meshing_around_clients.setup.whiptail import yesno
+
+        if yesno("Install Mosquitto MQTT broker?"):
+            log("Installing mosquitto...", "INFO")
+            result = subprocess.run(
+                ["sudo", "apt-get", "install", "-y", "mosquitto", "mosquitto-clients"],
+                timeout=120,
+            )
+            if result.returncode != 0:
+                log("Failed to install mosquitto", "ERROR")
+                return
+            subprocess.run(["sudo", "systemctl", "enable", "mosquitto"], timeout=30)
+            subprocess.run(["sudo", "systemctl", "start", "mosquitto"], timeout=30)
+            time.sleep(1)
+            try:
+                with socket.create_connection(("localhost", 1883), timeout=2):
+                    log("Mosquitto installed and running", "OK")
+            except (ConnectionRefusedError, OSError):
+                log("Mosquitto installed — may need a reboot to start", "WARN")
+    except ImportError:
+        log("Run: sudo apt-get install -y mosquitto mosquitto-clients", "INFO")
+
+
 def standalone_install(config: ConfigParser) -> None:
     """Full standalone install: all deps, config, log dirs."""
     use_venv = config.getboolean("advanced", "use_venv", fallback=True)
@@ -1453,6 +1515,8 @@ def launcher_menu(config: ConfigParser) -> bool:
             config.set("mqtt", "use_tls", "false")
             config.set("mqtt", "username", "")
             config.set("mqtt", "password", "")
+            # Check if Mosquitto is installed and running locally
+            _ensure_local_broker()
             broker = inputbox("MQTT broker", default="localhost")
             if broker:
                 if ":" in broker:
