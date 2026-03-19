@@ -57,12 +57,13 @@ graph LR
         MODELS[Data Models]
         ALERTS[Alert Detection]
         LAUNCH[Launcher Menu]
+        CMDS[Bot Commands]
+        PROF[Regional Profiles]
     end
 
     subgraph "Partial"
         MQTT[MQTT Mode]
         NOTIFY[Notifications]
-        CMDS[Bot Commands]
     end
 
     subgraph "Untested"
@@ -80,7 +81,8 @@ graph LR
     style LAUNCH fill:#27ae60,color:#fff
     style MQTT fill:#f39c12,color:#fff
     style NOTIFY fill:#f39c12,color:#fff
-    style CMDS fill:#f39c12,color:#fff
+    style CMDS fill:#27ae60,color:#fff
+    style PROF fill:#27ae60,color:#fff
     style SERIAL fill:#e74c3c,color:#fff
     style TCP fill:#e74c3c,color:#fff
     style BLE fill:#e74c3c,color:#fff
@@ -89,7 +91,7 @@ graph LR
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **TUI Client** | Working | 8 screens, search, export, plain-text fallback |
+| **TUI Client** | Working | 7 screens, search, export, plain-text fallback |
 | **Demo Mode** | Working | Simulated data for testing |
 | **Config System** | Working | INI-based configuration |
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
@@ -97,7 +99,7 @@ graph LR
 | **Launcher Menu** | Working | Interactive mode selection, config editor, updater |
 | **MQTT Mode** | Partial | Connects but limited testing |
 | **Notifications** | Partial | Email framework exists, untested |
-| **Bot Commands** | Partial | Parser exists, handlers incomplete |
+| **Bot Commands** | Working | cmd, help, ping, info, nodes, status, version, uptime + data sources |
 | **Serial Mode** | Untested | Requires hardware testing |
 | **TCP Mode** | Untested | Requires network device |
 | **BLE Mode** | Untested | Requires Bluetooth setup |
@@ -221,6 +223,12 @@ pip install -r meshing_around_clients/requirements.txt    # Pick up new deps
 python3 mesh_client.py --install-deps
 ```
 
+New config sections (like `[commands]` or `[data_sources]`) are **automatically added** to your existing `mesh_client.ini` on first run — your settings are never overwritten. You can also run this explicitly:
+
+```bash
+python3 mesh_client.py --upgrade-config
+```
+
 ### Rolling Back to a Previous Version
 
 If an update causes issues, you can roll back from the launcher menu:
@@ -254,10 +262,11 @@ graph LR
     subgraph "Meshing Around MeshForge"
         TUI["tui — TUI Client"]
         MQTT["mqtt — MQTT Monitor"]
+        MQTTL["mqtt-local — Local Broker"]
         DEMO["demo — Demo Mode"]
+        PROFILE["profile — Regional Profile"]
         INI["ini — Edit mesh_client.ini"]
-        CONFIG["config — Configuration Files"]
-        LOG["logging — Logging Settings"]
+        LOG["logs — Logging"]
         SETUP["setup — Setup Wizard"]
         UPDATE["update — Update / Reinstall"]
         INSTALL["install — Install Everything"]
@@ -266,9 +275,10 @@ graph LR
 
     style TUI fill:#27ae60,color:#fff
     style MQTT fill:#27ae60,color:#fff
+    style MQTTL fill:#27ae60,color:#fff
     style DEMO fill:#9b59b6,color:#fff
+    style PROFILE fill:#3498db,color:#fff
     style INI fill:#f39c12,color:#fff
-    style CONFIG fill:#f39c12,color:#fff
     style LOG fill:#f39c12,color:#fff
     style SETUP fill:#f39c12,color:#fff
     style UPDATE fill:#f39c12,color:#fff
@@ -285,7 +295,8 @@ This is the recommended way to start meshing_around_meshforge — select your mo
 ```bash
 python3 mesh_client.py             # Interactive launcher menu
 python3 mesh_client.py --demo      # Simulated data, no hardware
-python3 mesh_client.py --setup     # Interactive setup wizard
+python3 mesh_client.py --setup     # Interactive setup wizard (with profile picker)
+python3 mesh_client.py --profile hawaii  # Apply regional profile
 python3 mesh_client.py --tui       # Force TUI mode
 ```
 
@@ -382,6 +393,53 @@ reconnect_delay = 5            # Seconds between reconnect attempts
 max_reconnect_attempts = 10    # Give up after N failures
 uplink_enabled = true          # Receive messages from mesh
 downlink_enabled = true        # Send messages to mesh
+```
+
+### Regional Profiles
+
+Pre-configured templates for your area — sets topic root, emergency keywords, and data sources:
+
+```bash
+python3 mesh_client.py --list-profiles      # See available profiles
+python3 mesh_client.py --profile hawaii      # Apply Hawaii profile
+```
+
+| Profile | Region | Special Keywords |
+|---------|--------|-----------------|
+| `hawaii` | msh/US | tsunami, hurricane, lava, evacuation, shelter |
+| `default_us` | msh/US | standard (911, sos, mayday) |
+| `europe` | msh/EU_868 | 112 (EU emergency number) |
+| `australia_nz` | msh/ANZ | 000, 111, bushfire, cyclone |
+| `local_broker` | msh/US | auto_respond enabled (private broker only) |
+
+Profiles set defaults — add your own channels in `mesh_client.ini` after applying.
+
+### Bot Commands
+
+```ini
+[commands]
+enabled = true
+# NEVER enable auto_respond on public MQTT brokers (mqtt.meshtastic.org)
+# Only enable on your own private/local broker
+auto_respond = false
+commands = cmd,help,ping,info,nodes,status,version,uptime,weather,tsunami
+```
+
+### External Data Sources
+
+Commands like `weather` and `tsunami` pull live data from configured URLs. Set your station codes:
+
+```ini
+[data_sources]
+weather_enabled = true
+weather_station = PHTO          # Your NOAA station code
+weather_zone = HIZ018           # Your NOAA zone
+
+tsunami_enabled = true
+tsunami_url = https://www.tsunami.gov/events/xml/PAAQAtom.xml
+
+volcano_enabled = true
+volcano_url = https://volcanoes.usgs.gov/vsc/api/volcanoApi/
 ```
 
 ### UI and Feature Settings
@@ -482,7 +540,7 @@ meshing_around_meshforge includes 12 configurable alert types. Each can be indep
 
 | Alert Type | Trigger | Default Severity | Configurable |
 |------------|---------|-----------------|--------------|
-| **Emergency** | Keywords (911, SOS, HELP, mayday, etc.) | Critical | Keywords, cooldown, sound, email, SMS |
+| **Emergency** | Keywords (911, SOS, mayday, etc.) | Critical | Keywords, cooldown, sound, email, SMS |
 | **Proximity** | Node enters/exits geofence radius | Medium | Target coordinates, radius, script trigger |
 | **Altitude** | Node exceeds altitude threshold | Medium | Altitude threshold (meters) |
 | **Weather** | NOAA severe weather alerts | High | Severity levels, location, check interval |
@@ -503,11 +561,14 @@ meshing_around_meshforge includes 12 configurable alert types. Each can be indep
 python3 mesh_client.py [OPTIONS]
 
 Options:
-  --setup              Interactive configuration wizard
+  --setup              Interactive configuration wizard (includes profile picker)
   --check              Check dependencies only
   --install-deps       Install dependencies and exit
   --tui                Force TUI mode
   --demo               Demo mode (no hardware)
+  --profile NAME       Apply a regional profile (hawaii, europe, local_broker, etc.)
+  --list-profiles      List available regional profiles
+  --upgrade-config     Add new config sections without overwriting existing settings
   --no-venv            Don't use virtual environment
   --import-config PATH Import config from upstream meshing-around config.ini
   --check-config       Validate config file and exit
@@ -536,10 +597,16 @@ meshing_around_meshforge/
 ├── mesh_client.ini         # Configuration
 ├── configure_bot.py        # Bot setup wizard
 ├── setup_headless.sh       # Pi/headless installer
+├── profiles/               # Regional config templates
+│   ├── hawaii.ini          # Hawaii (tsunami/volcano/hurricane keywords)
+│   ├── default_us.ini      # Continental US defaults
+│   ├── europe.ini          # EU 868 MHz band
+│   ├── australia_nz.ini    # ANZ (bushfire/cyclone keywords)
+│   └── local_broker.ini    # Local Mosquitto (bot responses enabled)
 └── meshing_around_clients/
     ├── core/               # Runtime modules
-    │   ├── config.py       # Config management
-    │   ├── meshtastic_api.py  # Device API + MockAPI
+    │   ├── config.py       # Config management (profiles, data sources)
+    │   ├── meshtastic_api.py  # Device API + MockAPI + command handler
     │   ├── mqtt_client.py  # MQTT broker connection
     │   ├── mesh_crypto.py  # AES-256-CTR (optional deps)
     │   ├── callbacks.py    # Shared callback/cooldown mixin
@@ -552,7 +619,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py
     │   └── config_schema.py
     └── tui/
-        ├── app.py          # Rich terminal UI (8 screens + PlainTextTUI fallback)
+        ├── app.py          # Rich terminal UI (7 screens + PlainTextTUI fallback)
         └── helpers.py      # Shared formatting, safe panel rendering
 ```
 
@@ -582,7 +649,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **743 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, middleware, and more.
+The project has **743 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, and more.
 
 ```bash
 # Run all tests
