@@ -725,6 +725,37 @@ def _migrate_connection_section(config: ConfigParser) -> bool:
     return True
 
 
+def upgrade_config(config: ConfigParser) -> bool:
+    """Add missing sections/keys from DEFAULT_CONFIG without overwriting existing values.
+
+    This is safe to run on any config — it only fills in gaps. Existing user
+    settings are never modified. Useful after pulling new code that adds new
+    INI sections (e.g., [commands], [data_sources]).
+
+    Returns True if any new keys were added.
+    """
+    defaults = ConfigParser()
+    defaults.read_string(DEFAULT_CONFIG)
+
+    added = 0
+    for section in defaults.sections():
+        if not config.has_section(section):
+            config.add_section(section)
+            log(f"  + [{section}] (new section)", "INFO")
+
+        for key, value in defaults.items(section):
+            if not config.has_option(section, key):
+                config.set(section, key, value)
+                added += 1
+
+    if added:
+        log(f"Config upgraded: {added} new setting(s) added", "OK")
+        return True
+
+    log("Config is already up to date — no new settings to add", "OK")
+    return False
+
+
 def load_config() -> ConfigParser:
     """Load or create configuration file."""
     config = ConfigParser()
@@ -734,7 +765,12 @@ def load_config() -> ConfigParser:
         log(f"Loaded config from {CONFIG_FILE}", "OK")
 
         # Migrate legacy [connection] section if present
-        if _migrate_connection_section(config):
+        migrated = _migrate_connection_section(config)
+
+        # Auto-upgrade: add any new sections/keys from DEFAULT_CONFIG
+        upgraded = upgrade_config(config)
+
+        if migrated or upgraded:
             save_config(config)
     else:
         # Create default config
@@ -1969,6 +2005,7 @@ Examples:
     parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
     parser.add_argument("--profile", metavar="NAME", help="Apply a regional profile (e.g., hawaii, europe, local_broker)")
     parser.add_argument("--list-profiles", action="store_true", help="List available regional profiles")
+    parser.add_argument("--upgrade-config", action="store_true", help="Add new config sections without overwriting existing settings")
     parser.add_argument("--check-config", action="store_true", help="Validate config file and exit")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
@@ -2014,6 +2051,14 @@ Examples:
         else:
             log(f"Profile '{args.profile}' not found. Use --list-profiles to see options.", "ERROR")
             sys.exit(1)
+        sys.exit(0)
+
+    # Upgrade config (add new sections without overwriting)
+    if args.upgrade_config:
+        config = load_config()
+        if upgrade_config(config):
+            save_config(config)
+            log(f"Config saved to {CONFIG_FILE}", "OK")
         sys.exit(0)
 
     # Import upstream config
