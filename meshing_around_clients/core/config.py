@@ -396,15 +396,22 @@ class Config:
                 fav_str = self._parser.get("general", "favoriteNodeList", fallback="")
                 self.favorite_nodes = [n.strip() for n in fav_str.split(",") if n.strip()]
 
-            # Alerts
-            if self._parser.has_section("emergencyHandler"):
-                self.alerts.enabled = self._parser.getboolean("emergencyHandler", "enabled", fallback=True)
-                keywords_str = self._parser.get("emergencyHandler", "emergency_keywords", fallback="")
+            # Alerts — support both [alerts] (meshforge default) and
+            # [emergencyHandler] (upstream meshing-around format)
+            alerts_section = None
+            if self._parser.has_section("alerts"):
+                alerts_section = "alerts"
+            elif self._parser.has_section("emergencyHandler"):
+                alerts_section = "emergencyHandler"
+
+            if alerts_section:
+                self.alerts.enabled = self._parser.getboolean(alerts_section, "enabled", fallback=True)
+                keywords_str = self._parser.get(alerts_section, "emergency_keywords", fallback="")
                 if keywords_str:
                     self.alerts.emergency_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
-                self.alerts.alert_channel = self._parser.getint("emergencyHandler", "alert_channel", fallback=2)
-                self.alerts.play_sound = self._parser.getboolean("emergencyHandler", "play_sound", fallback=False)
-                self.alerts.cooldown_period = self._parser.getint("emergencyHandler", "cooldown_period", fallback=300)
+                self.alerts.alert_channel = self._parser.getint(alerts_section, "alert_channel", fallback=2)
+                self.alerts.play_sound = self._parser.getboolean(alerts_section, "play_sound", fallback=False)
+                self.alerts.cooldown_period = self._parser.getint(alerts_section, "cooldown_period", fallback=300)
 
             # Commands
             if self._parser.has_section("commands"):
@@ -595,14 +602,18 @@ class Config:
             self._parser.set("general", "bbs_admin_list", ",".join(self.admin_nodes))
             self._parser.set("general", "favoriteNodeList", ",".join(self.favorite_nodes))
 
-            # Alerts
-            if not self._parser.has_section("emergencyHandler"):
-                self._parser.add_section("emergencyHandler")
-            self._parser.set("emergencyHandler", "enabled", str(self.alerts.enabled))
-            self._parser.set("emergencyHandler", "emergency_keywords", ",".join(self.alerts.emergency_keywords))
-            self._parser.set("emergencyHandler", "alert_channel", str(self.alerts.alert_channel))
-            self._parser.set("emergencyHandler", "play_sound", str(self.alerts.play_sound))
-            self._parser.set("emergencyHandler", "cooldown_period", str(self.alerts.cooldown_period))
+            # Alerts — save to whichever section name exists, default [alerts]
+            if self._parser.has_section("emergencyHandler"):
+                _alert_sec = "emergencyHandler"
+            else:
+                _alert_sec = "alerts"
+                if not self._parser.has_section(_alert_sec):
+                    self._parser.add_section(_alert_sec)
+            self._parser.set(_alert_sec, "enabled", str(self.alerts.enabled))
+            self._parser.set(_alert_sec, "emergency_keywords", ",".join(self.alerts.emergency_keywords))
+            self._parser.set(_alert_sec, "alert_channel", str(self.alerts.alert_channel))
+            self._parser.set(_alert_sec, "play_sound", str(self.alerts.play_sound))
+            self._parser.set(_alert_sec, "cooldown_period", str(self.alerts.cooldown_period))
 
             # Commands
             if not self._parser.has_section("commands"):

@@ -59,6 +59,7 @@ graph LR
         LAUNCH[Launcher Menu]
         CMDS[Bot Commands]
         PROF[Regional Profiles]
+        TCP[TCP Mode]
     end
 
     subgraph "Partial"
@@ -68,7 +69,6 @@ graph LR
 
     subgraph "Untested"
         SERIAL[Serial Mode]
-        TCP[TCP Mode]
         BLE[BLE Mode]
         SMS[SMS Gateway]
     end
@@ -84,7 +84,7 @@ graph LR
     style CMDS fill:#27ae60,color:#fff
     style PROF fill:#27ae60,color:#fff
     style SERIAL fill:#e74c3c,color:#fff
-    style TCP fill:#e74c3c,color:#fff
+    style TCP fill:#27ae60,color:#fff
     style BLE fill:#e74c3c,color:#fff
     style SMS fill:#e74c3c,color:#fff
 ```
@@ -101,7 +101,7 @@ graph LR
 | **Notifications** | Partial | Email framework exists, untested |
 | **Bot Commands** | Working | cmd, help, ping, info, nodes, status, version, uptime + data sources |
 | **Serial Mode** | Untested | Requires hardware testing |
-| **TCP Mode** | Untested | Requires network device |
+| **TCP Mode** | Working | Tested with remote nodes (port 4403) |
 | **BLE Mode** | Untested | Requires Bluetooth setup |
 | **SMS Gateway** | Untested | Requires carrier configuration |
 
@@ -327,7 +327,7 @@ flowchart TD
     style DEMO fill:#9b59b6,color:#fff
     style SERIAL fill:#e74c3c,color:#fff
     style BLE fill:#e74c3c,color:#fff
-    style TCP fill:#e74c3c,color:#fff
+    style TCP fill:#27ae60,color:#fff
 ```
 
 | Mode | Radio Required | Status | Use Case |
@@ -335,7 +335,7 @@ flowchart TD
 | **Demo** | No | **Working** | Test the UI with simulated nodes and messages |
 | **MQTT** | No | Partial | Join live mesh channels via broker — no radio needed |
 | **Serial** | Yes (USB) | Untested | Direct USB connection to a Meshtastic device |
-| **TCP** | No (network) | Untested | Connect to meshtasticd protobuf API (port 4403, not web port 9443) |
+| **TCP** | No (network) | **Working** | Connect to meshtasticd protobuf API (port 4403, not web port 9443) |
 | **BLE** | Yes (nearby) | Untested | Bluetooth Low Energy to a nearby device |
 | **Auto** | Depends | Working | Tries Serial → TCP → MQTT → Demo in order |
 
@@ -406,7 +406,7 @@ python3 mesh_client.py --profile hawaii      # Apply Hawaii profile
 
 | Profile | Region | Special Keywords |
 |---------|--------|-----------------|
-| `hawaii` | msh/US | tsunami, hurricane, lava, evacuation, shelter |
+| `hawaii` | msh/US/HI | tsunami, hurricane, lava, evacuation, shelter |
 | `default_us` | msh/US | standard (911, sos, mayday) |
 | `europe` | msh/EU_868 | 112 (EU emergency number) |
 | `australia_nz` | msh/ANZ | 000, 111, bushfire, cyclone |

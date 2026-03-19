@@ -9,7 +9,7 @@ This document outlines requirements and procedures for testing MeshForge with Me
 | Mode | Status | Blocker |
 |------|--------|---------|
 | Serial | **Untested** | Requires USB-connected device |
-| TCP | **Untested** | Requires network-accessible device |
+| TCP | **Working** | Tested with remote nodes via port 4403 |
 | BLE | **Untested** | Requires Bluetooth-enabled device |
 | MQTT | **Partial** | Works; integration tests skipped without network |
 | Demo | **Working** | No hardware needed |
