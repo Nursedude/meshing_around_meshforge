@@ -19,7 +19,7 @@ The TUI `sys.exit(1)`s when Rich is not installed. CLAUDE.md requires: *"Rich Li
 
 #### Broad `except Exception` in source files
 
-~~Several files used `except Exception` where specific types would be better.~~ **Fixed** — `meshtastic_api.py` and `mqtt_client.py` narrowed to specific exception types. `configure_bot.py:2007` (top-level CLI wizard) and `web/middleware.py:203` (broadcast catch-all) are intentional.
+~~Several files used `except Exception` where specific types would be better.~~ **Fixed** — `meshtastic_api.py` and `mqtt_client.py` narrowed to specific exception types. `configure_bot.py:2007` (top-level CLI wizard) is intentional.
 
 #### Alert cooldown race condition in base class
 
@@ -96,21 +96,12 @@ The public Meshtastic broker credentials (`meshdev`/`large4cats`) are hardcoded 
 The following categories of issues were fixed in PRs #13, #14, #16, the security review (2026-02-21), and subsequent sessions:
 
 - Shell injection in `setup_headless.sh` (CRITICAL)
-- XSS in web UI (CRITICAL)
-- Zero authentication on web API (CRITICAL)
-- Web server `0.0.0.0` default binding → now `127.0.0.1`
-- WebSocket endpoint authentication added
-- `_schedule_async` startup race condition fixed (coroutine buffering)
 - Thread safety locks on shared state
-- `asyncio.create_task()` from non-async threads
 - Position parsing `0 or latitudeI / 1e7` bug
 - Config file permissions (0o600)
-- Dead WebSocket connections accumulating
-- Dead `_schedule_coroutine` helper removed
 - Orphaned `configure_bot_improved.py` deleted
 - `configure_bot.py` partially decomposed (2307 → 2000 lines)
 - 16 additional findings from the original 25-item review
-- WebSocket auth bypass when credentials misconfigured (CRITICAL — security review)
 - Unbounded message queue in MeshtasticAPI (HIGH — security review)
 - Unvalidated MQTT topic components (HIGH — security review)
 - Missing config validation bounds for port, intervals, delays (MEDIUM — security review)
@@ -118,8 +109,6 @@ The following categories of issues were fixed in PRs #13, #14, #16, the security
 - Deprecated SSL constant in MQTT TLS setup (HIGH — security review)
 - Subprocess username validation (HIGH — security hardening session)
 - MQTT non-default credentials TLS warning (HIGH — security hardening session)
-- Proxy-aware rate limiting (MEDIUM — security hardening session)
-- Basic auth non-HTTPS warning (MEDIUM — security hardening session)
 - Adaptive malformed MQTT message logging (MEDIUM — security hardening session)
 - Broad `except Exception` narrowed in API and MQTT (MEDIUM — security hardening session)
 - Alert cooldown race condition in CallbackMixin (HIGH — security hardening session)

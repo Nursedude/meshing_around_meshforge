@@ -13,7 +13,7 @@
 python3 mesh_client.py --demo
 
 # Run tests
-python3 -m pytest tests/ -v --ignore=tests/test_web_app.py
+python3 -m pytest tests/ -v
 
 # Check linting
 python3 -m flake8 meshing_around_clients/
@@ -28,7 +28,7 @@ python3 -m isort --check-only --diff meshing_around_clients/
 - **Owner:** Nursedude (`Nursedude/meshing_around_meshforge`)
 - **Upstream:** SpudGunMan/meshing-around (v1.9.9.5)
 - **Current Version:** 0.5.0-beta
-- **Test Status:** 665 tests passing, 11 skipped
+- **Test Status:** 743 tests passing
 - **Code Coverage:** 67% (CI threshold: 65%)
 
 ### Directory Structure (Current)
@@ -53,13 +53,11 @@ meshing_around_meshforge/
 │   │   ├── system_maintenance.py # Updates, systemd
 │   │   ├── alert_configurators.py # Alert wizards
 │   │   └── config_schema.py    # Upstream format conversion
-│   ├── tui/
-│   │   ├── app.py              # Terminal UI (~1147 lines, 6 screens)
-│   │   └── helpers.py          # TUI helper utilities (62 lines)
-│   └── web/
-│       ├── app.py              # Web dashboard (~1034 lines)
-│       └── middleware.py       # CSRF, rate limiting, security (214 lines)
-└── tests/                      # 3784 lines, 10 test files
+│   └── tui/
+│       ├── app.py              # Terminal UI (7 screens)
+│       └── helpers.py          # TUI helper utilities
+├── profiles/                   # Regional config templates (hawaii, europe, etc.)
+└── tests/                      # 743 tests across 17 files
 ```
 
 ---
@@ -102,10 +100,8 @@ except ImportError:
 | `core/meshtastic_api.py` | Device API + MockAPI | Cleaned |
 | `core/mesh_crypto.py` | AES-256-CTR (upgrade path) | Waiting on deps |
 | `core/callbacks.py` | Shared callback/cooldown mixin | Working |
-| `tui/app.py` | Rich-based terminal UI (6 screens) | Working |
+| `tui/app.py` | Rich-based terminal UI (7 screens) | Working |
 | `tui/helpers.py` | TUI helper utilities | Working |
-| `web/app.py` | FastAPI web dashboard | Fixed |
-| `web/middleware.py` | CSRF, rate limiting, security | Working |
 
 ---
 
@@ -117,8 +113,7 @@ except ImportError:
 4. **Specific exceptions** - No bare except: or except Exception:
 5. **core/__init__.py minimal** - Only 11 runtime exports, no setup bloat
 6. **mesh_crypto kept** - Legitimate upgrade path; mqtt_client.py already has conditional wiring
-7. **WebSocketManager rename** - web/app.py's WS connection class renamed from ConnectionManager
-8. **No connection fallback chain** - Current explicit approach is correct. Users should know exactly what they're connected to. Auto-fallback would be opt-in via config if ever added.
+7. **No connection fallback chain** - Current explicit approach is correct. Users should know exactly what they're connected to. Auto-fallback would be opt-in via config if ever added.
 
 ---
 
@@ -129,7 +124,7 @@ except ImportError:
   Not a bug — leave as-is unless requirements change.
 - [ ] TUI Rich fallback: CLAUDE.md requires plain-text fallback but TUI exits without Rich (see CODE_REVIEW.md)
 - [ ] Remaining broad `except Exception` in configure_bot.py
-- **Session 2 plan:** TUI message search, connection health indicator, log rotation, env var config overrides, CORS middleware
+- **Session 2 plan:** TUI message search, connection health indicator, log rotation, env var config overrides
 - ~~**Session 3 plan:** Test coverage push (65%+), DRY refactors, sound alert stub, dynamic demo nodes, doc updates~~ **Done**
 
 ---
@@ -173,7 +168,6 @@ except ImportError:
 
 ### 2026-02-21 (Security Review Session)
 - Created SECURITY_REVIEW.md — full security audit (22 findings, 6 fixed, 6 positive)
-- Fixed CRITICAL: WebSocket auth bypass when credentials not configured (web/app.py)
 - Fixed HIGH: Bounded message queue to 5000 (meshtastic_api.py) — prevents memory exhaustion
 - Fixed HIGH: MQTT topic validation — rejects null bytes, wildcards, control chars (mqtt_client.py)
 - Fixed HIGH: Deprecated ssl.PROTOCOL_TLS_CLIENT — conditional via hasattr (mqtt_client.py)
@@ -185,7 +179,7 @@ except ImportError:
 ### 2026-02-21 (Markdown Cleanup — Round 2)
 - Deleted Documentation/CLIENTS_README.md (redundant with README.md), merged unique content
 - Moved Documentation/MQTT_INTEGRATION.md to root, removed Documentation/ directory
-- README.md: expanded API table (5→10 endpoints), added WebSocket example, CLI options, systemd section
+- README.md: expanded CLI options, systemd section
 - CHANGELOG.md: populated empty [Unreleased] with 3 weeks of missing work
 - RELIABILITY_ROADMAP.md: fixed stale progress metrics, removed outdated section, checked off items
 - ALERT_CONFIG_README.md: fixed support link, log dates, config file reference
@@ -216,7 +210,7 @@ except ImportError:
 - Version bump to 0.5.0-beta, README rewrite with Mermaid diagrams, upstream analysis
 
 ### Earlier (2026-01-25 through 2026-01-31)
-- Initial beta, CSRF, rate limiting, map clustering, MQTT reliability, topology, mesh_crypto
+- Initial beta, MQTT reliability, topology, mesh_crypto
 
 ---
 

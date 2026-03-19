@@ -38,8 +38,15 @@ python3 mesh_client.py
 # Demo mode (no hardware needed)
 python3 mesh_client.py --demo
 
-# Interactive setup wizard
+# Interactive setup wizard (includes regional profile picker)
 python3 mesh_client.py --setup
+
+# Apply a regional profile (hawaii, europe, local_broker, etc.)
+python3 mesh_client.py --profile hawaii
+python3 mesh_client.py --list-profiles
+
+# Upgrade config after pulling new code (adds new sections, keeps your values)
+python3 mesh_client.py --upgrade-config
 
 # Force TUI mode
 python3 mesh_client.py --tui
@@ -59,11 +66,17 @@ meshing_around_meshforge/
 ├── mesh_client.ini             # Configuration file
 ├── configure_bot.py            # Bot setup wizard
 ├── setup_headless.sh           # Pi/headless installer
+├── profiles/                   # Regional config templates
+│   ├── hawaii.ini              # Hawaii (tsunami/volcano/hurricane keywords)
+│   ├── default_us.ini          # Continental US defaults
+│   ├── europe.ini              # EU 868 MHz band
+│   ├── australia_nz.ini        # ANZ (bushfire/cyclone keywords)
+│   └── local_broker.ini        # Local Mosquitto (auto_respond enabled)
 │
 └── meshing_around_clients/     # Main package
     ├── core/                   # Runtime modules
-    │   ├── config.py           # Config management
-    │   ├── meshtastic_api.py   # Device API + MockAPI (Serial/TCP/HTTP/BLE)
+    │   ├── config.py           # Config management (INI loading, profiles)
+    │   ├── meshtastic_api.py   # Device API + MockAPI + command handler
     │   ├── mqtt_client.py      # MQTT broker connection (no radio needed)
     │   ├── mesh_crypto.py      # AES-256-CTR decryption (optional deps)
     │   ├── callbacks.py        # Shared callback/cooldown mixin
@@ -76,7 +89,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py # Alert wizards
     │   └── config_schema.py    # Upstream format conversion
     └── tui/
-        ├── app.py              # Rich-based terminal UI (8 screens)
+        ├── app.py              # Rich-based terminal UI (7 screens)
         └── helpers.py          # TUI helper utilities
 ```
 
@@ -142,10 +155,11 @@ meshing_around_meshforge/
 | `core/config.py` | Config management | INI loading, search paths |
 | `core/models.py` | Data models | Node, Message, Alert, MeshNetwork |
 | `core/mqtt_client.py` | MQTT connection | Broker connection, packet decode |
-| `core/meshtastic_api.py` | Device API | Serial/TCP/HTTP/BLE + MockAPI |
+| `core/meshtastic_api.py` | Device API | Serial/TCP/HTTP/BLE + MockAPI + command handler |
 | `core/mesh_crypto.py` | Encryption | AES-256-CTR, optional deps |
-| `tui/app.py` | Terminal UI | Rich-based, 8 screens |
+| `tui/app.py` | Terminal UI | Rich-based, 7 screens |
 | `setup/whiptail.py` | Dialog helpers | Whiptail menus + print/input fallback |
+| `profiles/*.ini` | Regional templates | Hawaii, US, Europe, ANZ, Local Broker |
 | `SECURITY_REVIEW.md` | Security audit | 22 findings, severity-rated, remediation status |
 
 ## Testing
@@ -177,8 +191,20 @@ python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883
 ### Modifying the TUI
 - Main app in `tui/app.py`
 - Uses Rich library with fallback
-- 8 screens: Dashboard, Nodes, Messages, Alerts, Topology, Help
+- 7 screens: Dashboard, Nodes, Messages, Alerts, Topology, Devices, Help
 - **Launcher menus** (in `mesh_client.py`) use `setup/whiptail.py` — not Rich
+
+### Adding a Regional Profile
+1. Create `profiles/your_region.ini` (copy `default_us.ini` as template)
+2. Set `[profile]` name, description, region, recommended_hardware
+3. Configure `[mqtt]` topic_root, `[alerts]` emergency_keywords, `[data_sources]`
+4. Users apply with `--profile your_region` or via setup wizard
+
+### Bot Commands & Data Sources
+- Commands configured in `[commands]` INI section
+- Data sources (weather, tsunami, volcano) in `[data_sources]` section
+- `auto_respond` MUST be false on public MQTT brokers
+- Each data source needs user-specific codes (station ID, zone, etc.)
 
 ## MQTT Default Credentials
 

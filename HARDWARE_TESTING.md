@@ -42,19 +42,37 @@ sudo usermod -a -G dialout $USER
 
 ## Testing Procedures
 
+Connection mode is set via `mesh_client.ini` (not CLI flags). Use `--setup`
+to run the interactive wizard, or edit the config directly:
+
+```ini
+[interface]
+type = serial    # serial, tcp, http, mqtt, ble, auto
+port =           # e.g., /dev/ttyUSB0 (auto-detect if empty)
+hostname =       # e.g., 192.168.1.100 (for tcp/http)
+mac =            # e.g., AA:BB:CC:DD:EE:FF (for ble)
+```
+
 ### Serial Mode Testing
 
 **Prerequisites:**
 - Meshtastic device connected via USB
 - User in `dialout` group (Linux) or appropriate permissions
 
+**Setup:**
+```ini
+[interface]
+type = serial
+port =           # leave empty for auto-detect, or set /dev/ttyUSB0
+```
+
 **Test Steps:**
 ```bash
 # 1. Verify device detection
 ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
 
-# 2. Run client in serial mode
-python3 mesh_client.py --serial
+# 2. Run client
+python3 mesh_client.py --tui
 
 # 3. Verify in TUI:
 #    - Dashboard shows "connected (serial)"
@@ -78,13 +96,20 @@ python3 mesh_client.py --serial
 - Device hostname/IP known
 - Device configured to allow TCP connections (port 4403)
 
+**Setup:**
+```ini
+[interface]
+type = tcp
+hostname = 192.168.1.100    # your device IP
+```
+
 **Test Steps:**
 ```bash
 # 1. Verify TCP connectivity
 nc -zv <device-ip> 4403
 
-# 2. Run client in TCP mode
-python3 mesh_client.py --tcp --host <device-ip>
+# 2. Run client
+python3 mesh_client.py --tui
 
 # 3. Same verification as Serial mode
 ```
@@ -101,13 +126,20 @@ python3 mesh_client.py --tcp --host <device-ip>
 - Meshtastic device with BLE enabled
 - Device MAC address known
 
+**Setup:**
+```ini
+[interface]
+type = ble
+mac = AA:BB:CC:DD:EE:FF    # your device MAC
+```
+
 **Test Steps:**
 ```bash
 # 1. Scan for BLE devices
 python3 -c "from meshtastic.ble_interface import BLEInterface; BLEInterface.scan()"
 
-# 2. Run client in BLE mode
-python3 mesh_client.py --ble --mac <device-mac>
+# 2. Run client
+python3 mesh_client.py --tui
 ```
 
 **Expected Results:**
@@ -121,13 +153,30 @@ python3 mesh_client.py --ble --mac <device-mac>
 - Network connectivity to mqtt.meshtastic.org (or custom broker)
 - paho-mqtt installed
 
+**Setup:**
+```ini
+[interface]
+type = mqtt
+
+[mqtt]
+enabled = true
+broker = mqtt.meshtastic.org
+topic_root = msh/US
+channels = LongFast
+```
+
+Or use a regional profile:
+```bash
+python3 mesh_client.py --profile hawaii
+```
+
 **Test Steps:**
 ```bash
 # 1. Test broker connectivity
 python3 -c "import socket; socket.create_connection(('mqtt.meshtastic.org', 1883), 5); print('OK')"
 
-# 2. Run client in MQTT mode
-python3 mesh_client.py --mqtt
+# 2. Run client
+python3 mesh_client.py --tui
 
 # 3. Verify:
 #    - Connection status shows "connected (MQTT)"
@@ -141,10 +190,11 @@ python3 mesh_client.py --mqtt
 - [ ] Receiving mesh traffic
 - [ ] Node info populated from MQTT messages
 - [ ] Alerts work for emergency keywords
+- [ ] Commands recognized (cmd, help, ping) without triggering alerts
 
 ## Test Matrix
 
-### Connection Modes × Features
+### Connection Modes x Features
 
 | Feature | Serial | TCP | BLE | MQTT |
 |---------|--------|-----|-----|------|
@@ -155,25 +205,27 @@ python3 mesh_client.py --mqtt
 | Receive Message | ? | ? | ? | ? |
 | Emergency Alerts | ? | ? | ? | ? |
 | Battery Alerts | ? | ? | ? | ? |
+| Command Handler | ? | ? | ? | ? |
 
-Legend: ✓ = Tested OK, ✗ = Failed, ? = Untested
+Legend: pass = Tested OK, fail = Failed, ? = Untested
 
 ### TUI Screens
 
 | Screen | Serial | TCP | BLE | MQTT | Demo |
 |--------|--------|-----|-----|------|------|
-| Dashboard | ? | ? | ? | ? | ✓ |
-| Nodes | ? | ? | ? | ? | ✓ |
-| Messages | ? | ? | ? | ? | ✓ |
-| Alerts | ? | ? | ? | ? | ✓ |
-| Map | ? | ? | ? | ? | ✓ |
-| Settings | ? | ? | ? | ? | ✓ |
+| Dashboard | ? | ? | ? | ? | pass |
+| Nodes | ? | ? | ? | ? | pass |
+| Messages | ? | ? | ? | ? | pass |
+| Alerts | ? | ? | ? | ? | pass |
+| Topology | ? | ? | ? | ? | pass |
+| Devices | ? | ? | ? | ? | pass |
+| Help | ? | ? | ? | ? | pass |
 
 ## Automated Tests
 
 ```bash
 # All unit tests (no hardware needed)
-python3 -m pytest tests/ -v --ignore=tests/test_web_app.py
+python3 -m pytest tests/ -v
 
 # Specific module
 python3 -m pytest tests/test_models.py -v

@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `play_alert_sound()` stub in `callbacks.py` — platform audio playback (paplay/aplay/afplay)
 - Dynamic demo node discovery in `MockMeshtasticAPI` — 5% chance per event, up to 10 nodes
 - TUI helper utilities module (`tui/helpers.py`)
-- Web security middleware — CSRF, rate limiting (`web/middleware.py`)
 - HTTP connection type support in meshtastic_api.py
+- Bot command system with INI-driven `[commands]` config
+- Regional profile system (`profiles/`) with `--profile` and `--list-profiles`
+- External data source config `[data_sources]` for weather/tsunami/volcano lookups
+- Auto-upgrade config on load (adds new INI sections without overwriting)
 
 ### Changed
 - DRY refactored position extraction — replaced duplicate logic in mqtt_client.py and meshtastic_api.py
@@ -30,19 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Resource leaks on partial connection failure
-- WebSocket race condition in web/app.py
 - Decoded telemetry path wiring in mqtt_client.py
+- "cmd"/"help" no longer triggers false emergency alerts (command handler intercepts first)
 - Channel activity auto-updates
 
 ### Security
 - **Full security audit** — 22 findings documented in SECURITY_REVIEW.md, 6 fixed
-- Fixed WebSocket auth bypass when credentials not configured (CRITICAL)
 - Bounded message queue to prevent memory exhaustion on high traffic
+- Hard guard: auto_respond blocked on public MQTT brokers even if misconfigured
 - Added MQTT topic component validation (reject null bytes, wildcards, control chars)
 - Fixed deprecated `ssl.PROTOCOL_TLS_CLIENT` for Python 3.10+ compatibility
 - Added hostname validation for TCP/HTTP interface connections
 - Added config validation bounds for port, save interval, reconnect delays
-- Hardened web auth, added CSP headers
 - Pinned pyopenssl and cryptography to resolve version conflicts
 - Improved gitignore and dependency bounds
 
@@ -70,8 +72,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Architecture Docs** - Clear separation of working vs planned features
 
 ### Security
-- **WebSocket Authentication** - Added token-based authentication for WebSocket connections
-- **Localhost-only Binding** - Web server now binds to 127.0.0.1 by default (configurable)
 - **Secure Temp Files** - Replaced predictable temp file paths with `tempfile.mkstemp()`
 - **Thread-safe Logging** - Added locks to prevent race conditions in log handlers
 - **Input Validation** - Hardened message handling and config parsing
@@ -81,13 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fixed 32+ code quality and security issues across 14 files (PRs #13, #14, #16)
 - Race condition in file logging handler
-- Potential security issues in default network bindings
-- Thread safety issues in message handler and connection manager
-- Memory leaks in long-running WebSocket connections
+- Thread safety issues in connection handling
 
 ### Known Issues
 - Serial/TCP/BLE modes untested with real hardware
-- Web templates may have rendering issues
 - MQTT reconnection has limited retry logic
 - Email/SMS notifications not tested end-to-end
 - Single interface only (upstream supports 9)
@@ -101,11 +98,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dashboard, nodes, messages, alerts screens
   - Keyboard navigation
   - Works over SSH
-
-- **Web Client** - FastAPI-based dashboard
-  - Real-time WebSocket updates
-  - REST API endpoints
-  - Dark theme UI
 
 - **MQTT Support** - Radio-less operation
   - Connect via mqtt.meshtastic.org

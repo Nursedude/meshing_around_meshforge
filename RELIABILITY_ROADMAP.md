@@ -86,28 +86,6 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 
 ---
 
-## Web Client (P2)
-
-### Templates
-- [ ] Test all HTML templates render correctly
-- [ ] Verify responsive design on mobile
-- [ ] Test WebSocket reconnection in browser
-- [x] Validate CSRF protection — web/middleware.py
-
-### API
-- [ ] Test all REST endpoints
-- [x] Verify rate limiting works — web/middleware.py
-- [x] Test authentication flow — hardened web auth, CSP headers
-- [ ] Validate input sanitization
-
-### WebSocket
-- [ ] Test with multiple concurrent clients
-- [ ] Verify message broadcast to all clients
-- [ ] Test reconnection after server restart
-- [x] Handle malformed WebSocket messages — WebSocket race condition fixed
-
----
-
 ## Notifications (P3)
 
 ### Email/SMTP
@@ -186,7 +164,6 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 
 > See SECURITY_REVIEW.md for full audit details.
 
-- [x] WebSocket auth bypass when credentials misconfigured — fixed
 - [x] Bounded message queue (prevent memory exhaustion) — fixed
 - [x] MQTT topic component validation — fixed
 - [x] Deprecated SSL constant for Python 3.10+ — fixed
@@ -194,10 +171,8 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 - [x] Config validation bounds (port, intervals, delays) — fixed
 - [x] Subprocess argument validation for usernames/paths — fixed (prior session)
 - [x] Warn when non-default MQTT credentials used without TLS — fixed (prior session)
-- [ ] Tighten CSP (remove `'unsafe-inline'`)
-- [x] Proxy-aware rate limiting — fixed (prior session)
-- [x] Explicit CORS middleware configuration — fixed (Session 2)
 - [x] Narrow remaining `except Exception` to specific types — fixed (prior session)
+- [x] Public MQTT bot guard — auto_respond blocked on public brokers
 - [x] MQTT auth failure stops infinite reconnection — new
 - [x] Thread-safe _connected and rejection window stats — new
 - [x] Max reconnect attempt enforcement — new
