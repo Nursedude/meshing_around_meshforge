@@ -277,9 +277,11 @@ class TestConfigDefaults(unittest.TestCase):
     def test_default_alert_keywords_comprehensive(self):
         """Verify default emergency keywords include critical terms."""
         cfg = AlertConfig()
-        expected_terms = ["emergency", "911", "help", "sos", "mayday"]
+        expected_terms = ["emergency", "911", "sos", "mayday"]
         for term in expected_terms:
             self.assertIn(term, cfg.emergency_keywords, f"Missing critical keyword: {term}")
+        # 'help' should NOT be an emergency keyword (it's a command)
+        self.assertNotIn("help", cfg.emergency_keywords)
 
     def test_default_tui_reasonable_refresh(self):
         """TUI refresh rate should be reasonable (not too fast or slow)."""

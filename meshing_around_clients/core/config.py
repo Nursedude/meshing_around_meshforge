@@ -73,11 +73,6 @@ class AlertConfig:
             "911",
             "112",
             "999",
-            "police",
-            "fire",
-            "ambulance",
-            "rescue",
-            "help",
             "sos",
             "mayday",
         ]
@@ -85,6 +80,93 @@ class AlertConfig:
     alert_channel: int = 2
     play_sound: bool = False
     cooldown_period: int = 300
+
+
+@dataclass
+class CommandConfig:
+    """Bot command configuration for mesh command responses."""
+
+    enabled: bool = True
+    # Whether to auto-respond to commands received from the mesh
+    auto_respond: bool = False
+    # Recognized command prefixes (messages starting with these are commands, not emergencies)
+    commands: List[str] = field(
+        default_factory=lambda: [
+            "cmd",
+            "help",
+            "ping",
+            "info",
+            "nodes",
+            "status",
+            "version",
+            "uptime",
+        ]
+    )
+
+
+@dataclass
+class DataSourceEntry:
+    """A single external data source tied to a command keyword."""
+
+    name: str = ""
+    enabled: bool = False
+    url: str = ""
+    command: str = ""  # The command keyword that triggers this source
+    station: str = ""  # Station/location code (e.g., NOAA station ID)
+    zone: str = ""  # Zone code (e.g., NOAA weather zone)
+    region: str = ""  # Region identifier
+    api_key: str = ""  # Optional API key
+
+
+@dataclass
+class DataSourceConfig:
+    """External data source configuration for command responses.
+
+    Each source maps a command keyword to an external URL that provides
+    live data. Sources are configured in the [data_sources] INI section
+    with user-specific codes (station IDs, zones, API keys).
+    """
+
+    weather_enabled: bool = False
+    weather_station: str = ""
+    weather_zone: str = ""
+    weather_url: str = "https://api.weather.gov"
+
+    tsunami_enabled: bool = False
+    tsunami_url: str = "https://www.tsunami.gov/events/xml/PAAQAtom.xml"
+    tsunami_region: str = ""
+
+    volcano_enabled: bool = False
+    volcano_url: str = "https://volcanoes.usgs.gov/vsc/api/volcanoApi/"
+
+    def get_enabled_sources(self) -> Dict[str, "DataSourceEntry"]:
+        """Return a dict of command_name -> DataSourceEntry for enabled sources."""
+        sources: Dict[str, DataSourceEntry] = {}
+        if self.weather_enabled and self.weather_station:
+            sources["weather"] = DataSourceEntry(
+                name="NOAA Weather",
+                enabled=True,
+                url=self.weather_url,
+                command="weather",
+                station=self.weather_station,
+                zone=self.weather_zone,
+            )
+        if self.tsunami_enabled:
+            sources["tsunami"] = DataSourceEntry(
+                name="Tsunami Warning Center",
+                enabled=True,
+                url=self.tsunami_url,
+                command="tsunami",
+                region=self.tsunami_region,
+            )
+        if self.volcano_enabled:
+            sources["volcano"] = DataSourceEntry(
+                name="USGS Volcano Alerts",
+                enabled=True,
+                url=self.volcano_url,
+                command="volcano",
+            )
+        return sources
 
 
 @dataclass
@@ -181,6 +263,8 @@ class Config:
 
         # Configuration sections
         self.alerts = AlertConfig()
+        self.commands = CommandConfig()
+        self.data_sources = DataSourceConfig()
         self.tui = TuiConfig()
         self.mqtt = MQTTConfig()
         self.storage = StorageConfig()
@@ -321,6 +405,27 @@ class Config:
                 self.alerts.alert_channel = self._parser.getint("emergencyHandler", "alert_channel", fallback=2)
                 self.alerts.play_sound = self._parser.getboolean("emergencyHandler", "play_sound", fallback=False)
                 self.alerts.cooldown_period = self._parser.getint("emergencyHandler", "cooldown_period", fallback=300)
+
+            # Commands
+            if self._parser.has_section("commands"):
+                self.commands.enabled = self._parser.getboolean("commands", "enabled", fallback=True)
+                self.commands.auto_respond = self._parser.getboolean("commands", "auto_respond", fallback=False)
+                cmds_str = self._parser.get("commands", "commands", fallback="")
+                if cmds_str:
+                    self.commands.commands = [c.strip() for c in cmds_str.split(",") if c.strip()]
+
+            # Data Sources
+            if self._parser.has_section("data_sources"):
+                ds = self.data_sources
+                ds.weather_enabled = self._parser.getboolean("data_sources", "weather_enabled", fallback=False)
+                ds.weather_station = self._parser.get("data_sources", "weather_station", fallback="")
+                ds.weather_zone = self._parser.get("data_sources", "weather_zone", fallback="")
+                ds.weather_url = self._parser.get("data_sources", "weather_url", fallback=ds.weather_url)
+                ds.tsunami_enabled = self._parser.getboolean("data_sources", "tsunami_enabled", fallback=False)
+                ds.tsunami_url = self._parser.get("data_sources", "tsunami_url", fallback=ds.tsunami_url)
+                ds.tsunami_region = self._parser.get("data_sources", "tsunami_region", fallback="")
+                ds.volcano_enabled = self._parser.getboolean("data_sources", "volcano_enabled", fallback=False)
+                ds.volcano_url = self._parser.get("data_sources", "volcano_url", fallback=ds.volcano_url)
 
             # TUI
             if self._parser.has_section("tui"):
@@ -498,6 +603,27 @@ class Config:
             self._parser.set("emergencyHandler", "alert_channel", str(self.alerts.alert_channel))
             self._parser.set("emergencyHandler", "play_sound", str(self.alerts.play_sound))
             self._parser.set("emergencyHandler", "cooldown_period", str(self.alerts.cooldown_period))
+
+            # Commands
+            if not self._parser.has_section("commands"):
+                self._parser.add_section("commands")
+            self._parser.set("commands", "enabled", str(self.commands.enabled))
+            self._parser.set("commands", "auto_respond", str(self.commands.auto_respond))
+            self._parser.set("commands", "commands", ",".join(self.commands.commands))
+
+            # Data Sources
+            if not self._parser.has_section("data_sources"):
+                self._parser.add_section("data_sources")
+            ds = self.data_sources
+            self._parser.set("data_sources", "weather_enabled", str(ds.weather_enabled))
+            self._parser.set("data_sources", "weather_station", ds.weather_station)
+            self._parser.set("data_sources", "weather_zone", ds.weather_zone)
+            self._parser.set("data_sources", "weather_url", ds.weather_url)
+            self._parser.set("data_sources", "tsunami_enabled", str(ds.tsunami_enabled))
+            self._parser.set("data_sources", "tsunami_url", ds.tsunami_url)
+            self._parser.set("data_sources", "tsunami_region", ds.tsunami_region)
+            self._parser.set("data_sources", "volcano_enabled", str(ds.volcano_enabled))
+            self._parser.set("data_sources", "volcano_url", ds.volcano_url)
 
             # TUI
             if not self._parser.has_section("tui"):

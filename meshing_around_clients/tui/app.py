@@ -1173,7 +1173,7 @@ class HelpScreen(Screen):
 - **q** - Return to dashboard / Quit
 
 ## Actions
-- **s** - Send message
+- **s** - Send message (type 'cmd' for command list)
 - **r** - Refresh data
 - **c** - Connect/Disconnect
 - **?** / **h** - This help
@@ -2073,41 +2073,63 @@ class MeshingAroundTUI:
             self._dirty = True
 
     def _send_message_prompt(self) -> None:
-        """Prompt user to send a message."""
+        """Prompt user to send a message.
+
+        Intercepts recognized commands (cmd, help, etc.) and displays them
+        locally instead of sending as mesh messages.
+        """
         with self._prompt_mode():
             self.console.clear()
             self.console.print(Panel("[bold cyan]Send Message[/bold cyan]", border_style="cyan"))
+            self.console.print("[dim]Type 'cmd' for available commands[/dim]\n")
 
             try:
                 text = Prompt.ask("Message")
-                if text:
-                    msg_len = len(text.encode("utf-8"))
-                    if msg_len > MAX_MESSAGE_BYTES:
-                        self.console.print(
-                            f"[red]Message too long: {msg_len}/{MAX_MESSAGE_BYTES} bytes. "
-                            f"Please shorten by {msg_len - MAX_MESSAGE_BYTES} bytes.[/red]"
+                if not text:
+                    return
+
+                # Intercept local commands
+                text_lower = text.strip().lower()
+                if self.config.commands.enabled and text_lower in ("cmd", "help"):
+                    self.console.print()
+                    self.console.print(
+                        Panel(
+                            MeshtasticAPI.get_command_list(self.config),
+                            title="[bold green]Available Commands[/bold green]",
+                            border_style="green",
                         )
-                        time.sleep(2)
-                        return
+                    )
+                    self.console.print("\n[dim]Press Enter to continue...[/dim]")
+                    input()
+                    return
 
-                    try:
-                        channel = int(Prompt.ask("Channel", default="0"))
-                    except ValueError:
-                        self.console.print("[red]Invalid channel number[/red]")
-                        time.sleep(1)
-                        return
-                    if channel < 0 or channel > 7:
-                        self.console.print("[red]Channel must be 0-7[/red]")
-                        time.sleep(1)
-                        return
-                    dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
+                msg_len = len(text.encode("utf-8"))
+                if msg_len > MAX_MESSAGE_BYTES:
+                    self.console.print(
+                        f"[red]Message too long: {msg_len}/{MAX_MESSAGE_BYTES} bytes. "
+                        f"Please shorten by {msg_len - MAX_MESSAGE_BYTES} bytes.[/red]"
+                    )
+                    time.sleep(2)
+                    return
 
-                    if self.api.send_message(text, dest, channel):
-                        self.console.print("[green]Message sent![/green]")
-                    else:
-                        self.console.print("[red]Failed to send message[/red]")
-
+                try:
+                    channel = int(Prompt.ask("Channel", default="0"))
+                except ValueError:
+                    self.console.print("[red]Invalid channel number[/red]")
                     time.sleep(1)
+                    return
+                if channel < 0 or channel > 7:
+                    self.console.print("[red]Channel must be 0-7[/red]")
+                    time.sleep(1)
+                    return
+                dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
+
+                if self.api.send_message(text, dest, channel):
+                    self.console.print("[green]Message sent![/green]")
+                else:
+                    self.console.print("[red]Failed to send message[/red]")
+
+                time.sleep(1)
             except KeyboardInterrupt:
                 pass
 

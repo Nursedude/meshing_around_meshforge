@@ -1228,7 +1228,90 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self.network.add_message(message)
         self._trigger_callbacks("on_message", message)
-        self._check_emergency_keywords(message)
+
+        # Check for bot commands before emergency keywords
+        if not self._handle_command(message):
+            self._check_emergency_keywords(message)
+
+    # Public Meshtastic MQTT brokers — auto_respond MUST be off for these
+    _PUBLIC_BROKERS = {"mqtt.meshtastic.org"}
+
+    def _handle_command(self, message: Message) -> bool:
+        """Check if message is a recognized command. Returns True if handled.
+
+        When a message matches a known command, it is treated as a command
+        rather than checked for emergency keywords. Auto-respond is blocked
+        on public MQTT brokers — only private/local brokers may send responses.
+        """
+        if not self.config.commands.enabled:
+            return False
+
+        text_stripped = message.text.strip().lower()
+        recognized = [c.lower() for c in self.config.commands.commands]
+
+        if text_stripped not in recognized:
+            return False
+
+        logger.info("Command received via MQTT: %s from %s", text_stripped, message.sender_name)
+        self._trigger_callbacks("on_command", message, text_stripped)
+
+        # Auto-respond only on private brokers
+        if self.config.commands.auto_respond:
+            broker = self.mqtt_config.broker
+            if broker in self._PUBLIC_BROKERS:
+                logger.warning(
+                    "auto_respond blocked: %s is a public broker. "
+                    "Bot responses are not allowed on public MQTT.",
+                    broker,
+                )
+            else:
+                response = self._get_command_response(text_stripped)
+                if response:
+                    self.send_message(response, message.sender_id, message.channel)
+
+        return True
+
+    def _get_command_response(self, command: str) -> str:
+        """Generate response text for a recognized command.
+
+        For data-source commands (weather, tsunami, etc.), fetches live data
+        from the URL configured in [data_sources]. All sources and codes
+        are driven by mesh_client.ini.
+        """
+        from meshing_around_clients import __version__
+        from .meshtastic_api import _fetch_data_source
+
+        if command in ("cmd", "help"):
+            cmds = ", ".join(self.config.commands.commands)
+            return f"MeshForge v{__version__} commands: {cmds}"
+        elif command == "ping":
+            return "pong"
+        elif command == "version":
+            return f"MeshForge v{__version__}"
+        elif command == "nodes":
+            count = len(self.network.nodes)
+            return f"Tracking {count} node{'s' if count != 1 else ''}"
+        elif command == "status":
+            connected = "connected" if self.is_connected else "disconnected"
+            nodes = len(self.network.nodes)
+            msgs = len(self.network.messages)
+            return f"Status: {connected} | {nodes} nodes | {msgs} msgs"
+        elif command == "info":
+            return f"MeshForge v{__version__} mesh monitor"
+        elif command == "uptime":
+            if self._connection_start:
+                delta = datetime.now(timezone.utc) - self._connection_start
+                hours, rem = divmod(int(delta.total_seconds()), 3600)
+                mins, secs = divmod(rem, 60)
+                return f"Uptime: {hours}h {mins}m {secs}s"
+            return "Uptime: unknown"
+
+        # Check data sources for this command
+        sources = self.config.data_sources.get_enabled_sources()
+        if command in sources:
+            return _fetch_data_source(sources[command])
+
+        return ""
 
     def _check_emergency_keywords(self, message: Message):
         """Check message for emergency keywords."""

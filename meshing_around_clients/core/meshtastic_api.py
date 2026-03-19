@@ -94,6 +94,124 @@ def refresh_meshtastic_availability() -> bool:
     return MESHTASTIC_AVAILABLE
 
 
+def _fetch_data_source(source) -> str:
+    """Fetch data from an external data source configured in [data_sources].
+
+    Uses stdlib urllib only (no extra deps). Returns a short text summary
+    suitable for a mesh message (max ~200 chars). All URLs and codes come
+    from the INI config — nothing is hardcoded.
+
+    Args:
+        source: A DataSourceEntry with url, station, zone, region, etc.
+
+    Returns:
+        Summary string, or error message if fetch fails.
+    """
+    import json
+    from urllib.error import URLError
+    from urllib.request import Request, urlopen
+
+    try:
+        url = source.url
+        if not url:
+            return f"{source.name}: no URL configured"
+
+        # Build source-specific URL
+        if source.command == "weather" and source.station:
+            url = f"{url}/stations/{source.station}/observations/latest"
+        elif source.command == "tsunami":
+            pass  # Use the base URL directly (Atom feed)
+        elif source.command == "volcano":
+            pass  # Use the base URL directly
+
+        req = Request(url, headers={"User-Agent": "MeshForge/0.5", "Accept": "application/geo+json,application/json,application/xml"})
+        with urlopen(req, timeout=10) as resp:
+            data = resp.read().decode("utf-8", errors="replace")
+
+        # Parse based on source type
+        if source.command == "weather":
+            return _parse_weather_response(data, source)
+        elif source.command == "tsunami":
+            return _parse_tsunami_response(data, source)
+        elif source.command == "volcano":
+            return _parse_volcano_response(data, source)
+        else:
+            # Generic: return first 200 chars
+            return data[:200]
+
+    except (URLError, OSError, ValueError) as e:
+        logger.warning("Data source fetch failed (%s): %s", source.name, e)
+        return f"{source.name}: fetch failed"
+
+
+def _parse_weather_response(data: str, source) -> str:
+    """Parse NOAA weather API JSON response into a short summary."""
+    import json
+
+    try:
+        obs = json.loads(data)
+        props = obs.get("properties", {})
+        desc = props.get("textDescription", "N/A")
+        temp_c = props.get("temperature", {}).get("value")
+        humidity = props.get("relativeHumidity", {}).get("value")
+        wind_speed = props.get("windSpeed", {}).get("value")
+        wind_dir = props.get("windDirection", {}).get("value")
+
+        parts = [f"Wx {source.station}: {desc}"]
+        if temp_c is not None:
+            temp_f = round(temp_c * 9 / 5 + 32, 1)
+            parts.append(f"{temp_f}F/{round(temp_c, 1)}C")
+        if humidity is not None:
+            parts.append(f"RH:{round(humidity)}%")
+        if wind_speed is not None:
+            parts.append(f"Wind:{round(wind_speed)}kph")
+        return " ".join(parts)
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.warning("Weather parse error: %s", e)
+        return "Weather: parse error"
+
+
+def _parse_tsunami_response(data: str, source) -> str:
+    """Parse NOAA tsunami Atom feed into a short summary."""
+    # Simple XML parsing with stdlib — look for <title> and <updated> in entries
+    try:
+        entries = data.split("<entry>")
+        if len(entries) <= 1:
+            return "Tsunami: no active alerts"
+        # First entry after split is the most recent
+        entry = entries[1]
+        title_start = entry.find("<title>")
+        title_end = entry.find("</title>")
+        if title_start >= 0 and title_end > title_start:
+            title = entry[title_start + 7 : title_end].strip()
+            return f"Tsunami: {title[:180]}"
+        return "Tsunami: no active alerts"
+    except (IndexError, ValueError) as e:
+        logger.warning("Tsunami parse error: %s", e)
+        return "Tsunami: parse error"
+
+
+def _parse_volcano_response(data: str, source) -> str:
+    """Parse USGS volcano API response into a short summary."""
+    import json
+
+    try:
+        volcanoes = json.loads(data)
+        if isinstance(volcanoes, list) and volcanoes:
+            # Find highest alert level
+            active = [v for v in volcanoes if v.get("alertLevel") not in (None, "normal", "Normal")]
+            if active:
+                v = active[0]
+                name = v.get("volcanoName", "Unknown")
+                alert = v.get("alertLevel", "Unknown")
+                return f"Volcano: {name} alert={alert}"
+            return "Volcano: no active alerts"
+        return "Volcano: no data"
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.warning("Volcano parse error: %s", e)
+        return "Volcano: parse error"
+
+
 class MeshtasticAPI(CallbackMixin):
     """
     API layer for Meshtastic device communication.
@@ -669,6 +787,10 @@ class MeshtasticAPI(CallbackMixin):
         _message_logger.info("ch%d %s (%s): %s", message.channel, sender_name, sender_id, text)
         self._trigger_callbacks("on_message", message)
 
+        # Check for bot commands before emergency keywords
+        if self._handle_command(message):
+            return
+
         # Check for emergency keywords
         if self.config.alerts.enabled:
             text_lower = text.lower()
@@ -686,6 +808,110 @@ class MeshtasticAPI(CallbackMixin):
                     self.network.add_alert(alert)
                     self._trigger_callbacks("on_alert", alert)
                     break
+
+    # Public Meshtastic MQTT brokers — auto_respond MUST be off for these
+    _PUBLIC_BROKERS = {"mqtt.meshtastic.org"}
+
+    def _handle_command(self, message) -> bool:
+        """Check if message is a recognized command. Returns True if handled.
+
+        When a message matches a known command, it is treated as a command
+        rather than checked for emergency keywords. If auto_respond is enabled
+        AND the broker is private, the client sends a response back on the
+        same channel. Auto-respond is blocked on public brokers.
+        """
+        if not self.config.commands.enabled:
+            return False
+
+        text_stripped = message.text.strip().lower()
+        recognized = [c.lower() for c in self.config.commands.commands]
+
+        if text_stripped not in recognized:
+            return False
+
+        logger.info("Command received: %s from %s", text_stripped, message.sender_name)
+        self._trigger_callbacks("on_command", message, text_stripped)
+
+        # Auto-respond only on private brokers
+        if self.config.commands.auto_respond:
+            broker = getattr(self.config.mqtt, "broker", "")
+            if broker in self._PUBLIC_BROKERS:
+                logger.warning(
+                    "auto_respond blocked: %s is a public broker. "
+                    "Bot responses are not allowed on public MQTT.",
+                    broker,
+                )
+            else:
+                response = self._get_command_response(text_stripped)
+                if response:
+                    self.send_message(response, message.sender_id, message.channel)
+
+        return True
+
+    def _get_command_response(self, command: str) -> str:
+        """Generate response text for a recognized command.
+
+        For data-source commands (weather, tsunami, etc.), fetches live data
+        from the URL configured in [data_sources]. All sources and codes
+        are driven by mesh_client.ini — nothing is hardcoded.
+        """
+        from meshing_around_clients import __version__
+
+        if command in ("cmd", "help"):
+            cmds = ", ".join(self.config.commands.commands)
+            return f"MeshForge v{__version__} commands: {cmds}"
+        elif command == "ping":
+            return "pong"
+        elif command == "version":
+            return f"MeshForge v{__version__}"
+        elif command == "nodes":
+            count = len(self.network.nodes)
+            return f"Tracking {count} node{'s' if count != 1 else ''}"
+        elif command == "status":
+            connected = "connected" if self.is_connected else "disconnected"
+            nodes = len(self.network.nodes)
+            msgs = len(self.network.messages)
+            return f"Status: {connected} | {nodes} nodes | {msgs} msgs"
+        elif command == "info":
+            return f"MeshForge v{__version__} mesh monitor"
+        elif command == "uptime":
+            if hasattr(self, '_connect_time') and self._connect_time:
+                delta = datetime.now(timezone.utc) - self._connect_time
+                hours, rem = divmod(int(delta.total_seconds()), 3600)
+                mins, secs = divmod(rem, 60)
+                return f"Uptime: {hours}h {mins}m {secs}s"
+            return "Uptime: unknown"
+
+        # Check data sources for this command
+        sources = self.config.data_sources.get_enabled_sources()
+        if command in sources:
+            return _fetch_data_source(sources[command])
+
+        return ""
+
+    @staticmethod
+    def get_command_list(config=None) -> str:
+        """Return a formatted string of available commands for display."""
+        from meshing_around_clients import __version__
+
+        lines = [
+            f"MeshForge v{__version__} Commands:",
+            "  cmd / help  - Show this command list",
+            "  ping        - Test connectivity (pong)",
+            "  info        - Client info",
+            "  nodes       - Node count",
+            "  status      - Connection status",
+            "  version     - Version info",
+            "  uptime      - Time connected",
+        ]
+
+        # Show configured data sources
+        if config and hasattr(config, "data_sources"):
+            sources = config.data_sources.get_enabled_sources()
+            for cmd_name, src in sources.items():
+                lines.append(f"  {cmd_name:12s} - {src.name} (live data)")
+
+        return "\n".join(lines)
 
     def _handle_position(self, packet: dict) -> None:
         """Handle position update with coordinate validation."""

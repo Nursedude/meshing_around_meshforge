@@ -19,9 +19,10 @@ Works on:
 Usage:
     python3 mesh_client.py              # Auto-detect and run
     python3 mesh_client.py --tui        # Force TUI mode
-    python3 mesh_client.py --web        # Force Web mode
     python3 mesh_client.py --setup      # Run interactive setup
     python3 mesh_client.py --check      # Check dependencies only
+    python3 mesh_client.py --profile hawaii  # Apply a regional profile
+    python3 mesh_client.py --list-profiles   # List available profiles
 
 Configuration:
     Edit mesh_client.ini for all options
@@ -494,7 +495,7 @@ password = large4cats
 topic_root = msh/US
 channel = LongFast
 # Subscribe to multiple channels (comma-separated)
-# e.g. channels = LongFast,meshforge,2
+# Add your own channels here (e.g., LongFast,meshforge,MyLab)
 channels = LongFast
 
 # Your node ID for MQTT (leave empty to receive only)
@@ -522,13 +523,54 @@ alerts_enabled = true
 location_enabled = true
 telemetry_enabled = true
 
+[commands]
+# Bot command processing
+# When enabled, recognized commands (cmd, help, ping, etc.) are handled
+# instead of triggering emergency keyword alerts
+enabled = true
+
+# Auto-respond to commands received from the mesh
+# When true, the client will send command responses back to the mesh
+auto_respond = false
+
+# Recognized commands (comma-separated)
+# Messages matching these are treated as commands, not emergency keywords
+commands = cmd,help,ping,info,nodes,status,version,uptime
+
+[data_sources]
+# External data sources for command responses.
+# Each source is tied to a command keyword and fetches live data.
+# Set enabled = true and configure the URL/codes for your area.
+
+# NOAA Weather (requires station code for your area)
+# Find your station: https://www.weather.gov/
+weather_enabled = false
+weather_station =
+weather_zone =
+weather_url = https://api.weather.gov
+
+# Tsunami alerts (Pacific Tsunami Warning Center)
+tsunami_enabled = false
+tsunami_url = https://www.tsunami.gov/events/xml/PAAQAtom.xml
+tsunami_region =
+
+# USGS Volcano alerts
+volcano_enabled = false
+volcano_url = https://volcanoes.usgs.gov/vsc/api/volcanoApi/
+
+# Custom data source (user-defined)
+# custom_enabled = false
+# custom_name = MySource
+# custom_url =
+# custom_command = mysource
+
 [alerts]
 # Master alert enable
 enabled = true
 
 # Emergency keyword detection
 emergency_enabled = true
-emergency_keywords = emergency,911,112,999,sos,help,mayday
+emergency_keywords = emergency,911,112,999,sos,mayday
 
 # Alert types
 battery_alerts = true
@@ -717,6 +759,85 @@ def save_config(config: ConfigParser):
             config.write(f)
         os.chmod(CONFIG_FILE, 0o600)
     log(f"Saved config to {CONFIG_FILE}", "OK")
+
+
+# =============================================================================
+# REGIONAL PROFILES
+# =============================================================================
+
+# Profiles directory: bundled with the project
+PROFILES_DIR = Path(__file__).parent / "profiles"
+
+
+def list_profiles() -> List[Dict[str, str]]:
+    """List available regional profiles from the profiles/ directory.
+
+    Returns a list of dicts with keys: id, name, description, path.
+    """
+    profiles = []
+    if not PROFILES_DIR.is_dir():
+        return profiles
+
+    for ini_file in sorted(PROFILES_DIR.glob("*.ini")):
+        parser = ConfigParser()
+        try:
+            parser.read(ini_file)
+        except Exception:
+            continue
+
+        if parser.has_section("profile"):
+            profiles.append(
+                {
+                    "id": ini_file.stem,
+                    "name": parser.get("profile", "name", fallback=ini_file.stem),
+                    "description": parser.get("profile", "description", fallback=""),
+                    "region": parser.get("profile", "region", fallback="US"),
+                    "path": str(ini_file),
+                }
+            )
+
+    return profiles
+
+
+def load_profile(profile_id: str) -> Optional[ConfigParser]:
+    """Load a profile INI file by its ID (filename without extension).
+
+    Returns a ConfigParser with the profile values, or None if not found.
+    """
+    profile_path = PROFILES_DIR / f"{profile_id}.ini"
+    if not profile_path.is_file():
+        log(f"Profile not found: {profile_id}", "WARN")
+        return None
+
+    parser = ConfigParser()
+    try:
+        parser.read(profile_path)
+    except Exception as e:
+        log(f"Error loading profile {profile_id}: {e}", "ERROR")
+        return None
+
+    return parser
+
+
+def apply_profile(config: ConfigParser, profile: ConfigParser) -> None:
+    """Apply a profile's settings onto an existing config.
+
+    Merges profile sections into config, overwriting matching keys.
+    Skips the [profile] and [notes] metadata sections.
+    """
+    skip_sections = {"profile", "notes"}
+
+    for section in profile.sections():
+        if section in skip_sections:
+            continue
+
+        if not config.has_section(section):
+            config.add_section(section)
+
+        for key, value in profile.items(section):
+            config.set(section, key, value)
+
+    log("Profile applied to configuration", "OK")
 
 
 # =============================================================================
@@ -909,17 +1030,58 @@ def interactive_setup():
     except ImportError:
         pass
 
+    # Regional profile selection
+    profiles = list_profiles()
+    if profiles:
+        profile_items = [
+            (p["id"], f"{p['name']} - {p['description']}")
+            for p in profiles
+        ]
+        profile_items.append(("skip", "Skip - configure manually"))
+
+        profile_choice = menu("Select Your Region", profile_items, default="skip")
+
+        if profile_choice and profile_choice != "skip":
+            profile = load_profile(profile_choice)
+            if profile:
+                apply_profile(config, profile)
+                # Show what was applied
+                profile_name = profile.get("profile", "name", fallback=profile_choice)
+                rec_hw = profile.get("profile", "recommended_hardware", fallback="")
+                topic = profile.get("mqtt", "topic_root", fallback="msh/US")
+                channels = profile.get("mqtt", "channels", fallback="LongFast")
+                msgbox(
+                    f"Profile: {profile_name}\n"
+                    f"Topic root: {topic}\n"
+                    f"Channels: {channels}\n"
+                    + (f"Recommended hardware: {rec_hw}\n" if rec_hw else "")
+                    + "\nYou can customize further in the next steps.",
+                    title="Profile Applied",
+                )
+
     # Hardware selection
+    # Pre-select recommended hardware from profile if available
+    rec_hw_list = []
+    if config.has_option("interface", "hardware_model"):
+        rec_hw_list = [config.get("interface", "hardware_model")]
+    elif profiles and profile_choice and profile_choice != "skip":
+        profile = load_profile(profile_choice)
+        if profile and profile.has_option("profile", "recommended_hardware"):
+            rec_hw_list = [
+                h.strip()
+                for h in profile.get("profile", "recommended_hardware").split(",")
+            ]
+
     hw_items = [
-        ("TBEAM", "LILYGO T-Beam (ESP32, GPS)", False),
-        ("TLORA", "LILYGO T-Lora (ESP32, compact)", False),
-        ("TECHO", "LILYGO T-Echo (nRF52840, e-ink)", False),
-        ("TDECK", "LILYGO T-Deck (ESP32-S3, keyboard)", False),
-        ("HELTEC", "Heltec LoRa 32 (ESP32, OLED)", False),
-        ("RAK4631", "RAK WisBlock 4631 (nRF52840)", False),
-        ("STATION_G2", "Station G2 (ESP32-S3, high-power)", False),
+        ("TBEAM", "LILYGO T-Beam (ESP32, GPS)", "TBEAM" in rec_hw_list),
+        ("TLORA", "LILYGO T-Lora (ESP32, compact)", "TLORA" in rec_hw_list),
+        ("TECHO", "LILYGO T-Echo (nRF52840, e-ink)", "TECHO" in rec_hw_list),
+        ("TDECK", "LILYGO T-Deck (ESP32-S3, keyboard)", "TDECK" in rec_hw_list),
+        ("HELTEC", "Heltec LoRa 32 (ESP32, OLED)", "HELTEC" in rec_hw_list),
+        ("RAK4631", "RAK WisBlock 4631 (nRF52840)", "RAK4631" in rec_hw_list),
+        ("STATION_G2", "Station G2 (ESP32-S3, high-power)", "STATION_G2" in rec_hw_list),
         ("none", "No radio hardware (MQTT/Demo)", False),
-        ("other", "Other / not sure", True),
+        ("other", "Other / not sure", not rec_hw_list),
     ]
 
     hw_choice = radiolist("Select Your Radio Hardware", hw_items)
@@ -987,15 +1149,20 @@ def interactive_setup():
     elif conn_type == "mqtt":
         config.set("mqtt", "enabled", "true")
 
-        broker = inputbox("MQTT broker", default="mqtt.meshtastic.org")
+        # Use profile defaults if a profile was applied, otherwise use standard defaults
+        default_broker = config.get("mqtt", "broker", fallback="mqtt.meshtastic.org")
+        default_topic = config.get("mqtt", "topic_root", fallback="msh/US")
+        default_channels = config.get("mqtt", "channels", fallback="LongFast,meshforge")
+
+        broker = inputbox("MQTT broker", default=default_broker)
         if broker:
             config.set("mqtt", "broker", broker)
 
-        topic = inputbox("MQTT topic root", default="msh/US")
+        topic = inputbox("MQTT topic root", default=default_topic)
         if topic:
             config.set("mqtt", "topic_root", topic)
 
-        channels = inputbox("MQTT channels (comma-separated)", default="LongFast")
+        channels = inputbox("MQTT channels (comma-separated)", default=default_channels)
         if channels:
             config.set("mqtt", "channels", channels)
             first_channel = channels.split(",")[0].strip()
@@ -1460,6 +1627,7 @@ def launcher_menu(config: ConfigParser) -> bool:
         ("mqtt", "MQTT Monitor"),
         ("mqtt-local", "MQTT Local Broker (no auth)"),
         ("demo", "Demo Mode"),
+        ("profile", "Switch Regional Profile"),
         ("ini", "Edit mesh_client.ini"),
         ("logs", "Logs"),
         ("setup", "Setup Wizard"),
@@ -1541,6 +1709,31 @@ def launcher_menu(config: ConfigParser) -> bool:
         elif choice == "demo":
             config.set("advanced", "demo_mode", "true")
             config.set("features", "mode", "tui")
+        elif choice == "profile":
+            from meshing_around_clients.setup.whiptail import menu as profile_menu, msgbox as profile_msgbox
+
+            profiles = list_profiles()
+            if not profiles:
+                profile_msgbox("No profiles found in profiles/ directory.", title="Profiles")
+            else:
+                profile_items = [
+                    (p["id"], f"{p['name']} - {p['description']}")
+                    for p in profiles
+                ]
+                pick = profile_menu("Select Regional Profile", profile_items)
+                if pick:
+                    profile = load_profile(pick)
+                    if profile:
+                        apply_profile(config, profile)
+                        save_config(config)
+                        pname = profile.get("profile", "name", fallback=pick)
+                        profile_msgbox(
+                            f"Profile '{pname}' applied and saved.\n"
+                            f"Topic: {config.get('mqtt', 'topic_root', fallback='msh/US')}\n"
+                            f"Channels: {config.get('mqtt', 'channels', fallback='LongFast')}",
+                            title="Profile Applied",
+                        )
+            continue
         elif choice == "ini":
             editor = _find_editor()
             if not editor:
@@ -1760,6 +1953,8 @@ Examples:
   python3 mesh_client.py --setup      # Interactive setup
   python3 mesh_client.py --demo       # Demo mode (no hardware)
   python3 mesh_client.py --check      # Check dependencies only
+  python3 mesh_client.py --profile hawaii     # Apply regional profile
+  python3 mesh_client.py --list-profiles      # List available profiles
   python3 mesh_client.py --import-config /path/to/config.ini  # Import upstream config
         """,
     )
@@ -1772,6 +1967,8 @@ Examples:
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
     parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
+    parser.add_argument("--profile", metavar="NAME", help="Apply a regional profile (e.g., hawaii, europe, local_broker)")
+    parser.add_argument("--list-profiles", action="store_true", help="List available regional profiles")
     parser.add_argument("--check-config", action="store_true", help="Validate config file and exit")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
@@ -1792,6 +1989,31 @@ Examples:
     # Interactive setup
     if args.setup:
         interactive_setup()
+        sys.exit(0)
+
+    # List available profiles
+    if args.list_profiles:
+        profiles = list_profiles()
+        if not profiles:
+            log("No profiles found in profiles/ directory", "WARN")
+        else:
+            log(f"Available profiles ({len(profiles)}):", "INFO")
+            for p in profiles:
+                print(f"  {p['id']:20s} {p['name']} - {p['description']}")
+        sys.exit(0)
+
+    # Apply a profile
+    if args.profile:
+        config = load_config()
+        profile = load_profile(args.profile)
+        if profile:
+            apply_profile(config, profile)
+            save_config(config)
+            profile_name = profile.get("profile", "name", fallback=args.profile)
+            log(f"Profile '{profile_name}' applied to {CONFIG_FILE}", "OK")
+        else:
+            log(f"Profile '{args.profile}' not found. Use --list-profiles to see options.", "ERROR")
+            sys.exit(1)
         sys.exit(0)
 
     # Import upstream config
