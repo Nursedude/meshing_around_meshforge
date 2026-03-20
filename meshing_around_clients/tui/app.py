@@ -2123,6 +2123,15 @@ class MeshingAroundTUI:
                     time.sleep(1)
                     return
                 dest = Prompt.ask("Destination (^all for broadcast)", default="^all")
+                if dest != "^all":
+                    try:
+                        int(dest.lstrip("!"), 16) if dest.startswith("!") else int(dest)
+                    except ValueError:
+                        self.console.print(
+                            "[red]Invalid destination: use ^all, a node number, or !hex_id[/red]"
+                        )
+                        time.sleep(1)
+                        return
 
                 if self.api.send_message(text, dest, channel):
                     self.console.print("[green]Message sent![/green]")

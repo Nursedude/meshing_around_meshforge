@@ -1014,8 +1014,12 @@ class MeshtasticAPI(CallbackMixin):
             if destination == "^all":
                 self.interface.sendText(text, channelIndex=channel)
             else:
-                # Parse destination node number
-                dest_num = int(destination.lstrip("!"), 16) if destination.startswith("!") else int(destination)
+                # Parse destination node number (hex with ! prefix, or decimal)
+                try:
+                    dest_num = int(destination.lstrip("!"), 16) if destination.startswith("!") else int(destination)
+                except ValueError:
+                    logger.warning("Invalid destination '%s': must be ^all, a node number, or !hex_id", destination)
+                    return False
                 self.interface.sendText(text, destinationId=dest_num, channelIndex=channel)
 
             # Log outgoing message

@@ -1348,6 +1348,14 @@ class MQTTMeshtasticClient(CallbackMixin):
             logger.warning("Message too long (%d/%d bytes), rejecting", msg_bytes, MAX_MESSAGE_BYTES)
             return False
 
+        # Validate destination
+        if destination != "^all":
+            try:
+                int(destination.lstrip("!"), 16) if destination.startswith("!") else int(destination)
+            except ValueError:
+                logger.warning("Invalid destination '%s': must be ^all, a node number, or !hex_id", destination)
+                return False
+
         try:
             # Build JSON message
             message = {
