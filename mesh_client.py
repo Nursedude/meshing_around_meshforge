@@ -106,7 +106,7 @@ def log(msg: str, level: str = "INFO"):
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     log_msg = f"[{timestamp}] [{level}] {msg}"
     try:
-        with open(LOG_FILE, "a") as f:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(log_msg + "\n")
     except OSError:
         pass
@@ -752,7 +752,7 @@ def upgrade_config(config: ConfigParser) -> bool:
         log(f"Config upgraded: {added} new setting(s) added", "OK")
         return True
 
-    log("Config is already up to date — no new settings to add", "OK")
+    log("Config is already up to date - no new settings to add", "OK")
     return False
 
 
