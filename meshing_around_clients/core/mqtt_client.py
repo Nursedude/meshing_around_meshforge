@@ -130,6 +130,8 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         # Callbacks and alert cooldowns (from CallbackMixin)
         self._init_callbacks()
+        # Wire INI cooldown_period to runtime (default 300s)
+        self._alert_cooldown_seconds = config.alerts.cooldown_period
 
         # Connection health tracking
         self._last_message_time: Optional[datetime] = None
@@ -258,6 +260,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                 )
                 self.network.add_alert(alert)
                 self._trigger_callbacks("on_alert", alert)
+                self._dispatch_alert_actions(alert)
 
     def _extract_position(self, pos_data: dict) -> Optional["Position"]:
         """Extract and validate a Position from a dict with latitude/latitudeI keys."""
@@ -941,6 +944,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                     )
                     self.network.add_alert(alert)
                     self._trigger_callbacks("on_alert", alert)
+                    self._dispatch_alert_actions(alert)
             elif ch_util >= CHUTIL_WARNING_THRESHOLD:
                 if not self._is_alert_cooled_down(sender_id, "congestion_warning"):
                     alert = Alert(
@@ -954,6 +958,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                     )
                     self.network.add_alert(alert)
                     self._trigger_callbacks("on_alert", alert)
+                    self._dispatch_alert_actions(alert)
 
     def _handle_nodeinfo_from_json(self, data: dict, sender_id: str):
         """Handle node info from JSON."""
@@ -1332,6 +1337,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                 )
                 self.network.add_alert(alert)
                 self._trigger_callbacks("on_alert", alert)
+                self._dispatch_alert_actions(alert)
                 break
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:

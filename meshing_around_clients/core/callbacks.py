@@ -26,6 +26,7 @@ _CALLBACK_EVENTS = (
     "on_alert",
     "on_position",
     "on_telemetry",
+    "on_command",
 )
 _DEFAULT_COOLDOWN_SECONDS = 300
 _MAX_COOLDOWN_ENTRIES = 1000
@@ -201,6 +202,53 @@ class CallbackMixin:
                 cb(*args, **kwargs)
             except (TypeError, ValueError, AttributeError) as e:
                 logger.warning("Callback error for %s (%s): %s", event, type(e).__name__, e)
+
+    def _dispatch_alert_actions(self, alert: Any) -> None:
+        """Run configured alert actions: logging, sound, file output.
+
+        Called after ``network.add_alert()`` and ``_trigger_callbacks("on_alert", ...)``.
+        Requires ``self.config`` with an ``alerts`` attribute (AlertConfig).
+        """
+        config = getattr(self, "config", None)
+        if config is None:
+            return
+        alerts_cfg = getattr(config, "alerts", None)
+        if alerts_cfg is None:
+            return
+
+        # Log to Python logger so it appears in the TUI Log/Diagnostics screen
+        logger.warning(
+            "ALERT [%s] sev=%d: %s -- %s",
+            alert.alert_type.value if hasattr(alert.alert_type, "value") else alert.alert_type,
+            alert.severity,
+            alert.title,
+            alert.message,
+        )
+
+        # Play sound if configured
+        if getattr(alerts_cfg, "play_sound", False):
+            sound_file = getattr(alerts_cfg, "sound_file", "")
+            if sound_file:
+                play_alert_sound(sound_file)
+
+        # Write to alert log file if configured
+        if getattr(alerts_cfg, "log_to_file", False):
+            log_file = getattr(alerts_cfg, "log_file", "")
+            if log_file:
+                self._log_alert_to_file(alert, log_file)
+
+    def _log_alert_to_file(self, alert: Any, log_file: str) -> None:
+        """Append a single alert entry to the configured log file."""
+        try:
+            log_path = os.path.join(os.getcwd(), log_file)
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            ts = alert.timestamp.isoformat() if alert.timestamp else datetime.now(timezone.utc).isoformat()
+            alert_type = alert.alert_type.value if hasattr(alert.alert_type, "value") else str(alert.alert_type)
+            line = f"{ts} | {alert_type} | sev={alert.severity} | {alert.title} | {alert.message}\n"
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except OSError as e:
+            logger.error("Failed to write alert log to %s: %s", log_file, e)
 
     def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
         """Check if alert should be suppressed (still in cooldown).

@@ -219,6 +219,7 @@ class DashboardScreen(Screen):
         nodes = safe_panel_render(self._create_nodes_panel, "nodes")
         messages = safe_panel_render(self._create_messages_panel, "messages")
         alerts = safe_panel_render(self._create_alerts_panel, "alerts")
+        commands = safe_panel_render(self._create_commands_panel, "commands")
 
         # Combine into layout — show connect hint when disconnected
         if not self.app.api.is_connected:
@@ -233,7 +234,11 @@ class DashboardScreen(Screen):
         else:
             layout.split_column(Layout(stats, name="stats", size=5), Layout(name="main"))
         layout["main"].split_row(Layout(name="left"), Layout(name="right", ratio=2))
-        layout["left"].split_column(Layout(nodes, name="nodes"), Layout(alerts, name="alerts"))
+        layout["left"].split_column(
+            Layout(nodes, name="nodes"),
+            Layout(alerts, name="alerts"),
+            Layout(commands, name="commands", size=8),
+        )
         layout["right"].update(messages)
 
         return Panel(
@@ -411,6 +416,22 @@ class DashboardScreen(Screen):
             content.append(Text("No alerts", style="dim green"))
 
         return Panel(Group(*content), title="[bold]Alerts[/bold]", border_style="red")
+
+    def _create_commands_panel(self) -> Panel:
+        """Create the recent commands panel showing bot command activity."""
+        with self.app._command_lock:
+            entries = list(self.app._recent_commands)
+
+        content = []
+        for entry in reversed(entries[-5:]):
+            line = Text()
+            line.append(entry, style="dim")
+            content.append(line)
+
+        if not content:
+            content.append(Text("No commands received", style="dim"))
+
+        return Panel(Group(*content), title="[bold]Commands[/bold]", border_style="green")
 
 
 class NodesScreen(Screen):
@@ -1347,6 +1368,16 @@ class MeshingAroundTUI:
         self._unread_messages = 0  # Incoming messages while not on messages screen
         self._unread_lock = threading.Lock()
 
+        # Alert flash banner — shows briefly when a new alert fires
+        self._alert_flash_text: str = ""
+        self._alert_flash_time: float = 0.0
+        self._alert_flash_lock = threading.Lock()
+        _ALERT_FLASH_DURATION = 10  # seconds
+
+        # Command activity log (last N commands seen)
+        self._recent_commands: list = []
+        self._command_lock = threading.Lock()
+
         # Space weather (RF propagation) — cached, fetched in background
         self._space_weather: Optional[Dict[str, Any]] = None
         self._space_weather_lock = threading.Lock()
@@ -1375,16 +1406,43 @@ class MeshingAroundTUI:
 
     def _register_dirty_callbacks(self) -> None:
         """Register API callbacks that trigger display refresh on data changes."""
-        for event in ("on_message", "on_node_update", "on_alert", "on_connect", "on_disconnect", "on_telemetry"):
+        for event in ("on_message", "on_node_update", "on_alert", "on_connect", "on_disconnect", "on_telemetry", "on_command"):
             self.api.register_callback(event, self._mark_dirty)
         # Track unread incoming messages when not viewing messages screen
         self.api.register_callback("on_message", self._on_message_received)
+        # Alert flash banner
+        self.api.register_callback("on_alert", self._on_alert_received)
+        # Command activity tracking
+        self.api.register_callback("on_command", self._on_command_received)
 
     def _on_message_received(self, *args, **kwargs) -> None:
         """Increment unread counter for incoming messages when not on messages screen."""
         if self.current_screen != "messages":
             with self._unread_lock:
                 self._unread_messages += 1
+
+    def _on_alert_received(self, alert, *args, **kwargs) -> None:
+        """Set the alert flash banner when a new alert fires."""
+        title = getattr(alert, "title", "Alert")
+        message = getattr(alert, "message", "")
+        severity = getattr(alert, "severity", 1)
+        flash = f"sev={severity}: {title}"
+        if message:
+            flash += f" -- {message[:60]}"
+        with self._alert_flash_lock:
+            self._alert_flash_text = flash
+            self._alert_flash_time = time.monotonic()
+
+    def _on_command_received(self, message, command_text, *args, **kwargs) -> None:
+        """Track command activity for the Dashboard."""
+        sender = getattr(message, "sender_name", "?") or "?"
+        ts = datetime.now(timezone.utc).strftime("%H:%M")
+        entry = f"{ts} {command_text} from {sender}"
+        with self._command_lock:
+            self._recent_commands.append(entry)
+            # Keep last 5 commands
+            if len(self._recent_commands) > 5:
+                self._recent_commands = self._recent_commands[-5:]
 
     # ------------------------------------------------------------------
     # Space weather (RF propagation) — NOAA SWPC public API
@@ -1519,6 +1577,14 @@ class MeshingAroundTUI:
         if unread > 0:
             title.append(f"  {unread} new", style="green bold")
 
+        # Unread alert badge — visible on all screens
+        try:
+            unread_alerts = len(self.api.network.unread_alerts)
+            if unread_alerts > 0:
+                title.append(f"  [!] {unread_alerts} alert{'s' if unread_alerts != 1 else ''}", style="red bold")
+        except Exception:
+            pass
+
         # Show queue metrics when relevant (>50% full or drops occurred)
         q_size = health.get("queue_size")
         q_max = health.get("queue_maxsize")
@@ -1573,15 +1639,36 @@ class MeshingAroundTUI:
 
         return Panel(Align.center(shortcuts), box=box.SIMPLE, border_style="dim")
 
+    def _get_alert_flash(self) -> Optional[Panel]:
+        """Return an alert flash banner if one is active, else None."""
+        with self._alert_flash_lock:
+            text = self._alert_flash_text
+            flash_time = self._alert_flash_time
+        if not text:
+            return None
+        # Auto-expire after 10 seconds
+        if time.monotonic() - flash_time > 10:
+            with self._alert_flash_lock:
+                self._alert_flash_text = ""
+            return None
+        flash = Text()
+        flash.append(" ALERT ", style="bold white on red")
+        flash.append(f" {text}", style="bold yellow")
+        return Panel(Align.center(flash), box=box.HEAVY, border_style="red", padding=(0, 1))
+
     def _render(self) -> Layout:
         """Render the full application layout."""
         layout = Layout()
 
-        layout.split_column(
-            Layout(self._get_header(), name="header", size=3),
-            Layout(name="body"),
-            Layout(self._get_footer(), name="footer", size=3),
-        )
+        # Check for active alert flash banner
+        flash_panel = self._get_alert_flash()
+
+        parts = [Layout(self._get_header(), name="header", size=3)]
+        if flash_panel is not None:
+            parts.append(Layout(flash_panel, name="flash", size=3))
+        parts.append(Layout(name="body"))
+        parts.append(Layout(self._get_footer(), name="footer", size=3))
+        layout.split_column(*parts)
 
         # Render current screen with connection-safety guard
         screen = self.screens.get(self.current_screen)

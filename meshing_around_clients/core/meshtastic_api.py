@@ -226,6 +226,8 @@ class MeshtasticAPI(CallbackMixin):
         self._message_queue: queue.Queue = queue.Queue(maxsize=5000)
         self._messages_dropped = 0
         self._init_callbacks()
+        # Wire INI cooldown_period to runtime (default 300s)
+        self._alert_cooldown_seconds = config.alerts.cooldown_period
         self._running = threading.Event()
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -807,6 +809,7 @@ class MeshtasticAPI(CallbackMixin):
                     )
                     self.network.add_alert(alert)
                     self._trigger_callbacks("on_alert", alert)
+                    self._dispatch_alert_actions(alert)
                     break
 
     # Public Meshtastic MQTT brokers — auto_respond MUST be off for these
@@ -966,6 +969,7 @@ class MeshtasticAPI(CallbackMixin):
                     )
                     self.network.add_alert(alert)
                     self._trigger_callbacks("on_alert", alert)
+                    self._dispatch_alert_actions(alert)
 
     def _handle_nodeinfo(self, packet: dict) -> None:
         """Handle node info update."""
@@ -999,6 +1003,7 @@ class MeshtasticAPI(CallbackMixin):
             )
             self.network.add_alert(alert)
             self._trigger_callbacks("on_alert", alert)
+            self._dispatch_alert_actions(alert)
 
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
         """Send a text message with byte-length validation."""
@@ -1273,6 +1278,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
                 )
                 self.network.add_alert(alert)
                 self._trigger_callbacks("on_alert", alert)
+                self._dispatch_alert_actions(alert)
                 return
 
         node = random.choice(nodes)

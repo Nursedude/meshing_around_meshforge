@@ -79,7 +79,10 @@ class AlertConfig:
     )
     alert_channel: int = 2
     play_sound: bool = False
+    sound_file: str = ""
     cooldown_period: int = 300
+    log_to_file: bool = False
+    log_file: str = ""
 
 
 @dataclass
@@ -411,7 +414,10 @@ class Config:
                     self.alerts.emergency_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
                 self.alerts.alert_channel = self._parser.getint(alerts_section, "alert_channel", fallback=2)
                 self.alerts.play_sound = self._parser.getboolean(alerts_section, "play_sound", fallback=False)
+                self.alerts.sound_file = self._parser.get(alerts_section, "sound_file", fallback="")
                 self.alerts.cooldown_period = self._parser.getint(alerts_section, "cooldown_period", fallback=300)
+                self.alerts.log_to_file = self._parser.getboolean(alerts_section, "log_to_file", fallback=False)
+                self.alerts.log_file = self._parser.get(alerts_section, "log_file", fallback="")
 
             # Commands
             if self._parser.has_section("commands"):
@@ -613,7 +619,10 @@ class Config:
             self._parser.set(_alert_sec, "emergency_keywords", ",".join(self.alerts.emergency_keywords))
             self._parser.set(_alert_sec, "alert_channel", str(self.alerts.alert_channel))
             self._parser.set(_alert_sec, "play_sound", str(self.alerts.play_sound))
+            self._parser.set(_alert_sec, "sound_file", self.alerts.sound_file)
             self._parser.set(_alert_sec, "cooldown_period", str(self.alerts.cooldown_period))
+            self._parser.set(_alert_sec, "log_to_file", str(self.alerts.log_to_file))
+            self._parser.set(_alert_sec, "log_file", self.alerts.log_file)
 
             # Commands
             if not self._parser.has_section("commands"):
@@ -731,7 +740,10 @@ class Config:
                 "emergency_keywords": self.alerts.emergency_keywords,
                 "alert_channel": self.alerts.alert_channel,
                 "play_sound": self.alerts.play_sound,
+                "sound_file": self.alerts.sound_file,
                 "cooldown_period": self.alerts.cooldown_period,
+                "log_to_file": self.alerts.log_to_file,
+                "log_file": self.alerts.log_file,
             },
             "tui": {
                 "refresh_rate": self.tui.refresh_rate,
