@@ -554,9 +554,13 @@ tsunami_enabled = false
 tsunami_url = https://www.tsunami.gov/events/xml/PAAQAtom.xml
 tsunami_region =
 
-# USGS Volcano alerts
+# USGS Volcano alerts (CAP elevated alerts feed)
 volcano_enabled = false
-volcano_url = https://volcanoes.usgs.gov/vsc/api/volcanoApi/
+volcano_url = https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated
+# Latitude/longitude for proximity filtering (shows alerts within ~10 degrees)
+# Leave at 0.0 to show all elevated alerts worldwide
+volcano_lat = 0.0
+volcano_lon = 0.0
 
 # Custom data source (user-defined)
 # custom_enabled = false
@@ -783,6 +787,14 @@ def load_config() -> ConfigParser:
 
 def save_config(config: ConfigParser):
     """Save configuration to file with restricted permissions (atomic write)."""
+    # Backup existing config before overwriting
+    if CONFIG_FILE.exists():
+        bak_path = CONFIG_FILE.with_suffix(".ini.bak")
+        try:
+            import shutil
+            shutil.copy2(str(CONFIG_FILE), str(bak_path))
+        except OSError as e:
+            log(f"Warning: could not create config backup: {e}", "WARN")
     tmp_path = str(CONFIG_FILE) + ".tmp"
     try:
         fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

@@ -119,6 +119,8 @@ class DataSourceEntry:
     zone: str = ""  # Zone code (e.g., NOAA weather zone)
     region: str = ""  # Region identifier
     api_key: str = ""  # Optional API key
+    lat: float = 0.0  # Latitude for proximity filtering
+    lon: float = 0.0  # Longitude for proximity filtering
 
 
 @dataclass
@@ -140,7 +142,9 @@ class DataSourceConfig:
     tsunami_region: str = ""
 
     volcano_enabled: bool = False
-    volcano_url: str = "https://volcanoes.usgs.gov/vsc/api/volcanoApi/"
+    volcano_url: str = "https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated"
+    volcano_lat: float = 0.0
+    volcano_lon: float = 0.0
 
     def get_enabled_sources(self) -> Dict[str, "DataSourceEntry"]:
         """Return a dict of command_name -> DataSourceEntry for enabled sources."""
@@ -168,6 +172,8 @@ class DataSourceConfig:
                 enabled=True,
                 url=self.volcano_url,
                 command="volcano",
+                lat=self.volcano_lat,
+                lon=self.volcano_lon,
             )
         return sources
 
@@ -450,6 +456,8 @@ class Config:
                 ds.tsunami_region = self._parser.get("data_sources", "tsunami_region", fallback="")
                 ds.volcano_enabled = self._parser.getboolean("data_sources", "volcano_enabled", fallback=False)
                 ds.volcano_url = self._parser.get("data_sources", "volcano_url", fallback=ds.volcano_url)
+                ds.volcano_lat = self._parser.getfloat("data_sources", "volcano_lat", fallback=0.0)
+                ds.volcano_lon = self._parser.getfloat("data_sources", "volcano_lon", fallback=0.0)
 
             # Network
             if self._parser.has_section("network"):
@@ -672,6 +680,8 @@ class Config:
             self._parser.set("data_sources", "tsunami_region", ds.tsunami_region)
             self._parser.set("data_sources", "volcano_enabled", str(ds.volcano_enabled))
             self._parser.set("data_sources", "volcano_url", ds.volcano_url)
+            self._parser.set("data_sources", "volcano_lat", str(ds.volcano_lat))
+            self._parser.set("data_sources", "volcano_lon", str(ds.volcano_lon))
 
             # TUI
             if not self._parser.has_section("tui"):
@@ -813,6 +823,72 @@ class Config:
             if path.exists():
                 return path
         return None
+
+    def read_upstream_commands(self) -> Dict[str, bool]:
+        """Read upstream meshing-around config to discover enabled bot commands.
+
+        Returns a dict of command_display_name -> enabled status.
+        Read-only — never modifies the upstream config.
+        """
+        upstream_path = self.find_upstream_config()
+        if not upstream_path or not upstream_path.exists():
+            return {}
+
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(str(upstream_path))
+        except configparser.Error:
+            return {}
+
+        features: Dict[str, bool] = {}
+
+        # [general] section feature flags → display names
+        if parser.has_section("general"):
+            general_map = {
+                "dadjokes": "joke",
+                "spaceweather": "solar",
+                "rssenable": "rss",
+                "wikipedia": "wiki",
+                "ollama": "llm",
+                "whoami": "whoami",
+                "storeforward": "store-fwd",
+                "enableecho": "echo",
+            }
+            for key, cmd in general_map.items():
+                if parser.has_option("general", key):
+                    features[cmd] = parser.getboolean("general", key, fallback=False)
+
+        # [location] section
+        if parser.has_section("location"):
+            features["location"] = parser.getboolean("location", "enabled", fallback=False)
+            if parser.getboolean("location", "ipawsalertenabled", fallback=False):
+                features["iPAWS"] = True
+            if parser.getboolean("location", "volcanoalertbroadcastenabled", fallback=False):
+                features["valert"] = True
+
+        # [bbs] section
+        if parser.has_section("bbs"):
+            features["bbs"] = parser.getboolean("bbs", "enabled", fallback=False)
+
+        # [sentry] section
+        if parser.has_section("sentry"):
+            features["sentry"] = parser.getboolean("sentry", "sentryenabled", fallback=False)
+
+        # [emergencyHandler] section
+        if parser.has_section("emergencyHandler"):
+            features["emergency"] = parser.getboolean("emergencyHandler", "enabled", fallback=False)
+
+        # [scheduler] section
+        if parser.has_section("scheduler"):
+            features["scheduler"] = parser.getboolean("scheduler", "enabled", fallback=False)
+
+        # [radioMon] section
+        if parser.has_section("radioMon"):
+            features["radioMon"] = parser.getboolean("radioMon", "enabled", fallback=False)
+            if parser.getboolean("radioMon", "dxspotter_enabled", fallback=False):
+                features["dxspotter"] = True
+
+        return features
 
     def _validate_mqtt(self, issues: List[str]) -> None:
         """Validate MQTT configuration, appending any issues found."""

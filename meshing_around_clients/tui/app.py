@@ -315,6 +315,34 @@ class DashboardScreen(Screen):
             f"{len(network.unread_alerts)} unread",
         )
 
+        # Show MQTT topic and channel info when in MQTT mode
+        if conn.interface_type == "mqtt" and hasattr(self.app, "config"):
+            mqtt_cfg = self.app.config.mqtt
+            topic = mqtt_cfg.topic_root or "-"
+            ch_info = mqtt_cfg.channels if mqtt_cfg.channels else str(mqtt_cfg.channel)
+            stats_table.add_row("Topic", topic, "Channels", ch_info)
+
+            # Show MQTT message stats if available
+            if hasattr(self.app.api, "stats"):
+                mqtt_stats = self.app.api.stats
+                rx = mqtt_stats.get("messages_received", 0)
+                rej = mqtt_stats.get("messages_rejected", 0)
+                recon = mqtt_stats.get("reconnections", 0)
+                rx_str = f"{rx}"
+                if rej:
+                    rx_str += f" ([yellow]{rej} rejected[/yellow])"
+                stats_table.add_row(
+                    "MQTT Rx", Text.from_markup(rx_str),
+                    "Reconnects", str(recon),
+                )
+
+        # Show data source status summary
+        if hasattr(self.app, "config"):
+            sources = self.app.config.data_sources.get_enabled_sources()
+            if sources:
+                src_names = ", ".join(sources.keys())
+                stats_table.add_row("Data Src", src_names, "", "")
+
         return Panel(stats_table, title="[bold]Network Status[/bold]", border_style="blue")
 
     def _create_nodes_panel(self) -> Panel:
@@ -1038,6 +1066,32 @@ class TopologyScreen(Screen):
                 uplink,
                 downlink,
             )
+
+        # If no hardware channels shown, display MQTT subscription info
+        has_rows = any(
+            ch.role and ch.role.value != "DISABLED"
+            for ch in network.channels.values()
+        )
+        if not has_rows and hasattr(self.app, "config"):
+            conn = self.app.api.connection_info
+            if conn.interface_type == "mqtt":
+                mqtt_cfg = self.app.config.mqtt
+                ch_str = mqtt_cfg.channels if mqtt_cfg.channels else str(mqtt_cfg.channel)
+                topic = mqtt_cfg.topic_root or "msh/US"
+                for i, ch_name in enumerate(ch_str.split(",")):
+                    ch_name = ch_name.strip()
+                    # Count messages observed on this channel index
+                    msg_count = sum(1 for m in network.messages if str(m.channel) == ch_name)
+                    table.add_row(
+                        ch_name,
+                        f"{topic}/{ch_name}",
+                        "[cyan]MQTT[/cyan]",
+                        "[dim]-[/dim]",
+                        str(msg_count),
+                        "-",
+                        "[green]Y[/green]",
+                        "[green]Y[/green]",
+                    )
 
         return Panel(table, title="[bold]Channels[/bold]", border_style="yellow")
 

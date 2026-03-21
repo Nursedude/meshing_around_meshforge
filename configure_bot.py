@@ -1704,6 +1704,14 @@ def load_config(config_file: str) -> configparser.ConfigParser:
 
 def save_config(config: configparser.ConfigParser, config_file: str):
     """Save configuration to file with restricted permissions (may contain passwords)."""
+    # Backup existing config before overwriting
+    config_path = Path(config_file)
+    if config_path.exists():
+        bak_path = config_path.with_suffix(".ini.bak")
+        try:
+            shutil.copy2(config_file, str(bak_path))
+        except OSError:
+            pass  # Best effort backup
     try:
         with open(config_file, "w") as f:
             config.write(f)
@@ -1987,6 +1995,14 @@ def deploy_and_start(config_file: str, meshing_path: Path):
 
     # Copy config to meshing-around directory
     dest_config = meshing_path / "config.ini"
+    # Backup existing upstream config before overwriting
+    if dest_config.exists():
+        bak = dest_config.with_suffix(".ini.bak")
+        try:
+            shutil.copy2(str(dest_config), str(bak))
+            print_info(f"Backed up existing config to {bak}")
+        except OSError as e:
+            print_warning(f"Could not backup existing config: {e}")
     try:
         shutil.copy(config_file, dest_config)
         print_success(f"Config deployed to {dest_config}")

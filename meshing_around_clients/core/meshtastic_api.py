@@ -192,21 +192,44 @@ def _parse_tsunami_response(data: str, source) -> str:
 
 
 def _parse_volcano_response(data: str, source) -> str:
-    """Parse USGS volcano API response into a short summary."""
+    """Parse USGS volcano CAP elevated API response into a short summary.
+
+    Uses the same API and field names as upstream meshing-around:
+    https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated
+    """
     import json
 
     try:
         volcanoes = json.loads(data)
-        if isinstance(volcanoes, list) and volcanoes:
-            # Find highest alert level
-            active = [v for v in volcanoes if v.get("alertLevel") not in (None, "normal", "Normal")]
-            if active:
-                v = active[0]
-                name = v.get("volcanoName", "Unknown")
-                alert = v.get("alertLevel", "Unknown")
-                return f"Volcano: {name} alert={alert}"
+        if not isinstance(volcanoes, list) or not volcanoes:
+            return "Volcano: no data"
+
+        # Filter by proximity if lat/lon configured (matches upstream ±10 degrees)
+        lat = getattr(source, "lat", 0.0)
+        lon = getattr(source, "lon", 0.0)
+        if lat != 0.0 or lon != 0.0:
+            volcanoes = [
+                v for v in volcanoes
+                if (lat - 10 <= v.get("latitude", 0) <= lat + 10
+                    and lon - 10 <= v.get("longitude", 0) <= lon + 10)
+            ]
+
+        if not volcanoes:
             return "Volcano: no active alerts"
-        return "Volcano: no data"
+
+        # Format the first matching alert
+        v = volcanoes[0]
+        name = v.get("volcano_name_appended", "Unknown")
+        alert_level = v.get("alert_level", "Unknown")
+        color_code = v.get("color_code", "")
+        synopsis = v.get("synopsis", "")
+
+        result = f"Volcano: {name} {alert_level} {color_code}"
+        if synopsis:
+            max_syn = 180 - len(result) - 3
+            if max_syn > 20:
+                result += f" - {synopsis[:max_syn]}"
+        return result[:200]
     except (json.JSONDecodeError, KeyError, TypeError) as e:
         logger.warning("Volcano parse error: %s", e)
         return "Volcano: parse error"
@@ -913,6 +936,19 @@ class MeshtasticAPI(CallbackMixin):
             sources = config.data_sources.get_enabled_sources()
             for cmd_name, src in sources.items():
                 lines.append(f"  {cmd_name:12s} - {src.name} (live data)")
+
+        # Show upstream bot commands if available (read-only)
+        if config and hasattr(config, "read_upstream_commands"):
+            try:
+                upstream_cmds = config.read_upstream_commands()
+                if upstream_cmds:
+                    lines.append("")
+                    lines.append("Bot features (from meshing-around config):")
+                    for cmd_name, enabled in sorted(upstream_cmds.items()):
+                        status = "ON" if enabled else "off"
+                        lines.append(f"  {cmd_name:12s} [{status}]")
+            except (OSError, ValueError):
+                pass  # Upstream config not readable
 
         return "\n".join(lines)
 

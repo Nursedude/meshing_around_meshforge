@@ -439,7 +439,9 @@ tsunami_enabled = true
 tsunami_url = https://www.tsunami.gov/events/xml/PAAQAtom.xml
 
 volcano_enabled = true
-volcano_url = https://volcanoes.usgs.gov/vsc/api/volcanoApi/
+volcano_url = https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated
+volcano_lat = 19.5
+volcano_lon = -155.5
 ```
 
 ### UI and Feature Settings
