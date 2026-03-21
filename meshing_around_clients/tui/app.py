@@ -79,7 +79,7 @@ from meshing_around_clients import __version__ as VERSION  # noqa: E402
 from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.config import InterfaceConfig  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
-from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
+from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES, Message, MessageType  # noqa: E402
 
 
 class PlainTextTUI:
@@ -431,7 +431,12 @@ class DashboardScreen(Screen):
         if not content:
             content.append(Text("No commands received", style="dim"))
 
-        return Panel(Group(*content), title="[bold]Commands[/bold]", border_style="green")
+        return Panel(
+            Group(*content),
+            title="[bold]Commands[/bold]",
+            subtitle="[dim][r] run command[/dim]",
+            border_style="green",
+        )
 
 
 class NodesScreen(Screen):
@@ -1194,8 +1199,8 @@ class HelpScreen(Screen):
 - **q** - Return to dashboard / Quit
 
 ## Actions
-- **s** - Send message (type 'cmd' for command list)
-- **r** - Refresh data
+- **s** - Send message (commands auto-detected)
+- **r** - Run command (local output on default channel)
 - **c** - Connect/Disconnect
 - **?** / **h** - This help
 
@@ -1632,6 +1637,8 @@ class MeshingAroundTUI:
 
         shortcuts.append("[s]", style="green bold")
         shortcuts.append("Send ", style="dim")
+        shortcuts.append("[r]", style="green bold")
+        shortcuts.append("Run Cmd ", style="dim")
         shortcuts.append("[?]", style="yellow bold")
         shortcuts.append("Help ", style="dim")
         shortcuts.append("[q]", style="red bold")
@@ -2103,6 +2110,8 @@ class MeshingAroundTUI:
                 self._running = False
         elif key == "s":
             self._send_message_prompt()
+        elif key == "r":
+            self._run_command_prompt()
         elif key == "c":
             if self.api.is_connected:
                 self.disconnect()
@@ -2159,36 +2168,78 @@ class MeshingAroundTUI:
 
             self._dirty = True
 
+    def _run_command_prompt(self) -> None:
+        """Run a bot command locally and display output on default_channel."""
+        import uuid as _uuid
+
+        default_ch = self.config.network_cfg.default_channel
+        with self._prompt_mode():
+            self.console.clear()
+            self.console.print(Panel("[bold cyan]Run Command[/bold cyan]", border_style="cyan"))
+            self.console.print(
+                f"[dim]Output appears on channel {default_ch} in Messages screen[/dim]\n"
+            )
+            self.console.print(MeshtasticAPI.get_command_list(self.config))
+            self.console.print()
+
+            try:
+                cmd = Prompt.ask("Command").strip().lower()
+                if not cmd:
+                    return
+
+                response = self.api._get_command_response(cmd)
+                if not response:
+                    self.console.print(f"[red]Unknown command: {cmd}[/red]")
+                    time.sleep(1)
+                    return
+
+                # Show output in console
+                self.console.print()
+                self.console.print(Panel(response, title=f"[green]{cmd}[/green]", border_style="green"))
+
+                # Add as a local message on default_channel so it shows in Messages
+                msg = Message(
+                    id=str(_uuid.uuid4()),
+                    sender_id=getattr(self.api.network, "my_node_id", "") or "local",
+                    sender_name=f"{self.config.bot_name} (local)",
+                    channel=default_ch,
+                    text=f"[{cmd}] {response}",
+                    message_type=MessageType.TEXT,
+                    timestamp=datetime.now(timezone.utc),
+                    is_incoming=False,
+                )
+                self.api.network.add_message(msg)
+                self._dirty = True
+
+                self.console.print(f"\n[dim]Added to ch{default_ch} messages. Press Enter...[/dim]")
+                input()
+            except KeyboardInterrupt:
+                pass
+
     def _send_message_prompt(self) -> None:
         """Prompt user to send a message.
 
-        Intercepts recognized commands (cmd, help, etc.) and displays them
-        locally instead of sending as mesh messages.
+        Intercepts recognized commands and runs them locally with output
+        on default_channel, or sends a regular message.
         """
+        default_ch = str(self.config.network_cfg.default_channel)
         with self._prompt_mode():
             self.console.clear()
             self.console.print(Panel("[bold cyan]Send Message[/bold cyan]", border_style="cyan"))
-            self.console.print("[dim]Type 'cmd' for available commands[/dim]\n")
+            self.console.print("[dim]Type 'cmd' for commands, or a message to send[/dim]\n")
 
             try:
                 text = Prompt.ask("Message")
                 if not text:
                     return
 
-                # Intercept local commands
+                # Intercept recognized commands — run locally
                 text_lower = text.strip().lower()
-                if self.config.commands.enabled and text_lower in ("cmd", "help"):
-                    self.console.print()
-                    self.console.print(
-                        Panel(
-                            MeshtasticAPI.get_command_list(self.config),
-                            title="[bold green]Available Commands[/bold green]",
-                            border_style="green",
-                        )
-                    )
-                    self.console.print("\n[dim]Press Enter to continue...[/dim]")
-                    input()
-                    return
+                if self.config.commands.enabled:
+                    recognized = [c.lower() for c in self.config.commands.commands]
+                    if text_lower in recognized:
+                        self._run_command_local(text_lower)
+                        return
 
                 msg_len = len(text.encode("utf-8"))
                 if msg_len > MAX_MESSAGE_BYTES:
@@ -2200,7 +2251,7 @@ class MeshingAroundTUI:
                     return
 
                 try:
-                    channel = int(Prompt.ask("Channel", default="0"))
+                    channel = int(Prompt.ask("Channel", default=default_ch))
                 except ValueError:
                     self.console.print("[red]Invalid channel number[/red]")
                     time.sleep(1)
@@ -2228,6 +2279,37 @@ class MeshingAroundTUI:
                 time.sleep(1)
             except KeyboardInterrupt:
                 pass
+
+    def _run_command_local(self, command: str) -> None:
+        """Execute a command locally and show output on default_channel."""
+        import uuid as _uuid
+
+        response = self.api._get_command_response(command)
+        if not response:
+            self.console.print(f"[yellow]No response for: {command}[/yellow]")
+            time.sleep(1)
+            return
+
+        default_ch = self.config.network_cfg.default_channel
+        self.console.print()
+        self.console.print(Panel(response, title=f"[green]{command}[/green]", border_style="green"))
+
+        # Add as a local message on default_channel
+        msg = Message(
+            id=str(_uuid.uuid4()),
+            sender_id=getattr(self.api.network, "my_node_id", "") or "local",
+            sender_name=f"{self.config.bot_name} (local)",
+            channel=default_ch,
+            text=f"[{command}] {response}",
+            message_type=MessageType.TEXT,
+            timestamp=datetime.now(timezone.utc),
+            is_incoming=False,
+        )
+        self.api.network.add_message(msg)
+        self._dirty = True
+
+        self.console.print(f"\n[dim]Output on ch{default_ch}. Press Enter...[/dim]")
+        input()
 
     def _add_device_prompt(self) -> None:
         """Prompt user to add a new device/interface."""

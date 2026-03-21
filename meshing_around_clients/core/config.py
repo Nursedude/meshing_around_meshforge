@@ -173,6 +173,16 @@ class DataSourceConfig:
 
 
 @dataclass
+class NetworkConfig:
+    """Network behavior configuration."""
+
+    default_channel: int = 0
+    monitored_channels: List[int] = field(default_factory=lambda: [0, 1, 2])
+    message_history: int = 500
+    max_message_length: int = 200
+
+
+@dataclass
 class TuiConfig:
     """TUI client configuration."""
 
@@ -268,6 +278,7 @@ class Config:
         self.alerts = AlertConfig()
         self.commands = CommandConfig()
         self.data_sources = DataSourceConfig()
+        self.network_cfg = NetworkConfig()
         self.tui = TuiConfig()
         self.mqtt = MQTTConfig()
         self.storage = StorageConfig()
@@ -439,6 +450,23 @@ class Config:
                 ds.tsunami_region = self._parser.get("data_sources", "tsunami_region", fallback="")
                 ds.volcano_enabled = self._parser.getboolean("data_sources", "volcano_enabled", fallback=False)
                 ds.volcano_url = self._parser.get("data_sources", "volcano_url", fallback=ds.volcano_url)
+
+            # Network
+            if self._parser.has_section("network"):
+                self.network_cfg.default_channel = self._parser.getint(
+                    "network", "default_channel", fallback=0
+                )
+                mc_str = self._parser.get("network", "monitored_channels", fallback="")
+                if mc_str:
+                    self.network_cfg.monitored_channels = [
+                        int(c.strip()) for c in mc_str.split(",") if c.strip().isdigit()
+                    ]
+                self.network_cfg.message_history = self._parser.getint(
+                    "network", "message_history", fallback=500
+                )
+                self.network_cfg.max_message_length = self._parser.getint(
+                    "network", "max_message_length", fallback=200
+                )
 
             # TUI
             if self._parser.has_section("tui"):
