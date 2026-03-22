@@ -1251,6 +1251,189 @@ class DevicesScreen(Screen):
         return False
 
 
+class ConfigScreen(Screen):
+    """Config editor for /opt/meshing-around/config.ini — view and edit all settings."""
+
+    UPSTREAM_PATH = Path("/opt/meshing-around/config.ini")
+    # Preferred section display order
+    _SECTION_ORDER = [
+        "general", "location", "interface", "interface2", "bbs", "sentry",
+        "emergencyHandler", "scheduler", "games", "radioMon", "fileMon",
+        "smtp", "messagingSettings", "repeater", "checklist", "inventory",
+        "qrz", "dataPersistence", "weatherAlert", "femaAlert", "deAlert",
+    ]
+
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
+        self._parser = None  # type: ignore
+        self._items = []  # flat list of (section, key, value) for scrolling
+        self._cursor = 0
+        self._dirty = False  # config has unsaved changes
+        self._error = ""
+        self._load()
+
+    def _load(self) -> None:
+        """Load the upstream config.ini into memory."""
+        import configparser as _cp
+        self._parser = _cp.ConfigParser()
+        self._error = ""
+        if self.UPSTREAM_PATH.exists():
+            try:
+                self._parser.read(str(self.UPSTREAM_PATH))
+            except _cp.Error as e:
+                self._error = str(e)
+        else:
+            self._error = f"Not found: {self.UPSTREAM_PATH}"
+        self._rebuild_items()
+
+    def _rebuild_items(self) -> None:
+        """Build flat list of (section, key, value) for display/scroll."""
+        if not self._parser:
+            self._items = []
+            return
+        items = []
+        # Ordered sections first, then any remaining
+        seen = set()
+        ordered = [s for s in self._SECTION_ORDER if self._parser.has_section(s)]
+        remaining = [s for s in self._parser.sections() if s not in self._SECTION_ORDER]
+        for section in ordered + remaining:
+            seen.add(section)
+            items.append((section, None, None))  # section header
+            for key, value in self._parser.items(section):
+                if key == "__name__":
+                    continue
+                items.append((section, key, value))
+        self._items = items
+
+    def render(self) -> Panel:
+        if self._error:
+            return Panel(
+                Text(self._error, style="red"),
+                title="[bold]Config Editor[/bold]",
+                border_style="yellow",
+            )
+
+        table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
+        table.add_column("Section", style="cyan", width=20)
+        table.add_column("Key", style="white", width=28)
+        table.add_column("Value", style="green")
+
+        # Determine visible window (30 rows centered on cursor)
+        window = 28
+        start = max(0, self._cursor - window // 2)
+        end = min(len(self._items), start + window)
+        if end - start < window:
+            start = max(0, end - window)
+
+        for i in range(start, end):
+            section, key, value = self._items[i]
+            is_selected = i == self._cursor
+
+            if key is None:
+                # Section header
+                sec_style = "bold cyan on dark_blue" if is_selected else "bold cyan"
+                table.add_row(f"[{sec_style}][{section}][/{sec_style}]", "", "")
+            else:
+                # Key-value pair
+                row_style = "bold white on blue" if is_selected else ""
+                val_display = value if value else "[dim](empty)[/dim]"
+                # Highlight booleans
+                if value and value.lower() in ("true", "false"):
+                    val_color = "green" if value.lower() == "true" else "red"
+                    val_display = f"[{val_color}]{value}[/{val_color}]"
+                # Truncate long values
+                if value and len(value) > 50:
+                    val_display = value[:47] + "..."
+
+                if is_selected:
+                    table.add_row(
+                        f"[dim]{section}[/dim]",
+                        f"[bold white on blue]{key}[/bold white on blue]",
+                        f"[bold on blue]{val_display}[/bold on blue]",
+                    )
+                else:
+                    table.add_row(f"[dim]{section}[/dim]", key, val_display)
+
+        save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
+        subtitle = f"[dim][j/k] scroll  [Enter] edit  [t] toggle  [w] save  [R] reload  [q] back[/dim]{save_indicator}"
+
+        return Panel(
+            table,
+            title=f"[bold]Config Editor[/bold] [dim]({self.UPSTREAM_PATH})[/dim]",
+            subtitle=subtitle,
+            border_style="yellow",
+        )
+
+    def handle_input(self, key: str) -> bool:
+        if key == "j":
+            self._cursor = min(self._cursor + 1, len(self._items) - 1)
+            return True
+        elif key == "k":
+            self._cursor = max(self._cursor - 1, 0)
+            return True
+        elif key == "t":
+            # Toggle boolean values
+            if self._cursor < len(self._items):
+                section, k, v = self._items[self._cursor]
+                if k and v and v.lower() in ("true", "false"):
+                    new_val = "False" if v.lower() == "true" else "True"
+                    self._parser.set(section, k, new_val)
+                    self._items[self._cursor] = (section, k, new_val)
+                    self._dirty = True
+            return True
+        elif key == "\n" or key == "\r":
+            # Edit value
+            if self._cursor < len(self._items):
+                section, k, v = self._items[self._cursor]
+                if k is not None:
+                    self._edit_value(section, k, v or "")
+            return True
+        elif key == "w":
+            self._save()
+            return True
+        elif key == "R":
+            self._load()
+            self._dirty = False
+            return True
+        return False
+
+    def _edit_value(self, section: str, key: str, current: str) -> None:
+        """Edit a config value using prompt mode."""
+        with self.app._prompt_mode():
+            self.console.clear()
+            self.console.print(f"[cyan][{section}] {key}[/cyan]")
+            self.console.print(f"[dim]Current: {current}[/dim]\n")
+            try:
+                new_val = Prompt.ask("New value", default=current)
+                if new_val != current:
+                    self._parser.set(section, key, new_val)
+                    self._rebuild_items()
+                    self._dirty = True
+                    self.console.print("[green]Value updated (press [w] to save)[/green]")
+                else:
+                    self.console.print("[dim]No change[/dim]")
+                time.sleep(0.5)
+            except KeyboardInterrupt:
+                pass
+
+    def _save(self) -> None:
+        """Save config back to file with backup."""
+        import shutil as _shutil
+        if not self._dirty:
+            return
+        try:
+            # Backup
+            if self.UPSTREAM_PATH.exists():
+                bak = self.UPSTREAM_PATH.with_suffix(".ini.bak")
+                _shutil.copy2(str(self.UPSTREAM_PATH), str(bak))
+            with open(self.UPSTREAM_PATH, "w") as f:
+                self._parser.write(f)
+            self.UPSTREAM_PATH.chmod(0o600)
+            self._dirty = False
+        except OSError as e:
+            self._error = f"Save failed: {e}"
+
+
 class HelpScreen(Screen):
     """Help screen showing keyboard shortcuts."""
 
@@ -1266,11 +1449,12 @@ class HelpScreen(Screen):
 - **5** - Topology view
 - **6** - Devices view
 - **7** - Log / Diagnostics
+- **8** - Config Editor (meshing-around config.ini)
 - **q** - Return to dashboard / Quit
 
 ## Actions
 - **s** - Send message (commands auto-detected)
-- **r** - Run command (local output on default channel)
+- **r** - Run command (sends to bot via mesh; local if disconnected)
 - **c** - Connect/Disconnect
 - **?** / **h** - This help
 
@@ -1314,6 +1498,13 @@ class HelpScreen(Screen):
 - **t** - Test connection to device
 - **r** - Set as bot output radio
 - **j/k** - Navigate device list
+
+## Config Editor (screen 8)
+- **j/k** - Scroll through settings
+- **t** - Toggle boolean (True/False)
+- **Enter** - Edit selected value
+- **w** - Save changes (creates .bak backup)
+- **R** - Reload from disk (discard unsaved changes)
 """
         return Panel(
             Markdown(help_text),
@@ -1431,6 +1622,7 @@ class MeshingAroundTUI:
             "topology": TopologyScreen(self),
             "devices": DevicesScreen(self),
             "log": LogScreen(self),
+            "config": ConfigScreen(self),
             "help": HelpScreen(self),
         }
         self.current_screen = "dashboard"
@@ -1694,6 +1886,7 @@ class MeshingAroundTUI:
             ("5", "Topology", "topology"),
             ("6", "Devices", "devices"),
             ("7", "Log", "log"),
+            ("8", "Config", "config"),
         ]
 
         for key, label, screen_id in nav_items:
@@ -2156,6 +2349,7 @@ class MeshingAroundTUI:
         "5": "topology",
         "6": "devices",
         "7": "log",
+        "8": "config",
         "?": "help",
         "h": "help",
     }
@@ -2239,16 +2433,23 @@ class MeshingAroundTUI:
             self._dirty = True
 
     def _run_command_prompt(self) -> None:
-        """Run a bot command locally and display output on default_channel."""
+        """Send a command to the bot via mesh, or run locally if disconnected."""
         import uuid as _uuid
 
         default_ch = self.config.network_cfg.default_channel
+        connected = self.api.is_connected
         with self._prompt_mode():
             self.console.clear()
             self.console.print(Panel("[bold cyan]Run Command[/bold cyan]", border_style="cyan"))
-            self.console.print(
-                f"[dim]Output appears on channel {default_ch} in Messages screen[/dim]\n"
-            )
+            if connected:
+                self.console.print(
+                    f"[bold green]Sends command to bot on channel {default_ch}[/bold green]\n"
+                    "[dim]Bot response will appear in Live Feed[/dim]\n"
+                )
+            else:
+                self.console.print(
+                    f"[yellow]Not connected — running locally on ch{default_ch}[/yellow]\n"
+                )
             self.console.print(MeshtasticAPI.get_command_list(self.config))
             self.console.print()
 
@@ -2257,32 +2458,22 @@ class MeshingAroundTUI:
                 if not cmd:
                     return
 
-                response = self.api._get_command_response(cmd)
-                if not response:
-                    self.console.print(f"[red]Unknown command: {cmd}[/red]")
-                    time.sleep(1)
-                    return
-
-                # Show output in console
-                self.console.print()
-                self.console.print(Panel(response, title=f"[green]{cmd}[/green]", border_style="green"))
-
-                # Add as a local message on default_channel so it shows in Messages
-                msg = Message(
-                    id=str(_uuid.uuid4()),
-                    sender_id=getattr(self.api.network, "my_node_id", "") or "local",
-                    sender_name=f"{self.config.bot_name} (local)",
-                    channel=default_ch,
-                    text=f"[{cmd}] {response}",
-                    message_type=MessageType.TEXT,
-                    timestamp=datetime.now(timezone.utc),
-                    is_incoming=False,
-                )
-                self.api.network.add_message(msg)
-                self._dirty = True
-
-                self.console.print(f"\n[dim]Added to ch{default_ch} messages. Press Enter...[/dim]")
-                input()
+                if connected:
+                    # Send command as mesh message — bot will respond
+                    if self.api.send_message(cmd, "^all", default_ch):
+                        self.console.print(
+                            f"\n[green]Sent '{cmd}' on ch{default_ch}[/green]"
+                            "\n[dim]Watch Live Feed for bot response. Press Enter...[/dim]"
+                        )
+                    else:
+                        self.console.print("[red]Failed to send. Running locally...[/red]")
+                        self._run_command_local(cmd)
+                        return
+                    self._dirty = True
+                    input()
+                else:
+                    # Fallback: run locally when not connected
+                    self._run_command_local(cmd)
             except KeyboardInterrupt:
                 pass
 
