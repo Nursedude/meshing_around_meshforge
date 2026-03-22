@@ -266,11 +266,11 @@ class Config:
         Path("/etc/meshing-around-clients/config.ini"),
     ]
 
-    # Upstream meshing-around config paths
+    # Upstream meshing-around config paths (ordered by specificity)
     UPSTREAM_CONFIG_PATHS = [
+        Path("/opt/meshing-around/config.ini"),
         get_user_home() / "meshing-around" / "config.ini",
         Path.cwd() / "config.ini",
-        Path("/opt/meshing-around/config.ini"),
     ]
 
     def __init__(self, config_path: Optional[str] = None):

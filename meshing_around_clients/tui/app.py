@@ -1252,9 +1252,14 @@ class DevicesScreen(Screen):
 
 
 class ConfigScreen(Screen):
-    """Config editor for /opt/meshing-around/config.ini — view and edit all settings."""
+    """Config editor for meshing-around config.ini — view and edit all settings."""
 
-    UPSTREAM_PATH = Path("/opt/meshing-around/config.ini")
+    # Search paths for upstream config (same as Config.UPSTREAM_CONFIG_PATHS)
+    _SEARCH_PATHS = [
+        Path.home() / "meshing-around" / "config.ini",
+        Path("/opt/meshing-around/config.ini"),
+        Path("/opt/meshing_around/config.ini"),
+    ]
     # Preferred section display order
     _SECTION_ORDER = [
         "general", "location", "interface", "interface2", "bbs", "sentry",
@@ -1266,24 +1271,40 @@ class ConfigScreen(Screen):
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self._parser = None  # type: ignore
+        self._config_path = None  # type: Optional[Path]
         self._items = []  # flat list of (section, key, value) for scrolling
         self._cursor = 0
         self._dirty = False  # config has unsaved changes
         self._error = ""
         self._load()
 
+    def _find_config(self) -> Optional[Path]:
+        """Find upstream config.ini by searching known paths."""
+        # Try the Config class search first
+        if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
+            found = self.app.config.find_upstream_config()
+            if found:
+                return found
+        # Fallback: search our own list
+        for p in self._SEARCH_PATHS:
+            if p.exists():
+                return p
+        return None
+
     def _load(self) -> None:
         """Load the upstream config.ini into memory."""
         import configparser as _cp
         self._parser = _cp.ConfigParser()
         self._error = ""
-        if self.UPSTREAM_PATH.exists():
+        self._config_path = self._find_config()
+        if self._config_path and self._config_path.exists():
             try:
-                self._parser.read(str(self.UPSTREAM_PATH))
+                self._parser.read(str(self._config_path))
             except _cp.Error as e:
                 self._error = str(e)
         else:
-            self._error = f"Not found: {self.UPSTREAM_PATH}"
+            searched = ", ".join(str(p) for p in self._SEARCH_PATHS)
+            self._error = f"config.ini not found. Searched: {searched}"
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -1359,7 +1380,7 @@ class ConfigScreen(Screen):
 
         return Panel(
             table,
-            title=f"[bold]Config Editor[/bold] [dim]({self.UPSTREAM_PATH})[/dim]",
+            title=f"[bold]Config Editor[/bold] [dim]({self._config_path})[/dim]",
             subtitle=subtitle,
             border_style="yellow",
         )
@@ -1419,16 +1440,16 @@ class ConfigScreen(Screen):
     def _save(self) -> None:
         """Save config back to file with backup."""
         import shutil as _shutil
-        if not self._dirty:
+        if not self._dirty or not self._config_path:
             return
         try:
             # Backup
-            if self.UPSTREAM_PATH.exists():
-                bak = self.UPSTREAM_PATH.with_suffix(".ini.bak")
-                _shutil.copy2(str(self.UPSTREAM_PATH), str(bak))
-            with open(self.UPSTREAM_PATH, "w") as f:
+            if self._config_path.exists():
+                bak = self._config_path.with_suffix(".ini.bak")
+                _shutil.copy2(str(self._config_path), str(bak))
+            with open(self._config_path, "w") as f:
                 self._parser.write(f)
-            self.UPSTREAM_PATH.chmod(0o600)
+            self._config_path.chmod(0o600)
             self._dirty = False
         except OSError as e:
             self._error = f"Save failed: {e}"
