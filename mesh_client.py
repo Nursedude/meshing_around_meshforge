@@ -568,6 +568,14 @@ volcano_lon = 0.0
 # custom_url =
 # custom_command = mysource
 
+[maps]
+# meshforge-maps server connection (local or remote)
+enabled = true
+host = 127.0.0.1
+port = 8808
+# Set to remote IP if maps runs on different Pi:
+# host = 192.168.1.100
+
 [alerts]
 # Master alert enable
 enabled = true

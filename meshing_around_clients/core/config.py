@@ -201,6 +201,19 @@ class TuiConfig:
 
 
 @dataclass
+class MapsConfig:
+    """meshforge-maps server connection (local or remote)."""
+
+    enabled: bool = True
+    host: str = "127.0.0.1"
+    port: int = 8808
+
+    @property
+    def base_url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
+@dataclass
 class StorageConfig:
     """Persistent storage configuration."""
 
@@ -288,6 +301,7 @@ class Config:
         self.tui = TuiConfig()
         self.mqtt = MQTTConfig()
         self.storage = StorageConfig()
+        self.maps = MapsConfig()
         self.logging = LoggingConfig()
 
         # Bot connection info
@@ -497,6 +511,12 @@ class Config:
                 self.tui.alert_sound = self._parser.getboolean("tui", "alert_sound", fallback=True)
                 self.tui.space_weather = self._parser.getboolean("tui", "space_weather", fallback=True)
 
+            # Maps (meshforge-maps server)
+            if self._parser.has_section("maps"):
+                self.maps.enabled = self._parser.getboolean("maps", "enabled", fallback=True)
+                self.maps.host = self._parser.get("maps", "host", fallback="127.0.0.1")
+                self.maps.port = self._parser.getint("maps", "port", fallback=8808)
+
             # MQTT
             if self._parser.has_section("mqtt"):
                 self.mqtt.enabled = self._parser.getboolean("mqtt", "enabled", fallback=False)
@@ -702,6 +722,13 @@ class Config:
             self._parser.set("tui", "message_history", str(self.tui.message_history))
             self._parser.set("tui", "alert_sound", str(self.tui.alert_sound))
             self._parser.set("tui", "space_weather", str(self.tui.space_weather))
+
+            # Maps
+            if not self._parser.has_section("maps"):
+                self._parser.add_section("maps")
+            self._parser.set("maps", "enabled", str(self.maps.enabled))
+            self._parser.set("maps", "host", self.maps.host)
+            self._parser.set("maps", "port", str(self.maps.port))
 
             # MQTT
             if not self._parser.has_section("mqtt"):

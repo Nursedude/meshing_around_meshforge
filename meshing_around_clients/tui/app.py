@@ -1460,6 +1460,178 @@ class ConfigScreen(Screen):
             self._error = f"Save failed: {e}"
 
 
+class MapsScreen(Screen):
+    """meshforge-maps integration — shows node health, topology, alerts, analytics."""
+
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
+        self._client = None
+        self._data = {}  # cached API responses
+        self._last_fetch = 0.0
+        self._status_msg = ""
+
+    def _get_client(self):
+        """Lazy-init maps client from config."""
+        if self._client is None and hasattr(self.app, "config"):
+            from meshing_around_clients.core.maps_client import MapsClient
+            self._client = MapsClient(self.app.config.maps.base_url)
+        return self._client
+
+    def _refresh(self, force: bool = False) -> None:
+        """Fetch data from maps API (throttled to 10s)."""
+        now = time.monotonic()
+        if not force and now - self._last_fetch < 10:
+            return
+        client = self._get_client()
+        if not client:
+            self._status_msg = "Maps not configured"
+            return
+        status = client.get_status()
+        if not status:
+            self._status_msg = f"Maps server not found at {self.app.config.maps.base_url}"
+            self._data = {}
+            return
+        self._status_msg = ""
+        self._data = {
+            "status": status,
+            "health": client.get_health_summary(),
+            "alerts": client.get_active_alerts(),
+            "analytics": client.get_analytics_summary(),
+            "topology": client.get_topology(),
+        }
+        self._last_fetch = now
+
+    def render(self) -> Panel:
+        self._refresh()
+
+        if self._status_msg:
+            content = []
+            content.append(Text(self._status_msg, style="yellow"))
+            content.append(Text(""))
+            content.append(Text("Configure in mesh_client.ini:", style="dim"))
+            content.append(Text("  [maps]", style="cyan"))
+            content.append(Text("  host = 127.0.0.1  (or remote IP)", style="dim"))
+            content.append(Text("  port = 8808", style="dim"))
+            content.append(Text(""))
+            content.append(Text("Start maps: cd /opt/meshforge-maps && python -m src.main", style="dim"))
+            return Panel(
+                Group(*content),
+                title="[bold]Maps[/bold]",
+                subtitle="[dim][r] retry  [q] back[/dim]",
+                border_style="yellow",
+            )
+
+        # Build the 4-quadrant layout
+        layout = Layout()
+        layout.split_row(Layout(name="left"), Layout(name="right"))
+        layout["left"].split_column(
+            Layout(name="health", ratio=1),
+            Layout(name="topology", ratio=1),
+        )
+        layout["right"].split_column(
+            Layout(name="alerts", ratio=1),
+            Layout(name="analytics", ratio=1),
+        )
+
+        # Status bar
+        status = self._data.get("status", {})
+        node_count = status.get("total_nodes", 0)
+        sources = status.get("sources", {})
+        active_sources = sum(1 for s in sources.values() if isinstance(s, dict) and s.get("enabled"))
+        url = self.app.config.maps.base_url
+
+        # Health quadrant
+        health = self._data.get("health", {})
+        dist = health.get("distribution", {})
+        health_content = []
+        health_content.append(Text("Node Health", style="bold green"))
+        for level in ["excellent", "good", "fair", "poor", "critical"]:
+            count = dist.get(level, 0)
+            colors = {"excellent": "green", "good": "cyan", "fair": "yellow", "poor": "red", "critical": "bold red"}
+            style = colors.get(level, "white")
+            health_content.append(Text(f"  {level:10s} {count}", style=style))
+        avg = health.get("average_score", 0)
+        if avg:
+            health_content.append(Text(f"  Average:   {avg:.0f}%", style="white bold"))
+        layout["health"].update(Panel(Group(*health_content), border_style="green"))
+
+        # Topology quadrant
+        topo = self._data.get("topology", {})
+        links = topo.get("links", [])[:8]
+        topo_content = []
+        topo_content.append(Text("Topology Links", style="bold magenta"))
+        if links:
+            for link in links:
+                src = link.get("source", "?")[-6:]
+                tgt = link.get("target", "?")[-6:]
+                snr = link.get("snr", 0)
+                snr_style = "green" if snr > 5 else "yellow" if snr > 0 else "red"
+                line = Text()
+                line.append(f"  {src} ", style="cyan")
+                line.append("- ", style="dim")
+                line.append(f"{tgt} ", style="cyan")
+                line.append(f"SNR:{snr:.1f}", style=snr_style)
+                topo_content.append(line)
+        else:
+            topo_content.append(Text("  No links", style="dim"))
+        layout["topology"].update(Panel(Group(*topo_content), border_style="magenta"))
+
+        # Alerts quadrant
+        alerts = self._data.get("alerts", {})
+        alert_list = alerts.get("alerts", []) if isinstance(alerts, dict) else []
+        alert_content = []
+        alert_content.append(Text("Active Alerts", style="bold red"))
+        if alert_list:
+            for a in alert_list[:6]:
+                rule = a.get("rule_name", "?")
+                node = a.get("node_id", "?")[-6:]
+                sev = a.get("severity", "info")
+                sev_style = {"critical": "bold red", "warning": "yellow", "info": "cyan"}.get(sev, "white")
+                alert_content.append(Text(f"  {rule}: {node}", style=sev_style))
+        else:
+            alert_content.append(Text("  No active alerts", style="dim green"))
+        layout["alerts"].update(Panel(Group(*alert_content), border_style="red"))
+
+        # Analytics quadrant
+        analytics = self._data.get("analytics", {})
+        analytics_content = []
+        analytics_content.append(Text("Analytics", style="bold blue"))
+        growth = analytics.get("growth", {})
+        if growth:
+            total = growth.get("total_tracked", 0)
+            new_24h = growth.get("new_last_24h", 0)
+            analytics_content.append(Text(f"  Tracked:  {total} nodes", style="white"))
+            analytics_content.append(Text(f"  New 24h:  {new_24h}", style="green" if new_24h else "dim"))
+        activity = analytics.get("activity", {})
+        if activity:
+            active = activity.get("active_last_hour", 0)
+            analytics_content.append(Text(f"  Active 1h: {active}", style="white"))
+        if not growth and not activity:
+            analytics_content.append(Text("  No data yet", style="dim"))
+        layout["analytics"].update(Panel(Group(*analytics_content), border_style="blue"))
+
+        status_line = f"CONNECTED | {node_count} nodes | {active_sources} sources | {url}"
+        return Panel(
+            layout,
+            title=f"[bold]Maps[/bold] [dim]({url})[/dim]",
+            subtitle=f"[dim][green]{status_line}[/green] | [o] open browser  [r] refresh  [q] back[/dim]",
+            border_style="cyan",
+        )
+
+    def handle_input(self, key: str) -> bool:
+        if key == "r":
+            self._refresh(force=True)
+            return True
+        elif key == "o":
+            import webbrowser
+            try:
+                webbrowser.open(self.app.config.maps.base_url)
+            except (OSError, ValueError):
+                pass
+            return True
+        return False
+
+
 class HelpScreen(Screen):
     """Help screen showing keyboard shortcuts."""
 
@@ -1476,6 +1648,7 @@ class HelpScreen(Screen):
 - **6** - Devices view
 - **7** - Log / Diagnostics
 - **8** - Config Editor (meshing-around config.ini)
+- **9** - Maps (meshforge-maps integration)
 - **q** - Return to dashboard / Quit
 
 ## Actions
@@ -1531,6 +1704,11 @@ class HelpScreen(Screen):
 - **Enter** - Edit selected value
 - **w** - Save changes (creates .bak backup)
 - **R** - Reload from disk (discard unsaved changes)
+
+## Maps (screen 9)
+- **o** - Open web map in browser (http://host:port)
+- **r** - Refresh data from meshforge-maps API
+- Shows: node health, topology links, active alerts, analytics
 """
         return Panel(
             Markdown(help_text),
@@ -1649,6 +1827,7 @@ class MeshingAroundTUI:
             "devices": DevicesScreen(self),
             "log": LogScreen(self),
             "config": ConfigScreen(self),
+            "maps": MapsScreen(self),
             "help": HelpScreen(self),
         }
         self.current_screen = "dashboard"
@@ -1913,6 +2092,7 @@ class MeshingAroundTUI:
             ("6", "Devices", "devices"),
             ("7", "Log", "log"),
             ("8", "Config", "config"),
+            ("9", "Maps", "maps"),
         ]
 
         for key, label, screen_id in nav_items:
@@ -2376,6 +2556,7 @@ class MeshingAroundTUI:
         "6": "devices",
         "7": "log",
         "8": "config",
+        "9": "maps",
         "?": "help",
         "h": "help",
     }
