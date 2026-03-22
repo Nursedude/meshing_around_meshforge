@@ -1,10 +1,10 @@
 # meshing_around_meshforge
 
-Companion tools for [meshing-around](https://github.com/SpudGunMan/meshing-around) - configuration wizards, TUI monitoring client, and headless deployment scripts for your Meshtastic mesh network.
+Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing-around) — TUI monitoring dashboard, 51 mesh commands, config editor, and headless deployment for Meshtastic mesh networks.
 
 > Alert layer for the [meshforge ecosystem](https://github.com/Nursedude/meshforge/blob/main/.claude/foundations/meshforge_ecosystem.md) - note: this is `meshing_around_meshforge`, a separate project from [Nursedude/meshforge](https://github.com/Nursedude/meshforge)
 
-[![Version](https://img.shields.io/badge/version-0.5.0--beta-orange.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-743-brightgreen.svg)](tests/)
@@ -91,15 +91,16 @@ graph LR
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **TUI Client** | Working | 7 screens, search, export, plain-text fallback |
+| **TUI Client** | Working | 9 screens (Dashboard, Nodes, Messages, Alerts, Topology, Devices, Log, Config Editor, Help) |
 | **Demo Mode** | Working | Simulated data for testing |
-| **Config System** | Working | INI-based configuration |
+| **Config System** | Working | INI-based configuration + TUI config editor for meshing-around |
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
 | **Alert Detection** | Working | Emergency keywords, proximity |
 | **Launcher Menu** | Working | Interactive mode selection, config editor, updater |
 | **MQTT Mode** | Partial | Connects but limited testing |
 | **Notifications** | Partial | Email framework exists, untested |
-| **Bot Commands** | Working | cmd, help, ping, info, nodes, status, version, uptime + data sources |
+| **Bot Commands** | Working | 51 commands: 15 data (via bot engine), 11 local, 25 bot relay |
+| **Config Editor** | Working | View/edit meshing-around config.ini from TUI (screen 8) |
 | **Serial Mode** | Untested | Requires hardware testing |
 | **TCP Mode** | Working | Tested with remote nodes (port 4403) |
 | **BLE Mode** | Untested | Requires Bluetooth setup |
@@ -414,7 +415,50 @@ python3 mesh_client.py --profile hawaii      # Apply Hawaii profile
 
 Profiles set defaults — add your own channels in `mesh_client.ini` after applying.
 
-### Bot Commands
+### Commands (51 total)
+
+meshing_around_meshforge provides **51 commands** matching the upstream meshing-around bot. Smart routing automatically picks the best execution path:
+
+**Data Commands** (15 — run locally via bot's Python engine, identical output):
+
+| Command | Source | Output Example |
+|---------|--------|----------------|
+| `wx` / `wxc` / `mwx` | NOAA / Open-Meteo | Full multi-day forecast with alerts |
+| `wxa` / `wxalert` | NWS | Active weather alerts for your location |
+| `ealert` | iPAWS/FEMA | Emergency alerts by FIPS code |
+| `valert` | USGS | Volcano alert level, color code, synopsis |
+| `earthquake` | USGS | Recent quakes within range, magnitude |
+| `solar` | SWPC | A/K-Index, Sunspots, X-Ray Flux, Signal Noise |
+| `hfcond` | hamqsl.com | HF band conditions day/night, QRN |
+| `moon` | ephem | MoonRise/Set, Phase with emoji, illumination %, Full/New dates |
+| `sun` | ephem | SunRise/Set, Daylight hours, Azimuth |
+| `tide` | NOAA | Tide predictions |
+| `riverflow` | NOAA | River flow data |
+| `whereami` | Nominatim | Location info from coordinates |
+
+**Network Commands** (11 — built from local mesh data):
+
+| Command | Description |
+|---------|-------------|
+| `lheard` | Last 10 heard nodes with timestamps |
+| `sitrep` | Situation report (nodes/messages/alerts) |
+| `leaderboard` | Most active nodes |
+| `nodes` / `status` / `ping` / `version` / `uptime` / `motd` | Quick status info |
+
+**Bot Commands** (25 — sent to bot via mesh when connected):
+
+| Command | Description |
+|---------|-------------|
+| `joke` | Dad jokes |
+| `wiki` | Wikipedia lookup |
+| `askai` | LLM query |
+| `bbshelp` / `bbslist` | Bulletin board |
+| `games` | Game list |
+| `readrss` / `readnews` | RSS/news feeds |
+| `dx` / `rlist` | DX cluster / repeater list |
+| `howfar` / `howtall` / `whoami` / `sysinfo` | Node info |
+| `satpass` | Satellite passes |
+| `checkin` / `checkout` | Accountability tracking |
 
 ```ini
 [commands]
@@ -422,7 +466,6 @@ enabled = true
 # NEVER enable auto_respond on public MQTT brokers (mqtt.meshtastic.org)
 # Only enable on your own private/local broker
 auto_respond = false
-commands = cmd,help,ping,info,nodes,status,version,uptime,weather,tsunami
 ```
 
 ### External Data Sources
@@ -511,7 +554,9 @@ graph LR
     M --> A[Alerts<br/>Key: 4]
     A --> T[Topology<br/>Key: 5]
     T --> DV[Devices<br/>Key: 6]
-    DV --> H[Help<br/>Key: ?]
+    DV --> L[Log<br/>Key: 7]
+    L --> CF[Config<br/>Key: 8]
+    CF --> H[Help<br/>Key: ?]
     H --> D
 
     style D fill:#4a9eff,color:#fff
@@ -520,21 +565,31 @@ graph LR
     style A fill:#e74c3c,color:#fff
     style T fill:#e67e22,color:#fff
     style DV fill:#2c3e50,color:#fff
+    style L fill:#27ae60,color:#fff
+    style CF fill:#f39c12,color:#fff
     style H fill:#f39c12,color:#fff
 ```
 
-The TUI works with or without the Rich library. When Rich is installed you get the full 7-screen interface; without it, a plain-text fallback displays connection status and recent messages.
+The TUI works with or without the Rich library. When Rich is installed you get the full 9-screen interface; without it, a plain-text fallback displays connection status and recent messages.
 
 | Key | Action |
 |-----|--------|
-| `1-6` | Switch screens (Dashboard, Nodes, Messages, Alerts, Topology, Devices) |
+| `1-8` | Switch screens (Dashboard, Nodes, Messages, Alerts, Topology, Devices, Log, Config) |
 | `/` | Search (Nodes, Messages, Alerts) |
-| `s` | Send message |
+| `s` | Send message to mesh |
+| `r` | Run command (smart routing: local, bot engine, or mesh relay) |
 | `e` / `E` | Export messages (JSON / CSV) |
-| `r` | Refresh |
 | `c` | Connect/Disconnect |
 | `?` | Help |
 | `q` | Quit |
+
+### Dashboard (Screen 1)
+
+The main dashboard is a **live message feed** showing all mesh traffic with color-coded channel labels (`ch0`, `ch1`, etc.), direction arrows, and sender names. The sidebar shows online nodes, alerts, and upstream bot feature status.
+
+### Config Editor (Screen 8)
+
+View and edit the meshing-around `config.ini` directly from the TUI. Browse all sections (`[general]`, `[location]`, `[bbs]`, `[sentry]`, `[games]`, etc.), toggle booleans with `t`, edit values with `Enter`, and save with `w` (creates `.ini.bak` backup).
 
 ## Alert System
 
@@ -621,7 +676,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py
     │   └── config_schema.py
     └── tui/
-        ├── app.py          # Rich terminal UI (7 screens + PlainTextTUI fallback)
+        ├── app.py          # Rich terminal UI (9 screens + PlainTextTUI fallback)
         └── helpers.py      # Shared formatting, safe panel rendering
 ```
 
@@ -693,10 +748,11 @@ meshing_around_meshforge is designed to work with [meshing-around](https://githu
 
 | Feature | meshing-around | meshing_around_meshforge |
 |---------|---------------|-----------|
-| Purpose | Bot server | Monitoring client |
+| Purpose | Bot autoresponder | Companion TUI client |
 | Interfaces | Up to 9 | Single |
-| Config | `config.ini` | `mesh_client.ini` |
-| Focus | Commands/games | Visualization |
+| Config | `config.ini` | `mesh_client.ini` (reads bot's `config.ini` too) |
+| Commands | 150+ (server-side) | 51 (15 local via bot engine, 25 relay via mesh, 11 network) |
+| Focus | Automated responses, BBS, games | Live monitoring, config editing, command access |
 
 ## Use with meshforge
 
