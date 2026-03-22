@@ -279,42 +279,48 @@ class DashboardScreen(Screen):
             "Messages", str(network.total_messages),
         )
 
-        # Row 2: Interface + MQTT topic/channels (or serial info)
+        # Row 2: Interface info — adapt labels to connection type
         iface_str = f"{conn.interface_type}"
         if conn.device_path:
             iface_str += f" ({conn.device_path})"
-        topic_str = ""
-        ch_str = ""
-        if conn.interface_type == "mqtt" and hasattr(self.app, "config"):
-            mqtt_cfg = self.app.config.mqtt
-            topic_str = mqtt_cfg.topic_root or "-"
-            ch_str = mqtt_cfg.channels if mqtt_cfg.channels else str(mqtt_cfg.channel)
-        stats_table.add_row(
-            "Interface", iface_str,
-            "Topic", topic_str or "[dim]-[/dim]",
-            "Channels", ch_str or "[dim]-[/dim]",
-        )
 
-        # Row 3: Health + MQTT rx stats + alerts
+        iface_type = conn.interface_type or ""
+        if iface_type == "mqtt" and hasattr(self.app, "config"):
+            mqtt_cfg = self.app.config.mqtt
+            col2_label, col2_val = "Topic", mqtt_cfg.topic_root or "--"
+            col3_label, col3_val = "Channels", mqtt_cfg.channels or str(mqtt_cfg.channel)
+        elif iface_type in ("tcp", "serial", "ble"):
+            col2_label, col2_val = "Device", "Meshtastic"
+            avg_util = network.mesh_health.get("avg_channel_utilization", 0)
+            col3_label = "Ch Util"
+            col3_val = f"{avg_util:.1f}%" if avg_util > 0 else "--"
+        else:
+            col2_label, col2_val = "", ""
+            col3_label, col3_val = "", ""
+
+        stats_table.add_row("Interface", iface_str, col2_label, col2_val, col3_label, col3_val)
+
+        # Row 3: Health + rx stats + alerts
         health = network.mesh_health
         health_status = health.get("status", "unknown")
         health_score = health.get("score", 0)
         health_style = HEALTH_STATUS_COLORS.get(health_status, "white")
 
-        rx_str = ""
+        rx_str = str(network.total_messages) if network.total_messages else "--"
         if hasattr(self.app.api, "stats"):
             mqtt_stats = self.app.api.stats
             rx = mqtt_stats.get("messages_received", 0)
             rej = mqtt_stats.get("messages_rejected", 0)
-            rx_str = str(rx)
-            if rej:
-                rx_str += f" ({rej} rej)"
+            if rx:
+                rx_str = str(rx)
+                if rej:
+                    rx_str += f" ({rej} rej)"
 
         alert_count = len(network.unread_alerts)
         alert_str = f"[red bold]{alert_count} unread[/red bold]" if alert_count else "[dim green]none[/dim green]"
         stats_table.add_row(
             "Health", Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
-            "MQTT Rx", rx_str or "[dim]-[/dim]",
+            "Rx Msgs", rx_str,
             "Alerts", Text.from_markup(alert_str),
         )
 
@@ -333,10 +339,10 @@ class DashboardScreen(Screen):
         elif avg_util > 0:
             util_str = f"[green]{avg_util:.1f}%[/green]"
         else:
-            util_str = "[dim]-[/dim]"
+            util_str = "--"
         stats_table.add_row(
-            "Data Src", src_str or "[dim]none[/dim]",
-            "Avg SNR", f"{avg_snr:.1f} dB" if avg_snr else "[dim]-[/dim]",
+            "Data Src", src_str or "none",
+            "Avg SNR", f"{avg_snr:.1f} dB" if avg_snr else "--",
             "Ch Util", Text.from_markup(util_str),
         )
 
@@ -1285,7 +1291,11 @@ class ConfigScreen(Screen):
 
     def _find_config(self) -> Optional[Path]:
         """Find upstream config.ini by searching known paths."""
-        # Try the Config class search first
+        # Always check the most common path first (fast path)
+        common = Path("/opt/meshing-around/config.ini")
+        if common.exists():
+            return common
+        # Try the Config class search
         if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
             found = self.app.config.find_upstream_config()
             if found:
@@ -2680,7 +2690,9 @@ class MeshingAroundTUI:
                         if self.api.send_message(cmd, "^all", default_ch):
                             self.console.print(
                                 f"\n[green]Sent '{cmd}' to bot on ch{default_ch}[/green]"
-                                "\n[dim]Watch Live Feed for response. Press Enter...[/dim]"
+                                f"\n[dim]Bot response will appear in Live Feed (screen 1)."
+                                f"\nIf no response, bot may not be running or listening on ch{default_ch}."
+                                f"\nPress Enter...[/dim]"
                             )
                             self._dirty = True
                             input()
@@ -2689,8 +2701,8 @@ class MeshingAroundTUI:
                             time.sleep(1)
                     else:
                         self.console.print(
-                            f"\n[yellow]'{cmd}' requires the running bot.[/yellow]"
-                            "\n[dim]Connect first, then this will be sent via mesh.[/dim]"
+                            f"\n[yellow]'{cmd}' requires the running meshing-around bot.[/yellow]"
+                            "\n[dim]Connect to mesh first, then this sends via mesh to the bot.[/dim]"
                         )
                         time.sleep(2)
                     return
