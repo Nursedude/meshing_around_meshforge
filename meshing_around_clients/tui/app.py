@@ -324,12 +324,8 @@ class DashboardScreen(Screen):
             "Alerts", Text.from_markup(alert_str),
         )
 
-        # Row 4: Data sources + avg SNR + channel utilization
-        src_str = ""
-        if hasattr(self.app, "config"):
-            sources = self.app.config.data_sources.get_enabled_sources()
-            if sources:
-                src_str = ", ".join(sources.keys())
+        # Row 4: Default channel + avg SNR + channel utilization
+        default_ch = "ch" + str(self.app.config.network_cfg.default_channel) if hasattr(self.app, "config") else "--"
         avg_snr = health.get("avg_snr", 0)
         avg_util = health.get("avg_channel_utilization", 0)
         if avg_util >= 40.0:
@@ -341,7 +337,7 @@ class DashboardScreen(Screen):
         else:
             util_str = "--"
         stats_table.add_row(
-            "Data Src", src_str or "none",
+            "Default Ch", default_ch,
             "Avg SNR", f"{avg_snr:.1f} dB" if avg_snr else "--",
             "Ch Util", Text.from_markup(util_str),
         )
@@ -409,7 +405,7 @@ class DashboardScreen(Screen):
         return Panel(
             Group(*content),
             title="[bold]Live Feed[/bold]",
-            subtitle="[dim][3] full Messages screen  [s] send  [r] run cmd[/dim]",
+            subtitle="[dim]\\[3] Messages  \\[s] send  \\[r] run cmd[/dim]",
             border_style="magenta",
         )
 
@@ -1391,7 +1387,7 @@ class ConfigScreen(Screen):
                     table.add_row(f"[dim]{section}[/dim]", key, val_display)
 
         save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
-        subtitle = f"[dim][j/k] scroll  [Enter] edit  [t] toggle  [w] save  [R] reload  [q] back[/dim]{save_indicator}"
+        subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[R] reload  \\[q] back[/dim]{save_indicator}"
 
         return Panel(
             table,
@@ -1445,7 +1441,7 @@ class ConfigScreen(Screen):
                     self._parser.set(section, key, new_val)
                     self._rebuild_items()
                     self._dirty = True
-                    self.console.print("[green]Value updated (press [w] to save)[/green]")
+                    self.console.print("[green]Value updated (press \\[w] to save)[/green]")
                 else:
                     self.console.print("[dim]No change[/dim]")
                 time.sleep(0.5)
@@ -1527,7 +1523,7 @@ class MapsScreen(Screen):
             return Panel(
                 Group(*content),
                 title="[bold]Maps[/bold]",
-                subtitle="[dim][r] retry  [q] back[/dim]",
+                subtitle="[dim]\\[r] retry  \\[q] back[/dim]",
                 border_style="yellow",
             )
 
@@ -1624,7 +1620,7 @@ class MapsScreen(Screen):
         return Panel(
             layout,
             title=f"[bold]Maps[/bold] [dim]({url})[/dim]",
-            subtitle=f"[dim][green]{status_line}[/green] | [o] open browser  [r] refresh  [q] back[/dim]",
+            subtitle=f"[dim][green]{status_line}[/green] | \\[o] open browser  \\[r] refresh  \\[q] back[/dim]",
             border_style="cyan",
         )
 
