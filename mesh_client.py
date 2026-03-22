@@ -607,7 +607,9 @@ admin_nodes =
 blocked_nodes =
 # Comma-separated node IDs or numbers
 
-# Channel settings
+# Channel to send commands and messages on (0-7)
+# Set this to YOUR mesh channel — this is where [r] and [s] send
+# Note: the bot's defaultchannel may have ignoredefaultchannel=True
 default_channel = 0
 monitored_channels = 0,1,2
 

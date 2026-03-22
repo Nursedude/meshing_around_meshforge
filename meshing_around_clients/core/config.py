@@ -490,15 +490,10 @@ class Config:
                     "network", "max_message_length", fallback=200
                 )
 
-            # Sync default_channel from upstream if meshforge default is 0
-            if self.network_cfg.default_channel == 0:
-                try:
-                    upstream_settings = self.read_upstream_settings()
-                    upstream_ch = upstream_settings.get("defaultchannel", 0)
-                    if upstream_ch != 0:
-                        self.network_cfg.default_channel = upstream_ch
-                except (OSError, ValueError):
-                    pass
+            # NOTE: default_channel is USER-configured, not auto-synced from
+            # upstream bot. The bot's defaultchannel + ignoredefaultchannel
+            # means the bot may IGNORE commands on its default channel.
+            # Users set their channel in mesh_client.ini [network] section.
 
             # TUI
             if self._parser.has_section("tui"):
