@@ -760,6 +760,30 @@ def upgrade_config(config: ConfigParser) -> bool:
     return False
 
 
+# Known-bad config values that should be auto-corrected on load.
+# upgrade_config() only adds missing keys — it never updates existing values.
+# This map fixes exact known-bad values without touching user customizations.
+_STALE_VALUE_FIXES = {
+    ("data_sources", "volcano_url"): {
+        "https://volcanoes.usgs.gov/vsc/api/volcanoApi/":
+            "https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated",
+    },
+}
+
+
+def _fix_known_stale_values(config: ConfigParser) -> bool:
+    """Replace exact known-bad config values. Returns True if any were fixed."""
+    fixed = 0
+    for (section, key), replacements in _STALE_VALUE_FIXES.items():
+        if config.has_section(section) and config.has_option(section, key):
+            current = config.get(section, key).strip()
+            if current in replacements:
+                config.set(section, key, replacements[current])
+                log(f"  Fixed stale value [{section}] {key}", "OK")
+                fixed += 1
+    return fixed > 0
+
+
 def load_config() -> ConfigParser:
     """Load or create configuration file."""
     config = ConfigParser()
@@ -774,7 +798,11 @@ def load_config() -> ConfigParser:
         # Auto-upgrade: add any new sections/keys from DEFAULT_CONFIG
         upgraded = upgrade_config(config)
 
-        if migrated or upgraded:
+        # Fix known stale values that upgrade_config won't touch
+        # (upgrade_config only adds missing keys, never updates existing)
+        stale_fixed = _fix_known_stale_values(config)
+
+        if migrated or upgraded or stale_fixed:
             save_config(config)
     else:
         # Create default config

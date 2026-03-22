@@ -26,6 +26,7 @@ _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 from .callbacks import CallbackMixin, extract_position, safe_float, safe_int  # noqa: E402
 from .config import Config  # noqa: E402
 from .models import (  # noqa: E402
+    DATETIME_MIN_UTC,
     MAX_MESSAGE_BYTES,
     Alert,
     AlertType,
@@ -92,6 +93,156 @@ def refresh_meshtastic_availability() -> bool:
                 logger.info("meshtastic.%s import failed (%s): %s", mod_name, type(exc).__name__, exc)
 
     return MESHTASTIC_AVAILABLE
+
+
+def _fetch_url(url: str, timeout: int = 10) -> str:
+    """Fetch URL content with stdlib only. Returns response text or empty string."""
+    from urllib.error import URLError
+    from urllib.request import Request, urlopen
+
+    try:
+        req = Request(url, headers={"User-Agent": "MeshForge/0.5", "Accept": "application/json,application/xml,text/plain"})
+        with urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except (URLError, OSError, ValueError) as e:
+        logger.warning("Fetch failed (%s): %s", url[:60], e)
+        return ""
+
+
+def _cmd_wx(lat: float, lon: float) -> str:
+    """NOAA weather forecast — same API as upstream meshing-around."""
+    import json
+
+    # Step 1: Get forecast URL from points endpoint
+    points_data = _fetch_url(f"https://api.weather.gov/points/{lat},{lon}")
+    if not points_data:
+        return "Weather: fetch failed"
+    try:
+        props = json.loads(points_data).get("properties", {})
+        forecast_url = props.get("forecast", "")
+        if not forecast_url:
+            return "Weather: no forecast URL"
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning("Weather points parse error: %s", e)
+        return "Weather: parse error"
+
+    # Step 2: Get actual forecast
+    forecast_data = _fetch_url(forecast_url)
+    if not forecast_data:
+        return "Weather: forecast fetch failed"
+    try:
+        periods = json.loads(forecast_data).get("properties", {}).get("periods", [])
+        if not periods:
+            return "Weather: no forecast data"
+        p = periods[0]
+        name = p.get("name", "")
+        temp = p.get("temperature", "")
+        unit = p.get("temperatureUnit", "F")
+        wind = p.get("windSpeed", "")
+        wind_dir = p.get("windDirection", "")
+        short = p.get("shortForecast", "")
+        return f"Wx {name}: {temp}{unit} {wind_dir} {wind} {short}"[:200]
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning("Weather forecast parse error: %s", e)
+        return "Weather: parse error"
+
+
+def _cmd_wxa(lat: float, lon: float) -> str:
+    """NWS active weather alerts — same API as upstream."""
+    import json
+
+    data = _fetch_url(f"https://api.weather.gov/alerts/active?point={lat},{lon}")
+    if not data:
+        return "WxAlert: fetch failed"
+    try:
+        features = json.loads(data).get("features", [])
+        if not features:
+            return "WxAlert: no active alerts"
+        a = features[0]["properties"]
+        event = a.get("event", "Unknown")
+        headline = a.get("headline", "")
+        return f"WxAlert: {event} - {headline}"[:200]
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        logger.warning("WxAlert parse error: %s", e)
+        return "WxAlert: parse error"
+
+
+def _cmd_earthquake(lat: float, lon: float) -> str:
+    """USGS earthquake data — same feed as upstream."""
+    import json
+
+    data = _fetch_url("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.geojson")
+    if not data:
+        return "Earthquake: fetch failed"
+    try:
+        features = json.loads(data).get("features", [])
+        if not features:
+            return "Earthquake: no recent 2.5+ quakes"
+        # Filter by proximity (within 20 degrees)
+        nearby = []
+        for f in features:
+            coords = f["geometry"]["coordinates"]
+            if abs(coords[1] - lat) <= 20 and abs(coords[0] - lon) <= 20:
+                nearby.append(f)
+        if not nearby:
+            # Show latest global if none nearby
+            nearby = features[:1]
+        q = nearby[0]
+        props = q["properties"]
+        mag = props.get("mag", "?")
+        place = props.get("place", "Unknown")
+        return f"Earthquake: M{mag} {place}"[:200]
+    except (json.JSONDecodeError, KeyError, IndexError) as e:
+        logger.warning("Earthquake parse error: %s", e)
+        return "Earthquake: parse error"
+
+
+def _cmd_solar() -> str:
+    """Solar/space weather — same SWPC data as upstream."""
+    import json
+
+    data = _fetch_url("https://services.swpc.noaa.gov/products/summary/solar-wind-speed.json")
+    if not data:
+        return "Solar: fetch failed"
+    try:
+        sw = json.loads(data)
+        speed = sw.get("WindSpeed", "?")
+        return f"Solar Wind: {speed} km/s"
+    except (json.JSONDecodeError, KeyError):
+        pass
+
+    # Also try geomagnetic summary
+    data2 = _fetch_url("https://services.swpc.noaa.gov/products/noaa-planetary-k-index-forecast.json")
+    if data2:
+        try:
+            kp = json.loads(data2)
+            if isinstance(kp, list) and len(kp) > 1:
+                latest = kp[-1]
+                return f"Solar Kp: {latest}"[:200]
+        except (json.JSONDecodeError, KeyError):
+            pass
+    return "Solar: no data"
+
+
+def _cmd_hfcond() -> str:
+    """HF band conditions — same hamqsl.com source as upstream."""
+    data = _fetch_url("https://www.hamqsl.com/solarxml.php")
+    if not data:
+        return "HF: fetch failed"
+    # Simple XML parsing for key fields
+    def _extract(tag: str) -> str:
+        start = data.find(f"<{tag}>")
+        end = data.find(f"</{tag}>")
+        if start >= 0 and end > start:
+            return data[start + len(tag) + 2:end].strip()
+        return "?"
+
+    sfi = _extract("solarflux")
+    sn = _extract("sunspots")
+    a_index = _extract("aindex")
+    k_index = _extract("kindex")
+    sig = _extract("signalnoise")
+    return f"HF: SFI={sfi} SN={sn} A={a_index} K={k_index} Noise={sig}"[:200]
 
 
 def _fetch_data_source(source) -> str:
@@ -913,6 +1064,73 @@ class MeshtasticAPI(CallbackMixin):
         if command in sources:
             return _fetch_data_source(sources[command])
 
+        # Meshing-around data commands (use upstream lat/lon if available)
+        upstream = {}
+        if hasattr(self.config, "read_upstream_settings"):
+            try:
+                upstream = self.config.read_upstream_settings()
+            except (OSError, ValueError):
+                pass
+        lat = upstream.get("lat", 0.0)
+        lon = upstream.get("lon", 0.0)
+
+        if command == "wx" and lat:
+            return _cmd_wx(lat, lon)
+        elif command in ("wxa", "wxalert") and lat:
+            return _cmd_wxa(lat, lon)
+        elif command == "earthquake":
+            return _cmd_earthquake(lat, lon)
+        elif command == "solar":
+            return _cmd_solar()
+        elif command in ("hfcond", "hf"):
+            return _cmd_hfcond()
+        elif command == "valert" and lat:
+            # Use upstream's volcano endpoint directly with proximity filter
+            return _parse_volcano_response(
+                _fetch_url("https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated"),
+                type("src", (), {"lat": lat, "lon": lon})(),
+            )
+
+        # Local network commands (built from meshforge's own data)
+        elif command == "lheard":
+            nodes = sorted(
+                self.network.get_nodes_snapshot(),
+                key=lambda n: n.last_heard or DATETIME_MIN_UTC,
+                reverse=True,
+            )[:10]
+            if not nodes:
+                return "lheard: no nodes"
+            lines = ["Last heard:"]
+            for n in nodes:
+                lines.append(f"  {n.display_name[:15]:15s} {n.time_since_heard}")
+            return "\n".join(lines)
+
+        elif command == "sitrep":
+            net = self.network
+            connected = "UP" if self.is_connected else "DOWN"
+            return (
+                f"SITREP: {connected} | "
+                f"{len(net.online_nodes)}/{len(net.nodes)} nodes | "
+                f"{net.total_messages} msgs | "
+                f"{len(net.unread_alerts)} alerts"
+            )
+
+        elif command == "leaderboard":
+            # Nodes with most messages (rough count from channel activity)
+            nodes = self.network.get_nodes_snapshot()
+            if not nodes:
+                return "Leaderboard: no data"
+            # Sort by last heard (most active = most recently heard)
+            active = sorted(
+                nodes,
+                key=lambda n: n.last_heard or DATETIME_MIN_UTC,
+                reverse=True,
+            )[:5]
+            lines = ["Most active:"]
+            for i, n in enumerate(active, 1):
+                lines.append(f"  {i}. {n.display_name[:15]} ({n.time_since_heard})")
+            return "\n".join(lines)
+
         return ""
 
     @staticmethod
@@ -920,35 +1138,58 @@ class MeshtasticAPI(CallbackMixin):
         """Return a formatted string of available commands for display."""
         from meshing_around_clients import __version__
 
-        lines = [
-            f"MeshForge v{__version__} Commands:",
-            "  cmd / help  - Show this command list",
-            "  ping        - Test connectivity (pong)",
-            "  info        - Client info",
-            "  nodes       - Node count",
-            "  status      - Connection status",
-            "  version     - Version info",
-            "  uptime      - Time connected",
-        ]
+        # Check if upstream lat/lon is available for data commands
+        has_location = False
+        if config and hasattr(config, "read_upstream_settings"):
+            try:
+                s = config.read_upstream_settings()
+                has_location = s.get("lat", 0.0) != 0.0
+            except (OSError, ValueError):
+                pass
 
-        # Show configured data sources
+        lines = [f"Meshing-Around v{__version__} Commands:"]
+
+        # Data commands (live API calls)
+        lines.append("")
+        lines.append("Data Commands (live):")
+        if has_location:
+            lines.append("  wx          - NOAA Weather forecast")
+            lines.append("  wxa         - Weather alerts (NWS)")
+        lines.append("  valert      - Volcano alerts (USGS)")
+        lines.append("  earthquake  - Recent earthquakes (USGS)")
+        lines.append("  solar       - Solar/space weather (SWPC)")
+        lines.append("  hfcond      - HF band conditions")
+
+        # Show configured data sources (may overlap, that's ok)
         if config and hasattr(config, "data_sources"):
             sources = config.data_sources.get_enabled_sources()
             for cmd_name, src in sources.items():
-                lines.append(f"  {cmd_name:12s} - {src.name} (live data)")
+                if cmd_name not in ("volcano", "weather", "tsunami"):
+                    lines.append(f"  {cmd_name:12s} - {src.name}")
+                elif cmd_name == "tsunami":
+                    lines.append("  tsunami     - Tsunami alerts (PTWC)")
 
-        # Show upstream bot commands if available (read-only)
+        # Network commands (local data)
+        lines.append("")
+        lines.append("Network Commands (local):")
+        lines.append("  lheard      - Last heard nodes")
+        lines.append("  sitrep      - Situation report")
+        lines.append("  leaderboard - Most active nodes")
+        lines.append("  nodes       - Node count")
+        lines.append("  status      - Connection status")
+        lines.append("  ping        - Test connectivity")
+        lines.append("  cmd / help  - Show this list")
+
+        # Bot-only commands (need running meshing-around bot)
         if config and hasattr(config, "read_upstream_commands"):
             try:
                 upstream_cmds = config.read_upstream_commands()
-                if upstream_cmds:
+                on_cmds = [n for n, v in sorted(upstream_cmds.items()) if v]
+                if on_cmds:
                     lines.append("")
-                    lines.append("Bot features (from meshing-around config):")
-                    for cmd_name, enabled in sorted(upstream_cmds.items()):
-                        status = "ON" if enabled else "off"
-                        lines.append(f"  {cmd_name:12s} [{status}]")
+                    lines.append(f"Bot Commands (send via [s]): {', '.join(on_cmds)}")
             except (OSError, ValueError):
-                pass  # Upstream config not readable
+                pass
 
         return "\n".join(lines)
 

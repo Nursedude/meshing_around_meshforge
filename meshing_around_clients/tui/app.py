@@ -1706,11 +1706,11 @@ class MeshingAroundTUI:
                 shortcuts.append(f"{label} ", style="dim")
 
         shortcuts.append("[s]", style="green bold")
-        shortcuts.append("Send ", style="dim")
+        shortcuts.append("Send ", style="white")
         shortcuts.append("[r]", style="green bold")
-        shortcuts.append("Run Cmd ", style="dim")
+        shortcuts.append("Run Cmd ", style="white")
         shortcuts.append("[?]", style="yellow bold")
-        shortcuts.append("Help ", style="dim")
+        shortcuts.append("Help ", style="white")
         shortcuts.append("[q]", style="red bold")
         shortcuts.append("Quit", style="dim")
 

@@ -476,6 +476,16 @@ class Config:
                     "network", "max_message_length", fallback=200
                 )
 
+            # Sync default_channel from upstream if meshforge default is 0
+            if self.network_cfg.default_channel == 0:
+                try:
+                    upstream_settings = self.read_upstream_settings()
+                    upstream_ch = upstream_settings.get("defaultchannel", 0)
+                    if upstream_ch != 0:
+                        self.network_cfg.default_channel = upstream_ch
+                except (OSError, ValueError):
+                    pass
+
             # TUI
             if self._parser.has_section("tui"):
                 self.tui.refresh_rate = self._parser.getfloat("tui", "refresh_rate", fallback=1.0)
@@ -889,6 +899,36 @@ class Config:
                 features["dxspotter"] = True
 
         return features
+
+    def read_upstream_settings(self) -> Dict[str, Any]:
+        """Read location and channel settings from upstream meshing-around config.
+
+        Returns a dict with lat, lon, defaultchannel, and other useful settings.
+        Read-only — never modifies the upstream config.
+        """
+        upstream_path = self.find_upstream_config()
+        if not upstream_path or not upstream_path.exists():
+            return {}
+
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(str(upstream_path))
+        except configparser.Error:
+            return {}
+
+        settings: Dict[str, Any] = {}
+
+        if parser.has_section("location"):
+            settings["lat"] = parser.getfloat("location", "lat", fallback=0.0)
+            settings["lon"] = parser.getfloat("location", "lon", fallback=0.0)
+            settings["usemetric"] = parser.getboolean("location", "usemetric", fallback=False)
+            settings["noaaforecastduration"] = parser.getint("location", "noaaforecastduration", fallback=3)
+            settings["myfipslist"] = parser.get("location", "myfipslist", fallback="")
+
+        if parser.has_section("general"):
+            settings["defaultchannel"] = parser.getint("general", "defaultchannel", fallback=0)
+
+        return settings
 
     def _validate_mqtt(self, issues: List[str]) -> None:
         """Validate MQTT configuration, appending any issues found."""
