@@ -99,20 +99,44 @@ def refresh_meshtastic_availability() -> bool:
 # Path to upstream meshing-around bot's Python venv
 _UPSTREAM_VENV_PYTHON = Path("/opt/meshing-around/venv/bin/python3")
 
-# Map of meshforge command names → upstream function calls
+# Map of meshforge command names → upstream function calls via bot's venv
 # Each value is (module, function, needs_latlon)
 _UPSTREAM_CMD_MAP = {
+    # Space / astronomy
     "moon": ("space", "get_moon", True),
     "sun": ("space", "get_sun", True),
     "solar": ("space", "solar_conditions", False),
     "hfcond": ("space", "hf_band_conditions", False),
+    # Weather
     "wx": ("locationdata", "get_NOAAweather", True),
+    "wxc": ("locationdata", "get_NOAAweather", True),  # compact format
+    "mwx": ("wx_meteo", "get_wx_meteo", True),
     "wxa": ("locationdata", "getWeatherAlertsNOAA", True),
     "wxalert": ("locationdata", "getWeatherAlertsNOAA", True),
+    # Alerts / hazards
     "valert": ("locationdata", "get_volcano_usgs", True),
     "earthquake": ("locationdata", "checkUSGSEarthQuake", True),
+    "ealert": ("locationdata", "getIpawsAlert", True),
+    # Water / tides
     "tide": ("locationdata", "get_NOAAtide", True),
+    "riverflow": ("locationdata", "get_flood_noaa", True),
+    # Location
     "whereami": ("locationdata", "where_am_i", True),
+}
+
+# Commands that REQUIRE the running bot (need runtime state, node DB, etc.)
+# These get sent via mesh when connected, or show "requires bot" when not.
+_BOT_ONLY_COMMANDS = {
+    "joke", "wiki", "askai", "bbshelp", "bbslist", "bbspost", "bbsread",
+    "checkin", "checkout", "dx", "games", "messages", "readnews", "readrss",
+    "rlist", "howfar", "howtall", "whoami", "sysinfo", "satpass",
+    "echo", "email:", "sms:", "survey", "quiz",
+}
+
+# Commands always handled locally by meshforge (no network needed)
+_LOCAL_COMMANDS = {
+    "cmd", "help", "ping", "version", "nodes", "status", "info", "uptime",
+    "lheard", "sitrep", "leaderboard",
 }
 
 
@@ -1221,6 +1245,25 @@ class MeshtasticAPI(CallbackMixin):
                 lines.append(f"  {i}. {n.display_name[:15]} ({n.time_since_heard})")
             return "\n".join(lines)
 
+        elif command == "motd":
+            # Read MOTD directly from upstream config
+            motd = upstream.get("motd", "")
+            if not motd and hasattr(self.config, "read_upstream_settings"):
+                try:
+                    import configparser as _cp
+                    p = _cp.ConfigParser()
+                    uc = self.config.find_upstream_config()
+                    if uc:
+                        p.read(str(uc))
+                        motd = p.get("general", "motd", fallback="")
+                except (OSError, _cp.Error):
+                    pass
+            return motd or "No MOTD configured"
+
+        # Bot-only commands — signal to caller to send via mesh
+        if command in _BOT_ONLY_COMMANDS:
+            return f"__BOT_ONLY__:{command}"
+
         return ""
 
     @staticmethod
@@ -1241,21 +1284,23 @@ class MeshtasticAPI(CallbackMixin):
 
         lines = [f"Meshing-Around v{__version__} Commands:"]
 
-        # Data commands (uses bot's venv when available, stdlib fallback)
+        # Data commands (run locally via bot engine)
         lines.append("")
-        lines.append("Data Commands (live):")
+        lines.append("Data Commands (run locally via bot engine):")
         if has_location:
-            lines.append("  wx          - NOAA Weather forecast")
-            lines.append("  wxa         - Weather alerts (NWS)")
-            lines.append("  whereami    - Location info")
+            lines.append("  wx/wxc/mwx  - Weather (NOAA/Meteo)")
+            lines.append("  wxa/wxalert - Weather alerts (NWS)")
+            lines.append("  ealert      - Emergency alerts (iPAWS)")
         lines.append("  valert      - Volcano alerts (USGS)")
-        lines.append("  earthquake  - Recent earthquakes (USGS)")
+        lines.append("  earthquake  - Earthquakes (USGS)")
         lines.append("  solar       - Solar/space weather")
         lines.append("  hfcond      - HF band conditions")
         if has_location:
             lines.append("  moon        - Moon phase/rise/set")
             lines.append("  sun         - Sunrise/sunset")
             lines.append("  tide        - NOAA tide data")
+            lines.append("  riverflow   - River flow data")
+            lines.append("  whereami    - Location info")
 
         # Show configured data sources
         if config and hasattr(config, "data_sources"):
@@ -1264,27 +1309,24 @@ class MeshtasticAPI(CallbackMixin):
                 if cmd_name == "tsunami":
                     lines.append("  tsunami     - Tsunami alerts (PTWC)")
 
+        lines.append("  motd        - Message of the day")
+
         # Network commands (local data)
         lines.append("")
         lines.append("Network Commands (local):")
         lines.append("  lheard      - Last heard nodes")
         lines.append("  sitrep      - Situation report")
         lines.append("  leaderboard - Most active nodes")
-        lines.append("  nodes       - Node count")
-        lines.append("  status      - Connection status")
-        lines.append("  ping        - Test connectivity")
+        lines.append("  nodes/status/ping/version/uptime")
         lines.append("  cmd / help  - Show this list")
 
-        # Bot-only commands
-        if config and hasattr(config, "read_upstream_commands"):
-            try:
-                upstream_cmds = config.read_upstream_commands()
-                on_cmds = [n for n, v in sorted(upstream_cmds.items()) if v]
-                if on_cmds:
-                    lines.append("")
-                    lines.append(f"Bot Commands (send via [s]): {', '.join(on_cmds)}")
-            except (OSError, ValueError):
-                pass
+        # Bot commands (sent via mesh)
+        lines.append("")
+        lines.append("Bot Commands (sent to bot via mesh):")
+        lines.append("  joke, wiki, askai, bbshelp, bbslist")
+        lines.append("  games, readrss, readnews, dx, rlist")
+        lines.append("  howfar, howtall, whoami, sysinfo")
+        lines.append("  satpass, checkin, checkout, messages")
 
         return "\n".join(lines)
 

@@ -1254,12 +1254,17 @@ class DevicesScreen(Screen):
 class ConfigScreen(Screen):
     """Config editor for meshing-around config.ini — view and edit all settings."""
 
-    # Search paths for upstream config (same as Config.UPSTREAM_CONFIG_PATHS)
-    _SEARCH_PATHS = [
-        Path.home() / "meshing-around" / "config.ini",
-        Path("/opt/meshing-around/config.ini"),
-        Path("/opt/meshing_around/config.ini"),
-    ]
+    # Search paths for upstream config (MF001: use SUDO_USER, not Path.home())
+    @staticmethod
+    def _get_search_paths():
+        import os
+        sudo_user = os.environ.get("SUDO_USER")
+        home = Path(f"/home/{sudo_user}") if sudo_user else Path.home()
+        return [
+            Path("/opt/meshing-around/config.ini"),
+            home / "meshing-around" / "config.ini",
+            Path("/opt/meshing_around/config.ini"),
+        ]
     # Preferred section display order
     _SECTION_ORDER = [
         "general", "location", "interface", "interface2", "bbs", "sentry",
@@ -1286,7 +1291,7 @@ class ConfigScreen(Screen):
             if found:
                 return found
         # Fallback: search our own list
-        for p in self._SEARCH_PATHS:
+        for p in self._get_search_paths():
             if p.exists():
                 return p
         return None
@@ -1303,7 +1308,7 @@ class ConfigScreen(Screen):
             except _cp.Error as e:
                 self._error = str(e)
         else:
-            searched = ", ".join(str(p) for p in self._SEARCH_PATHS)
+            searched = ", ".join(str(p) for p in self._get_search_paths())
             self._error = f"config.ini not found. Searched: {searched}"
         self._rebuild_items()
 
@@ -2454,8 +2459,10 @@ class MeshingAroundTUI:
             self._dirty = True
 
     def _run_command_prompt(self) -> None:
-        """Send a command to the bot via mesh, or run locally if disconnected."""
-        import uuid as _uuid
+        """Smart command router: local, upstream venv, or send to bot via mesh."""
+        from meshing_around_clients.core.meshtastic_api import (
+            _BOT_ONLY_COMMANDS, _LOCAL_COMMANDS, _UPSTREAM_CMD_MAP,
+        )
 
         default_ch = self.config.network_cfg.default_channel
         connected = self.api.is_connected
@@ -2464,12 +2471,13 @@ class MeshingAroundTUI:
             self.console.print(Panel("[bold cyan]Run Command[/bold cyan]", border_style="cyan"))
             if connected:
                 self.console.print(
-                    f"[bold green]Sends command to bot on channel {default_ch}[/bold green]\n"
-                    "[dim]Bot response will appear in Live Feed[/dim]\n"
+                    f"[bold green]Connected on ch{default_ch}[/bold green] — "
+                    "data cmds run locally, bot cmds sent via mesh\n"
                 )
             else:
                 self.console.print(
-                    f"[yellow]Not connected — running locally on ch{default_ch}[/yellow]\n"
+                    f"[yellow]Not connected — data cmds run locally, "
+                    "bot cmds unavailable[/yellow]\n"
                 )
             self.console.print(MeshtasticAPI.get_command_list(self.config))
             self.console.print()
@@ -2479,22 +2487,51 @@ class MeshingAroundTUI:
                 if not cmd:
                     return
 
-                if connected:
-                    # Send command as mesh message — bot will respond
+                # Route 1: Local commands — always run locally
+                # Route 2: Upstream venv commands — run locally via bot engine
+                if cmd in _LOCAL_COMMANDS or cmd in _UPSTREAM_CMD_MAP:
+                    self._run_command_local(cmd)
+                    return
+
+                # Route 3: Bot-only commands — send via mesh
+                if cmd in _BOT_ONLY_COMMANDS:
+                    if connected:
+                        if self.api.send_message(cmd, "^all", default_ch):
+                            self.console.print(
+                                f"\n[green]Sent '{cmd}' to bot on ch{default_ch}[/green]"
+                                "\n[dim]Watch Live Feed for response. Press Enter...[/dim]"
+                            )
+                            self._dirty = True
+                            input()
+                        else:
+                            self.console.print("[red]Failed to send message[/red]")
+                            time.sleep(1)
+                    else:
+                        self.console.print(
+                            f"\n[yellow]'{cmd}' requires the running bot.[/yellow]"
+                            "\n[dim]Connect first, then this will be sent via mesh.[/dim]"
+                        )
+                        time.sleep(2)
+                    return
+
+                # Route 4: Try local execution first, then send via mesh
+                response = self.api._get_command_response(cmd)
+                if response and not response.startswith("__BOT_ONLY__"):
+                    self._run_command_local(cmd)
+                elif connected:
                     if self.api.send_message(cmd, "^all", default_ch):
                         self.console.print(
                             f"\n[green]Sent '{cmd}' on ch{default_ch}[/green]"
-                            "\n[dim]Watch Live Feed for bot response. Press Enter...[/dim]"
+                            "\n[dim]Watch Live Feed for response. Press Enter...[/dim]"
                         )
+                        self._dirty = True
+                        input()
                     else:
-                        self.console.print("[red]Failed to send. Running locally...[/red]")
-                        self._run_command_local(cmd)
-                        return
-                    self._dirty = True
-                    input()
+                        self.console.print(f"[red]Unknown command: {cmd}[/red]")
+                        time.sleep(1)
                 else:
-                    # Fallback: run locally when not connected
-                    self._run_command_local(cmd)
+                    self.console.print(f"[red]Unknown command: {cmd}[/red]")
+                    time.sleep(1)
             except KeyboardInterrupt:
                 pass
 
@@ -2570,6 +2607,11 @@ class MeshingAroundTUI:
         if not response:
             self.console.print(f"[yellow]No response for: {command}[/yellow]")
             time.sleep(1)
+            return
+        # Bot-only commands can't run locally
+        if response.startswith("__BOT_ONLY__"):
+            self.console.print(f"[yellow]'{command}' requires the running bot (send via mesh)[/yellow]")
+            time.sleep(1.5)
             return
 
         default_ch = self.config.network_cfg.default_channel

@@ -57,7 +57,7 @@ def _ensure_utf8_stdio():
 _ensure_utf8_stdio()
 
 # Version
-VERSION = "0.5.0-beta"
+VERSION = "0.6.0"
 
 # Paths
 SCRIPT_DIR = Path(__file__).parent.absolute()
