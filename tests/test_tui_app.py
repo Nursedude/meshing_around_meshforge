@@ -48,7 +48,7 @@ class TestDashboardMessagesNoneGuards(unittest.TestCase):
         self.tui.api.network.add_message(msg)
 
         # Should not raise
-        panel = self.screen._create_messages_panel()
+        panel = self.screen._create_feed_panel()
         self.assertIsNotNone(panel)
 
     def test_render_with_none_sender_id(self):
@@ -62,7 +62,7 @@ class TestDashboardMessagesNoneGuards(unittest.TestCase):
         )
         self.tui.api.network.add_message(msg)
 
-        panel = self.screen._create_messages_panel()
+        panel = self.screen._create_feed_panel()
         self.assertIsNotNone(panel)
 
     def test_render_with_all_none_fields(self):
@@ -76,7 +76,7 @@ class TestDashboardMessagesNoneGuards(unittest.TestCase):
         )
         self.tui.api.network.add_message(msg)
 
-        panel = self.screen._create_messages_panel()
+        panel = self.screen._create_feed_panel()
         self.assertIsNotNone(panel)
 
 

@@ -209,19 +209,17 @@ class Screen:
 
 
 class DashboardScreen(Screen):
-    """Main dashboard screen showing overview of mesh network."""
+    """Main dashboard screen — message-centric live feed with network status."""
 
     def render(self) -> Panel:
         layout = Layout()
 
         # Create sub-panels with crash isolation
         stats = safe_panel_render(self._create_stats_panel, "stats")
-        nodes = safe_panel_render(self._create_nodes_panel, "nodes")
-        messages = safe_panel_render(self._create_messages_panel, "messages")
-        alerts = safe_panel_render(self._create_alerts_panel, "alerts")
-        commands = safe_panel_render(self._create_commands_panel, "commands")
+        feed = safe_panel_render(self._create_feed_panel, "feed")
+        sidebar = safe_panel_render(self._create_sidebar_panel, "sidebar")
 
-        # Combine into layout — show connect hint when disconnected
+        # Combine into layout — message feed is primary
         if not self.app.api.is_connected:
             hint = Text(
                 "Press [c] to connect  ·  [?] help  ·  [q] quit",
@@ -229,17 +227,17 @@ class DashboardScreen(Screen):
                 justify="center",
             )
             layout.split_column(
-                Layout(stats, name="stats", size=5), Layout(hint, name="hint", size=1), Layout(name="main")
+                Layout(stats, name="stats", size=7),
+                Layout(hint, name="hint", size=1),
+                Layout(name="main"),
             )
         else:
-            layout.split_column(Layout(stats, name="stats", size=5), Layout(name="main"))
-        layout["main"].split_row(Layout(name="left"), Layout(name="right", ratio=2))
-        layout["left"].split_column(
-            Layout(nodes, name="nodes"),
-            Layout(alerts, name="alerts"),
-            Layout(commands, name="commands", size=8),
+            layout.split_column(Layout(stats, name="stats", size=7), Layout(name="main"))
+
+        layout["main"].split_row(
+            Layout(feed, name="feed", ratio=3),
+            Layout(sidebar, name="sidebar", ratio=1),
         )
-        layout["right"].update(messages)
 
         return Panel(
             layout,
@@ -249,7 +247,7 @@ class DashboardScreen(Screen):
         )
 
     def _create_stats_panel(self) -> Panel:
-        """Create the statistics overview panel with mesh health and congestion."""
+        """Create compact network status panel with connection, MQTT, and health info."""
         network = self.app.api.network
         conn = self.app.api.connection_info
 
@@ -265,204 +263,222 @@ class DashboardScreen(Screen):
             "disconnected": ("DISCONNECTED", "bold red"),
         }
         label, style = conn_status_map.get(conn_status, (conn_status.upper(), "white"))
-        status = Text(label, style=style)
-
-        # Mesh health
-        health = network.mesh_health
-        health_status = health.get("status", "unknown")
-        health_score = health.get("score", 0)
-        health_style = HEALTH_STATUS_COLORS.get(health_status, "white")
-
-        # Congestion indicator from avg channel utilization
-        avg_util = health.get("avg_channel_utilization", 0)
-        if avg_util >= 40.0:
-            util_str = f"[red bold]{avg_util:.1f}% CRITICAL[/red bold]"
-        elif avg_util >= 25.0:
-            util_str = f"[yellow]{avg_util:.1f}% WARNING[/yellow]"
-        elif avg_util > 0:
-            util_str = f"[green]{avg_util:.1f}%[/green]"
-        else:
-            util_str = "[dim]-[/dim]"
 
         stats_table = Table(show_header=False, box=None, padding=(0, 2))
         stats_table.add_column("Label", style="cyan")
         stats_table.add_column("Value", style="white bold")
         stats_table.add_column("Label2", style="cyan")
         stats_table.add_column("Value2", style="white bold")
+        stats_table.add_column("Label3", style="cyan")
+        stats_table.add_column("Value3", style="white bold")
 
+        # Row 1: Connection + nodes + messages
         stats_table.add_row(
-            "Status",
-            status,
-            "Health",
-            Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
-        )
-        stats_table.add_row(
-            "Interface",
-            f"{conn.interface_type} ({conn.device_path})",
-            "Ch Util",
-            Text.from_markup(util_str),
-        )
-        stats_table.add_row(
-            "Nodes",
-            f"{len(network.online_nodes)}/{len(network.nodes)}",
-            "Avg SNR",
-            f"{health.get('avg_snr', 0):.1f} dB",
-        )
-        stats_table.add_row(
-            "Messages",
-            str(network.total_messages),
-            "Alerts",
-            f"{len(network.unread_alerts)} unread",
+            "Status", Text(label, style=style),
+            "Nodes", f"{len(network.online_nodes)}/{len(network.nodes)}",
+            "Messages", str(network.total_messages),
         )
 
-        # Show MQTT topic and channel info when in MQTT mode
+        # Row 2: Interface + MQTT topic/channels (or serial info)
+        iface_str = f"{conn.interface_type}"
+        if conn.device_path:
+            iface_str += f" ({conn.device_path})"
+        topic_str = ""
+        ch_str = ""
         if conn.interface_type == "mqtt" and hasattr(self.app, "config"):
             mqtt_cfg = self.app.config.mqtt
-            topic = mqtt_cfg.topic_root or "-"
-            ch_info = mqtt_cfg.channels if mqtt_cfg.channels else str(mqtt_cfg.channel)
-            stats_table.add_row("Topic", topic, "Channels", ch_info)
+            topic_str = mqtt_cfg.topic_root or "-"
+            ch_str = mqtt_cfg.channels if mqtt_cfg.channels else str(mqtt_cfg.channel)
+        stats_table.add_row(
+            "Interface", iface_str,
+            "Topic", topic_str or "[dim]-[/dim]",
+            "Channels", ch_str or "[dim]-[/dim]",
+        )
 
-            # Show MQTT message stats if available
-            if hasattr(self.app.api, "stats"):
-                mqtt_stats = self.app.api.stats
-                rx = mqtt_stats.get("messages_received", 0)
-                rej = mqtt_stats.get("messages_rejected", 0)
-                recon = mqtt_stats.get("reconnections", 0)
-                rx_str = f"{rx}"
-                if rej:
-                    rx_str += f" ([yellow]{rej} rejected[/yellow])"
-                stats_table.add_row(
-                    "MQTT Rx", Text.from_markup(rx_str),
-                    "Reconnects", str(recon),
-                )
+        # Row 3: Health + MQTT rx stats + alerts
+        health = network.mesh_health
+        health_status = health.get("status", "unknown")
+        health_score = health.get("score", 0)
+        health_style = HEALTH_STATUS_COLORS.get(health_status, "white")
 
-        # Show data source status summary
+        rx_str = ""
+        if hasattr(self.app.api, "stats"):
+            mqtt_stats = self.app.api.stats
+            rx = mqtt_stats.get("messages_received", 0)
+            rej = mqtt_stats.get("messages_rejected", 0)
+            rx_str = str(rx)
+            if rej:
+                rx_str += f" ({rej} rej)"
+
+        alert_count = len(network.unread_alerts)
+        alert_str = f"[red bold]{alert_count} unread[/red bold]" if alert_count else "[dim green]none[/dim green]"
+        stats_table.add_row(
+            "Health", Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
+            "MQTT Rx", rx_str or "[dim]-[/dim]",
+            "Alerts", Text.from_markup(alert_str),
+        )
+
+        # Row 4: Data sources + avg SNR + channel utilization
+        src_str = ""
         if hasattr(self.app, "config"):
             sources = self.app.config.data_sources.get_enabled_sources()
             if sources:
-                src_names = ", ".join(sources.keys())
-                stats_table.add_row("Data Src", src_names, "", "")
+                src_str = ", ".join(sources.keys())
+        avg_snr = health.get("avg_snr", 0)
+        avg_util = health.get("avg_channel_utilization", 0)
+        if avg_util >= 40.0:
+            util_str = f"[red bold]{avg_util:.1f}%[/red bold]"
+        elif avg_util >= 25.0:
+            util_str = f"[yellow]{avg_util:.1f}%[/yellow]"
+        elif avg_util > 0:
+            util_str = f"[green]{avg_util:.1f}%[/green]"
+        else:
+            util_str = "[dim]-[/dim]"
+        stats_table.add_row(
+            "Data Src", src_str or "[dim]none[/dim]",
+            "Avg SNR", f"{avg_snr:.1f} dB" if avg_snr else "[dim]-[/dim]",
+            "Ch Util", Text.from_markup(util_str),
+        )
 
         return Panel(stats_table, title="[bold]Network Status[/bold]", border_style="blue")
 
-    def _create_nodes_panel(self) -> Panel:
-        """Create the nodes list panel."""
-        nodes = sorted(
-            self.app.api.network.get_nodes_snapshot(), key=lambda n: n.last_heard or DATETIME_MIN_UTC, reverse=True
-        )[:10]
+    def _create_feed_panel(self) -> Panel:
+        """Create the live message feed — primary display showing all channel traffic."""
+        messages = self.app.api.network.get_messages_snapshot()[-30:]
 
-        table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
-        table.add_column("Name", style="white", no_wrap=True)
-        table.add_column("Last", style="dim", justify="right")
-        table.add_column("Batt", justify="right")
-        table.add_column("SNR", justify="right")
-
-        for node in nodes:
-            # Determine style based on status
-            if node.is_favorite:
-                name_style = "yellow bold"
-            elif not node.is_online:
-                name_style = "dim"
-            else:
-                name_style = "white"
-
-            # Battery indicator
-            batt_level = node.telemetry.battery_level if node.telemetry else None
-            batt_str = format_battery(batt_level)
-
-            # SNR
-            snr = node.telemetry.snr if node.telemetry else None
-            snr_str = format_snr(snr)
-
-            table.add_row(
-                f"[{name_style}]{node.display_name[:15]}[/{name_style}]", node.time_since_heard, batt_str, snr_str
-            )
-
-        if not nodes:
-            table.add_row("[dim]No nodes yet[/dim]", "", "", "")
-
-        return Panel(table, title="[bold]Nodes[/bold]", border_style="green")
-
-    def _create_messages_panel(self) -> Panel:
-        """Create the messages panel."""
-        messages = self.app.api.network.get_messages_snapshot()[-15:]
+        # Channel name/color mapping for visual distinction
+        ch_colors = ["cyan", "green", "yellow", "magenta", "blue", "red", "white", "bright_cyan"]
 
         content = []
         for msg in reversed(messages):
             time_str = msg.time_formatted
             sender = msg.sender_name or (msg.sender_id or "unknown")[-6:]
+            ch_idx = msg.channel if isinstance(msg.channel, int) else 0
+            ch_color = ch_colors[ch_idx % len(ch_colors)]
 
             if msg.is_incoming:
-                prefix_text = "<< "
-                prefix_style = "cyan"
+                direction = "<<"
+                dir_style = "cyan"
             else:
-                prefix_text = ">> "
-                prefix_style = "green"
+                direction = ">>"
+                dir_style = "green"
 
-            # Check for emergency keywords (msg.text may be None for non-text messages)
+            # Check for emergency keywords
             is_emergency = msg.text and any(
                 kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords
             )
 
-            if is_emergency:
-                text_style = "bold red"
-            else:
-                text_style = "white"
-
             text = msg.text or ""
             line = Text()
             line.append(f"{time_str} ", style="dim")
-            line.append(prefix_text, style=prefix_style)
-            line.append(f"{sender}: ", style="cyan")
-            line.append(text[:60], style=text_style)
-            if len(text) > 60:
+            line.append(f"ch{ch_idx}", style=f"bold {ch_color}")
+            line.append(f" {direction} ", style=dir_style)
+            line.append(f"{sender}: ", style="cyan bold" if msg.is_incoming else "green")
+            line.append(
+                text[:120] if not is_emergency else text[:120],
+                style="bold red" if is_emergency else "white",
+            )
+            if len(text) > 120:
                 line.append("...", style="dim")
 
             content.append(line)
 
         if not content:
-            content.append(Text("No messages yet", style="dim"))
-
-        return Panel(Group(*content), title="[bold]Messages[/bold]", border_style="magenta")
-
-    def _create_alerts_panel(self) -> Panel:
-        """Create the alerts panel."""
-        alerts = self.app.api.network.get_alerts_snapshot()[-5:]
-
-        content = []
-        for alert in reversed(alerts):
-            style = SEVERITY_COLORS.get(alert.severity, "white")
-            icon = SEVERITY_ICONS.get(alert.severity, "*")
-
-            line = Text()
-            line.append(f"[{icon}] ", style=style)
-            line.append(alert.title[:30], style=style)
-
-            content.append(line)
-
-        if not content:
-            content.append(Text("No alerts", style="dim green"))
-
-        return Panel(Group(*content), title="[bold]Alerts[/bold]", border_style="red")
-
-    def _create_commands_panel(self) -> Panel:
-        """Create the recent commands panel showing bot command activity."""
-        with self.app._command_lock:
-            entries = list(self.app._recent_commands)
-
-        content = []
-        for entry in reversed(entries[-5:]):
-            line = Text()
-            line.append(entry, style="dim")
-            content.append(line)
-
-        if not content:
-            content.append(Text("No commands received", style="dim"))
+            if self.app.api.is_connected:
+                content.append(Text("Listening for messages...", style="dim yellow"))
+                content.append(Text(""))
+                conn = self.app.api.connection_info
+                if conn.interface_type == "mqtt" and hasattr(self.app, "config"):
+                    mqtt_cfg = self.app.config.mqtt
+                    topic = mqtt_cfg.topic_root or "msh/US"
+                    ch = mqtt_cfg.channels if mqtt_cfg.channels else mqtt_cfg.channel
+                    content.append(Text(f"  Subscribed to: {topic}/{ch}", style="dim"))
+                content.append(Text("  Messages will appear here as they arrive", style="dim"))
+            else:
+                content.append(Text("Not connected", style="dim red"))
+                content.append(Text(""))
+                content.append(Text("  Press [c] to connect to MQTT/serial/TCP", style="dim"))
+                content.append(Text("  Press [r] to run local commands (weather, volcano, tsunami)", style="dim"))
 
         return Panel(
             Group(*content),
-            title="[bold]Commands[/bold]",
-            subtitle="[dim][r] run command[/dim]",
+            title="[bold]Live Feed[/bold]",
+            subtitle="[dim][3] full Messages screen  [s] send  [r] run cmd[/dim]",
+            border_style="magenta",
+        )
+
+    def _create_sidebar_panel(self) -> Panel:
+        """Create sidebar with nodes, alerts, and bot status."""
+        network = self.app.api.network
+        content = []
+
+        # --- Active Nodes (compact) ---
+        nodes = sorted(
+            network.get_nodes_snapshot(),
+            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
+            reverse=True,
+        )[:8]
+
+        content.append(Text(f"Nodes ({len(network.online_nodes)} online)", style="bold green"))
+        if nodes:
+            for node in nodes:
+                name = node.display_name[:14]
+                heard = node.time_since_heard
+                if node.is_favorite:
+                    nstyle = "yellow bold"
+                elif not node.is_online:
+                    nstyle = "dim"
+                else:
+                    nstyle = "white"
+                line = Text()
+                line.append(f"  {name:<14s}", style=nstyle)
+                line.append(f" {heard}", style="dim")
+                batt = node.telemetry.battery_level if node.telemetry else None
+                if batt is not None:
+                    line.append(f" {batt}%", style="green" if batt > 20 else "red")
+                content.append(line)
+        else:
+            content.append(Text("  Waiting for nodes...", style="dim"))
+        content.append(Text(""))
+
+        # --- Alerts (compact) ---
+        alerts = network.get_alerts_snapshot()[-3:]
+        alert_count = len(network.unread_alerts)
+        alert_label = f"Alerts ({alert_count} unread)" if alert_count else "Alerts"
+        content.append(Text(alert_label, style="bold red" if alert_count else "bold blue"))
+        if alerts:
+            for alert in reversed(alerts):
+                style = SEVERITY_COLORS.get(alert.severity, "white")
+                icon = SEVERITY_ICONS.get(alert.severity, "*")
+                content.append(Text(f"  {icon} {alert.title[:25]}", style=style))
+        else:
+            content.append(Text("  No alerts", style="dim green"))
+        content.append(Text(""))
+
+        # --- Bot Status (upstream features) ---
+        content.append(Text("Bot Features", style="bold cyan"))
+        if hasattr(self.app, "config") and hasattr(self.app.config, "read_upstream_commands"):
+            try:
+                upstream = self.app.config.read_upstream_commands()
+                if upstream:
+                    on_features = [name for name, enabled in sorted(upstream.items()) if enabled]
+                    off_features = [name for name, enabled in sorted(upstream.items()) if not enabled]
+                    if on_features:
+                        content.append(Text(f"  ON: {', '.join(on_features[:6])}", style="green"))
+                        if len(on_features) > 6:
+                            content.append(Text(f"      +{len(on_features)-6} more", style="dim green"))
+                    if off_features:
+                        content.append(Text(f"  off: {', '.join(off_features[:4])}", style="dim"))
+                else:
+                    content.append(Text("  No upstream config found", style="dim"))
+            except (OSError, ValueError):
+                content.append(Text("  Could not read bot config", style="dim"))
+        else:
+            content.append(Text("  N/A", style="dim"))
+
+        return Panel(
+            Group(*content),
+            title="[bold]Status[/bold]",
             border_style="green",
         )
 
