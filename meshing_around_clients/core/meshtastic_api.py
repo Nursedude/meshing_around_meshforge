@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,90 @@ def refresh_meshtastic_availability() -> bool:
                 logger.info("meshtastic.%s import failed (%s): %s", mod_name, type(exc).__name__, exc)
 
     return MESHTASTIC_AVAILABLE
+
+
+# Path to upstream meshing-around bot's Python venv
+_UPSTREAM_VENV_PYTHON = Path("/opt/meshing-around/venv/bin/python3")
+
+# Map of meshforge command names → upstream function calls
+# Each value is (module, function, needs_latlon)
+_UPSTREAM_CMD_MAP = {
+    "moon": ("space", "get_moon", True),
+    "sun": ("space", "get_sun", True),
+    "solar": ("space", "solar_conditions", False),
+    "hfcond": ("space", "hf_band_conditions", False),
+    "wx": ("locationdata", "get_NOAAweather", True),
+    "wxa": ("locationdata", "getWeatherAlertsNOAA", True),
+    "wxalert": ("locationdata", "getWeatherAlertsNOAA", True),
+    "valert": ("locationdata", "get_volcano_usgs", True),
+    "earthquake": ("locationdata", "checkUSGSEarthQuake", True),
+    "tide": ("locationdata", "get_NOAAtide", True),
+    "whereami": ("locationdata", "where_am_i", True),
+}
+
+
+def _call_upstream_cmd(command: str, lat: float = 0.0, lon: float = 0.0) -> str:
+    """Call an upstream meshing-around command using the bot's Python venv.
+
+    This gives identical output to the bot since it uses the same code + deps.
+    Falls back gracefully if the bot venv or modules aren't available.
+    """
+    import subprocess
+
+    if command not in _UPSTREAM_CMD_MAP:
+        return ""
+    if not _UPSTREAM_VENV_PYTHON.exists():
+        return ""
+
+    module, func, needs_latlon = _UPSTREAM_CMD_MAP[command]
+
+    # Build a self-contained Python script that stubs the logger,
+    # sets location, imports the module, and calls the function.
+    args = f"{lat}, {lon}" if needs_latlon else ""
+    script = f"""
+import sys, types, logging
+sys.path.insert(0, '/opt/meshing-around')
+sys.path.insert(0, '/opt/meshing-around/modules')
+stub = types.ModuleType('modules.log')
+stub.logger = logging.getLogger('stub')
+stub.getPrettyTime = lambda: ''
+sys.modules['modules.log'] = stub
+import modules.settings as s
+s.latitudeValue = {lat}
+s.longitudeValue = {lon}
+s.zuluTime = False
+s.use_metric = False
+s.urlTimeoutSeconds = 10
+s.noaaForecastDuration = 3
+s.ignoreUSGSEnable = False
+s.ignoreUSGSwords = []
+s.ERROR_FETCHING_DATA = 'Error fetching data'
+s.NO_DATA_NOGPS = 'No GPS data'
+s.NO_ALERTS = 'No alerts'
+from {module} import {func}
+result = {func}({args})
+if result:
+    print(result)
+"""
+    try:
+        proc = subprocess.run(
+            [str(_UPSTREAM_VENV_PYTHON), "-c", script],
+            capture_output=True, text=True, timeout=15,
+        )
+        output = proc.stdout.strip()
+        if output:
+            return output
+        if proc.stderr:
+            # Filter out the harmless config warning
+            errs = [l for l in proc.stderr.splitlines() if "config.ini" not in l.lower()]
+            if errs:
+                logger.warning("Upstream cmd %s stderr: %s", command, errs[0][:100])
+        return f"{command}: no data"
+    except subprocess.TimeoutExpired:
+        return f"{command}: timeout"
+    except (OSError, ValueError) as e:
+        logger.warning("Upstream cmd %s failed: %s", command, e)
+        return ""
 
 
 def _fetch_url(url: str, timeout: int = 10) -> str:
@@ -1059,12 +1144,7 @@ class MeshtasticAPI(CallbackMixin):
                 return f"Uptime: {hours}h {mins}m {secs}s"
             return "Uptime: unknown"
 
-        # Check data sources for this command
-        sources = self.config.data_sources.get_enabled_sources()
-        if command in sources:
-            return _fetch_data_source(sources[command])
-
-        # Meshing-around data commands (use upstream lat/lon if available)
+        # Try upstream bot venv first (gives identical output to the bot)
         upstream = {}
         if hasattr(self.config, "read_upstream_settings"):
             try:
@@ -1073,6 +1153,16 @@ class MeshtasticAPI(CallbackMixin):
                 pass
         lat = upstream.get("lat", 0.0)
         lon = upstream.get("lon", 0.0)
+
+        if command in _UPSTREAM_CMD_MAP:
+            result = _call_upstream_cmd(command, lat, lon)
+            if result:
+                return result
+
+        # Fallback: check data sources from meshforge config
+        sources = self.config.data_sources.get_enabled_sources()
+        if command in sources:
+            return _fetch_data_source(sources[command])
 
         if command == "wx" and lat:
             return _cmd_wx(lat, lon)
@@ -1147,26 +1237,31 @@ class MeshtasticAPI(CallbackMixin):
             except (OSError, ValueError):
                 pass
 
+        has_upstream_venv = _UPSTREAM_VENV_PYTHON.exists()
+
         lines = [f"Meshing-Around v{__version__} Commands:"]
 
-        # Data commands (live API calls)
+        # Data commands (uses bot's venv when available, stdlib fallback)
         lines.append("")
         lines.append("Data Commands (live):")
         if has_location:
             lines.append("  wx          - NOAA Weather forecast")
             lines.append("  wxa         - Weather alerts (NWS)")
+            lines.append("  whereami    - Location info")
         lines.append("  valert      - Volcano alerts (USGS)")
         lines.append("  earthquake  - Recent earthquakes (USGS)")
-        lines.append("  solar       - Solar/space weather (SWPC)")
+        lines.append("  solar       - Solar/space weather")
         lines.append("  hfcond      - HF band conditions")
+        if has_location:
+            lines.append("  moon        - Moon phase/rise/set")
+            lines.append("  sun         - Sunrise/sunset")
+            lines.append("  tide        - NOAA tide data")
 
-        # Show configured data sources (may overlap, that's ok)
+        # Show configured data sources
         if config and hasattr(config, "data_sources"):
             sources = config.data_sources.get_enabled_sources()
             for cmd_name, src in sources.items():
-                if cmd_name not in ("volcano", "weather", "tsunami"):
-                    lines.append(f"  {cmd_name:12s} - {src.name}")
-                elif cmd_name == "tsunami":
+                if cmd_name == "tsunami":
                     lines.append("  tsunami     - Tsunami alerts (PTWC)")
 
         # Network commands (local data)
@@ -1180,7 +1275,7 @@ class MeshtasticAPI(CallbackMixin):
         lines.append("  ping        - Test connectivity")
         lines.append("  cmd / help  - Show this list")
 
-        # Bot-only commands (need running meshing-around bot)
+        # Bot-only commands
         if config and hasattr(config, "read_upstream_commands"):
             try:
                 upstream_cmds = config.read_upstream_commands()
