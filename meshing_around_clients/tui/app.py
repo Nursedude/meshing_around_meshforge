@@ -1438,11 +1438,11 @@ class ConfigScreen(Screen):
                 else:
                     table.add_row(f"[dim]{section}[/dim]", key, val_display)
 
+        save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
         if self._is_template:
-            subtitle = "[dim]\\[j/k] scroll  \\[C] create config.ini  \\[R] reload  \\[q] back[/dim] [yellow](read-only template)[/yellow]"
-            title_suffix = " [yellow](template - read only)[/yellow]"
+            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[C] create .ini  \\[R] reload  \\[q] back[/dim]{save_indicator}"
+            title_suffix = " [yellow](template)[/yellow]"
         else:
-            save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
             subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[R] reload  \\[q] back[/dim]{save_indicator}"
             title_suffix = ""
 
@@ -1461,8 +1461,6 @@ class ConfigScreen(Screen):
             self._cursor = max(self._cursor - 1, 0)
             return True
         elif key == "t":
-            if self._is_template:
-                return True  # read-only
             # Toggle boolean values
             if self._cursor < len(self._items):
                 section, k, v = self._items[self._cursor]
@@ -1473,8 +1471,6 @@ class ConfigScreen(Screen):
                     self._dirty = True
             return True
         elif key == "\n" or key == "\r":
-            if self._is_template:
-                return True  # read-only
             # Edit value
             if self._cursor < len(self._items):
                 section, k, v = self._items[self._cursor]
@@ -1482,8 +1478,6 @@ class ConfigScreen(Screen):
                     self._edit_value(section, k, v or "")
             return True
         elif key == "w":
-            if self._is_template:
-                return True  # read-only
             self._save()
             return True
         elif key == "C":
