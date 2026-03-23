@@ -863,7 +863,20 @@ class Config:
 
     def find_upstream_config(self) -> Optional[Path]:
         """Find upstream meshing-around config file."""
-        paths = self._get_upstream_config_paths()
+        # Hardcoded primary check — most common install location
+        primary = Path("/opt/meshing-around/config.ini")
+        try:
+            if primary.exists():
+                logger.debug("Upstream config found at primary path: %s", primary)
+                return primary
+        except Exception:
+            pass
+
+        # Dynamic path search
+        try:
+            paths = self._get_upstream_config_paths()
+        except Exception:
+            paths = [primary]
         for path in paths:
             try:
                 if path.exists():
@@ -877,6 +890,14 @@ class Config:
 
     def get_upstream_template_path(self) -> Optional[Path]:
         """Find config.template in upstream paths (fallback when config.ini missing)."""
+        # Hardcoded primary check
+        primary = Path("/opt/meshing-around/config.template")
+        try:
+            if primary.exists():
+                return primary
+        except Exception:
+            pass
+
         for path in self._get_upstream_config_paths():
             template_path = path.with_name("config.template")
             try:

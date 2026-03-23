@@ -339,7 +339,7 @@ class DashboardScreen(Screen):
         else:
             util_str = "--"
         stats_table.add_row(
-            "Default Ch", default_ch,
+            "Bot Ch", default_ch,
             "Avg SNR", f"{avg_snr:.1f} dB" if avg_snr else "--",
             "Ch Util", Text.from_markup(util_str),
         )
@@ -474,10 +474,24 @@ class DashboardScreen(Screen):
                     if off_features:
                         content.append(Text(f"  off: {', '.join(off_features[:4])}", style="dim"))
                 else:
-                    template = self.app.config.get_upstream_template_path()
-                    if template:
-                        content.append(Text("  config.template found (no config.ini)", style="dim yellow"))
-                    else:
+                    # Last-resort: direct read of hardcoded path
+                    import configparser as _fallback_cp
+                    _primary = Path("/opt/meshing-around/config.ini")
+                    _fallback_parser = _fallback_cp.ConfigParser()
+                    try:
+                        if _primary.exists():
+                            _fallback_parser.read(str(_primary))
+                            if _fallback_parser.sections():
+                                content.append(Text(f"  Config: {_primary}", style="dim green"))
+                            else:
+                                content.append(Text("  Config found but empty", style="dim yellow"))
+                        else:
+                            template = self.app.config.get_upstream_template_path()
+                            if template:
+                                content.append(Text("  config.template found (no config.ini)", style="dim yellow"))
+                            else:
+                                content.append(Text("  No upstream config found", style="dim"))
+                    except Exception:
                         content.append(Text("  No upstream config found", style="dim"))
             except (OSError, ValueError):
                 content.append(Text("  Could not read bot config", style="dim"))
@@ -1309,13 +1323,21 @@ class ConfigScreen(Screen):
 
     def _find_config(self) -> Optional[Path]:
         """Find upstream config.ini, falling back to config.template."""
-        # Try Config's canonical search first
+        # Hardcoded primary check — most common install location
+        primary = Path("/opt/meshing-around/config.ini")
+        try:
+            if primary.exists():
+                return primary
+        except Exception:
+            pass
+
+        # Try Config's canonical search
         if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
             try:
                 found = self.app.config.find_upstream_config()
                 if found:
                     return found
-            except (OSError, ValueError):
+            except Exception:
                 pass
 
         # Comprehensive search for config.ini
@@ -1327,6 +1349,13 @@ class ConfigScreen(Screen):
                 continue
 
         # Fallback: search for config.template
+        primary_template = Path("/opt/meshing-around/config.template")
+        try:
+            if primary_template.exists():
+                return primary_template
+        except Exception:
+            pass
+
         for p in self._get_search_paths():
             template = p.with_name("config.template")
             try:
