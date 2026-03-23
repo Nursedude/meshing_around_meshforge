@@ -1271,44 +1271,24 @@ class MeshtasticAPI(CallbackMixin):
         """Return a formatted string of available commands for display."""
         from meshing_around_clients import __version__
 
-        # Check if upstream lat/lon is available for data commands
-        has_location = False
-        if config and hasattr(config, "read_upstream_settings"):
-            try:
-                s = config.read_upstream_settings()
-                has_location = s.get("lat", 0.0) != 0.0
-            except (OSError, ValueError):
-                pass
-
-        has_upstream_venv = _UPSTREAM_VENV_PYTHON.exists()
-
         lines = [f"Meshing-Around v{__version__} Commands:"]
 
-        # Data commands (run locally via bot engine)
+        # Data commands — always show all (bot venv resolves lat/lon at runtime)
         lines.append("")
         lines.append("Data Commands (run locally via bot engine):")
-        if has_location:
-            lines.append("  wx/wxc/mwx  - Weather (NOAA/Meteo)")
-            lines.append("  wxa/wxalert - Weather alerts (NWS)")
-            lines.append("  ealert      - Emergency alerts (iPAWS)")
+        lines.append("  wx/wxc/mwx  - Weather (NOAA/Meteo)")
+        lines.append("  wxa/wxalert - Weather alerts (NWS)")
+        lines.append("  ealert      - Emergency alerts (iPAWS)")
         lines.append("  valert      - Volcano alerts (USGS)")
         lines.append("  earthquake  - Earthquakes (USGS)")
         lines.append("  solar       - Solar/space weather")
         lines.append("  hfcond      - HF band conditions")
-        if has_location:
-            lines.append("  moon        - Moon phase/rise/set")
-            lines.append("  sun         - Sunrise/sunset")
-            lines.append("  tide        - NOAA tide data")
-            lines.append("  riverflow   - River flow data")
-            lines.append("  whereami    - Location info")
-
-        # Show configured data sources
-        if config and hasattr(config, "data_sources"):
-            sources = config.data_sources.get_enabled_sources()
-            for cmd_name, src in sources.items():
-                if cmd_name == "tsunami":
-                    lines.append("  tsunami     - Tsunami alerts (PTWC)")
-
+        lines.append("  moon        - Moon phase/rise/set")
+        lines.append("  sun         - Sunrise/sunset")
+        lines.append("  tide        - NOAA tide data")
+        lines.append("  riverflow   - River flow data")
+        lines.append("  whereami    - Location info")
+        lines.append("  tsunami     - Tsunami alerts (PTWC)")
         lines.append("  motd        - Message of the day")
 
         # Network commands (local data)
