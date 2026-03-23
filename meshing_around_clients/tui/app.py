@@ -472,7 +472,11 @@ class DashboardScreen(Screen):
                     if off_features:
                         content.append(Text(f"  off: {', '.join(off_features[:4])}", style="dim"))
                 else:
-                    content.append(Text("  No upstream config found", style="dim"))
+                    template = self.app.config.get_upstream_template_path()
+                    if template:
+                        content.append(Text("  config.template found (no config.ini)", style="dim yellow"))
+                    else:
+                        content.append(Text("  No upstream config found", style="dim"))
             except (OSError, ValueError):
                 content.append(Text("  Could not read bot config", style="dim"))
         else:
@@ -1256,17 +1260,6 @@ class DevicesScreen(Screen):
 class ConfigScreen(Screen):
     """Config editor for meshing-around config.ini — view and edit all settings."""
 
-    # Search paths for upstream config (MF001: use SUDO_USER, not Path.home())
-    @staticmethod
-    def _get_search_paths():
-        import os
-        sudo_user = os.environ.get("SUDO_USER")
-        home = Path(f"/home/{sudo_user}") if sudo_user else Path.home()
-        return [
-            Path("/opt/meshing-around/config.ini"),
-            home / "meshing-around" / "config.ini",
-            Path("/opt/meshing_around/config.ini"),
-        ]
     # Preferred section display order
     _SECTION_ORDER = [
         "general", "location", "interface", "interface2", "bbs", "sentry",
@@ -1285,31 +1278,69 @@ class ConfigScreen(Screen):
         self._error = ""
         self._loaded = False  # lazy load on first render
 
-    def _find_config(self) -> Optional[Path]:
-        """Find upstream config.ini by searching all known paths."""
-        # Build a comprehensive search list — check every possible location
-        all_paths = [Path("/opt/meshing-around/config.ini")]
-        all_paths.extend(self._get_search_paths())
+    def _get_search_paths(self) -> "list[Path]":
+        """Get deduplicated upstream config search paths.
 
-        # Also try the Config class search (may find it via CWD)
+        Delegates to Config._get_upstream_config_paths() for consistency,
+        then adds ConfigScreen-specific paths.
+        """
+        paths: list[Path] = []
+        seen: set[str] = set()
+
+        # Primary: use Config's canonical search paths
+        if hasattr(self.app, "config"):
+            for p in self.app.config._get_upstream_config_paths():
+                key = str(p)
+                if key not in seen:
+                    paths.append(p)
+                    seen.add(key)
+
+        # Additional path (underscore variant)
+        for p in [Path("/opt/meshing_around/config.ini")]:
+            key = str(p)
+            if key not in seen:
+                paths.append(p)
+                seen.add(key)
+
+        return paths
+
+    def _find_config(self) -> Optional[Path]:
+        """Find upstream config.ini, falling back to config.template."""
+        # Try Config's canonical search first
         if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
             try:
                 found = self.app.config.find_upstream_config()
-                if found and found not in all_paths:
-                    all_paths.insert(0, found)
+                if found:
+                    return found
             except (OSError, ValueError):
                 pass
 
-        for p in all_paths:
+        # Comprehensive search for config.ini
+        for p in self._get_search_paths():
             try:
                 if p.exists():
                     return p
             except (OSError, PermissionError):
                 continue
+
+        # Fallback: search for config.template
+        for p in self._get_search_paths():
+            template = p.with_name("config.template")
+            try:
+                if template.exists():
+                    return template
+            except (OSError, PermissionError):
+                continue
+
         return None
 
+    @property
+    def _is_template(self) -> bool:
+        """True if currently viewing a config.template (read-only)."""
+        return bool(self._config_path and self._config_path.name == "config.template")
+
     def _load(self) -> None:
-        """Load the upstream config.ini into memory."""
+        """Load the upstream config.ini (or config.template) into memory."""
         import configparser as _cp
         self._parser = _cp.ConfigParser()
         self._error = ""
@@ -1321,11 +1352,10 @@ class ConfigScreen(Screen):
             except _cp.Error as e:
                 self._error = f"Parse error: {e}"
         else:
-            all_paths = [Path("/opt/meshing-around/config.ini")]
-            all_paths.extend(self._get_search_paths())
-            searched = ", ".join(str(p) for p in all_paths)
+            # Nothing found — show helpful error
+            searched = ", ".join(str(p) for p in self._get_search_paths())
             self._error = (
-                f"meshing-around config.ini not found.\n"
+                f"meshing-around config not found.\n"
                 f"Searched: {searched}\n\n"
                 f"If meshing-around is installed elsewhere, create a symlink:\n"
                 f"  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
@@ -1402,12 +1432,17 @@ class ConfigScreen(Screen):
                 else:
                     table.add_row(f"[dim]{section}[/dim]", key, val_display)
 
-        save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
-        subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[R] reload  \\[q] back[/dim]{save_indicator}"
+        if self._is_template:
+            subtitle = "[dim]\\[j/k] scroll  \\[R] reload  \\[q] back[/dim] [yellow](read-only template)[/yellow]"
+            title_suffix = " [yellow](template - read only)[/yellow]"
+        else:
+            save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
+            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[R] reload  \\[q] back[/dim]{save_indicator}"
+            title_suffix = ""
 
         return Panel(
             table,
-            title=f"[bold]Config Editor[/bold] [dim]({self._config_path})[/dim]",
+            title=f"[bold]Config Editor[/bold] [dim]({self._config_path})[/dim]{title_suffix}",
             subtitle=subtitle,
             border_style="yellow",
         )
@@ -1420,6 +1455,8 @@ class ConfigScreen(Screen):
             self._cursor = max(self._cursor - 1, 0)
             return True
         elif key == "t":
+            if self._is_template:
+                return True  # read-only
             # Toggle boolean values
             if self._cursor < len(self._items):
                 section, k, v = self._items[self._cursor]
@@ -1430,6 +1467,8 @@ class ConfigScreen(Screen):
                     self._dirty = True
             return True
         elif key == "\n" or key == "\r":
+            if self._is_template:
+                return True  # read-only
             # Edit value
             if self._cursor < len(self._items):
                 section, k, v = self._items[self._cursor]
@@ -1437,6 +1476,8 @@ class ConfigScreen(Screen):
                     self._edit_value(section, k, v or "")
             return True
         elif key == "w":
+            if self._is_template:
+                return True  # read-only
             self._save()
             return True
         elif key == "R":

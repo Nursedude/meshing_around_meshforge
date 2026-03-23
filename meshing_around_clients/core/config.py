@@ -4,11 +4,14 @@ Handles loading and saving client configuration.
 """
 
 import configparser
+import logging
 import os
 import pathlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 def get_user_home() -> Path:
@@ -272,19 +275,28 @@ class Config:
     enabled interface for backward compatibility.
     """
 
-    DEFAULT_CONFIG_PATHS = [
-        get_user_home() / ".config" / "meshing-around-clients" / "config.ini",
-        Path.cwd() / "client_config.ini",
-        Path.cwd() / "mesh_client.ini",
-        Path("/etc/meshing-around-clients/config.ini"),
-    ]
+    @staticmethod
+    def _get_default_config_paths() -> "List[Path]":
+        """Build client config search paths at call time (not import time)."""
+        return [
+            get_user_home() / ".config" / "meshing-around-clients" / "config.ini",
+            Path.cwd() / "client_config.ini",
+            Path.cwd() / "mesh_client.ini",
+            Path("/etc/meshing-around-clients/config.ini"),
+        ]
 
-    # Upstream meshing-around config paths (ordered by specificity)
-    UPSTREAM_CONFIG_PATHS = [
-        Path("/opt/meshing-around/config.ini"),
-        get_user_home() / "meshing-around" / "config.ini",
-        Path.cwd() / "config.ini",
-    ]
+    @staticmethod
+    def _get_upstream_config_paths() -> "List[Path]":
+        """Build upstream config search paths at call time (not import time).
+
+        Evaluates get_user_home() and Path.cwd() fresh each call so they
+        reflect the actual runtime environment.
+        """
+        return [
+            Path("/opt/meshing-around/config.ini"),
+            get_user_home() / "meshing-around" / "config.ini",
+            Path.cwd() / "config.ini",
+        ]
 
     def __init__(self, config_path: Optional[str] = None):
         self.config_path = Path(config_path) if config_path else self._find_config()
@@ -350,14 +362,14 @@ class Config:
     def _find_config(self) -> Optional[Path]:
         """Find an existing config file, checking MeshForge paths first."""
         # Check MeshForge paths first
-        for path in self.DEFAULT_CONFIG_PATHS:
+        for path in self._get_default_config_paths():
             if path.exists():
                 return path
         # Check upstream paths
-        for path in self.UPSTREAM_CONFIG_PATHS:
+        for path in self._get_upstream_config_paths():
             if path.exists():
                 return path
-        return self.DEFAULT_CONFIG_PATHS[0]  # Default path for new config
+        return self._get_default_config_paths()[0]  # Default path for new config
 
     def _detect_config_format(self) -> str:
         """Detect if config is upstream meshing-around or MeshForge format."""
@@ -851,9 +863,27 @@ class Config:
 
     def find_upstream_config(self) -> Optional[Path]:
         """Find upstream meshing-around config file."""
-        for path in self.UPSTREAM_CONFIG_PATHS:
-            if path.exists():
-                return path
+        paths = self._get_upstream_config_paths()
+        for path in paths:
+            try:
+                if path.exists():
+                    logger.debug("Upstream config found: %s", path)
+                    return path
+                logger.debug("Upstream config not at: %s", path)
+            except (OSError, PermissionError) as e:
+                logger.debug("Upstream config check failed for %s: %s", path, e)
+        logger.debug("No upstream config found in %d paths", len(paths))
+        return None
+
+    def get_upstream_template_path(self) -> Optional[Path]:
+        """Find config.template in upstream paths (fallback when config.ini missing)."""
+        for path in self._get_upstream_config_paths():
+            template_path = path.with_name("config.template")
+            try:
+                if template_path.exists():
+                    return template_path
+            except (OSError, PermissionError):
+                continue
         return None
 
     def read_upstream_commands(self) -> Dict[str, bool]:
@@ -863,6 +893,7 @@ class Config:
         Read-only — never modifies the upstream config.
         """
         upstream_path = self.find_upstream_config()
+        logger.debug("read_upstream_commands: upstream_path=%s", upstream_path)
         if not upstream_path or not upstream_path.exists():
             return {}
 
@@ -920,6 +951,7 @@ class Config:
             if parser.getboolean("radioMon", "dxspotter_enabled", fallback=False):
                 features["dxspotter"] = True
 
+        logger.debug("read_upstream_commands: found %d features", len(features))
         return features
 
     def read_upstream_settings(self) -> Dict[str, Any]:
