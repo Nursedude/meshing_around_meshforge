@@ -1274,6 +1274,7 @@ class ConfigScreen(Screen):
         self._config_path = None  # type: Optional[Path]
         self._items = []  # flat list of (section, key, value) for scrolling
         self._cursor = 0
+        self._scroll_top = 0  # stable scroll position
         self._dirty = False  # config has unsaved changes
         self._error = ""
         self._loaded = False  # lazy load on first render
@@ -1396,12 +1397,15 @@ class ConfigScreen(Screen):
         table.add_column("Key", style="white", width=28)
         table.add_column("Value", style="green")
 
-        # Determine visible window (30 rows centered on cursor)
+        # Stable scroll — only moves when cursor exits visible range
         window = 28
-        start = max(0, self._cursor - window // 2)
+        if self._cursor < self._scroll_top:
+            self._scroll_top = self._cursor
+        elif self._cursor >= self._scroll_top + window:
+            self._scroll_top = self._cursor - window + 1
+        self._scroll_top = max(0, min(self._scroll_top, max(0, len(self._items) - window)))
+        start = self._scroll_top
         end = min(len(self._items), start + window)
-        if end - start < window:
-            start = max(0, end - window)
 
         for i in range(start, end):
             section, key, value = self._items[i]
@@ -1433,7 +1437,7 @@ class ConfigScreen(Screen):
                     table.add_row(f"[dim]{section}[/dim]", key, val_display)
 
         if self._is_template:
-            subtitle = "[dim]\\[j/k] scroll  \\[R] reload  \\[q] back[/dim] [yellow](read-only template)[/yellow]"
+            subtitle = "[dim]\\[j/k] scroll  \\[C] create config.ini  \\[R] reload  \\[q] back[/dim] [yellow](read-only template)[/yellow]"
             title_suffix = " [yellow](template - read only)[/yellow]"
         else:
             save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
@@ -1480,11 +1484,31 @@ class ConfigScreen(Screen):
                 return True  # read-only
             self._save()
             return True
+        elif key == "C":
+            if self._is_template and self._config_path:
+                self._create_from_template()
+            return True
         elif key == "R":
             self._load()
             self._dirty = False
             return True
         return False
+
+    def _create_from_template(self) -> None:
+        """Create config.ini from the current config.template."""
+        import shutil as _shutil
+        if not self._config_path:
+            return
+        target = self._config_path.with_name("config.ini")
+        if target.exists():
+            self._error = f"config.ini already exists at {target}"
+            return
+        try:
+            _shutil.copy2(str(self._config_path), str(target))
+            target.chmod(0o600)
+            self._load()  # reload — will now find the new config.ini
+        except OSError as e:
+            self._error = f"Failed to create config.ini: {e}"
 
     def _edit_value(self, section: str, key: str, current: str) -> None:
         """Edit a config value using prompt mode."""
