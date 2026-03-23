@@ -291,9 +291,7 @@ class DashboardScreen(Screen):
             col3_label, col3_val = "Channels", mqtt_cfg.channels or str(mqtt_cfg.channel)
         elif iface_type in ("tcp", "serial", "ble"):
             col2_label, col2_val = "Device", "Meshtastic"
-            avg_util = network.mesh_health.get("avg_channel_utilization", 0)
-            col3_label = "Ch Util"
-            col3_val = f"{avg_util:.1f}%" if avg_util > 0 else "--"
+            col3_label, col3_val = "", ""
         else:
             col2_label, col2_val = "", ""
             col3_label, col3_val = "", ""
@@ -325,7 +323,11 @@ class DashboardScreen(Screen):
         )
 
         # Row 4: Default channel + avg SNR + channel utilization
-        default_ch = "ch" + str(self.app.config.network_cfg.default_channel) if hasattr(self.app, "config") else "--"
+        default_ch = "--"
+        if hasattr(self.app, "config"):
+            upstream = self.app.config.read_upstream_settings()
+            if upstream and "defaultchannel" in upstream:
+                default_ch = "ch" + str(upstream["defaultchannel"])
         avg_snr = health.get("avg_snr", 0)
         avg_util = health.get("avg_channel_utilization", 0)
         if avg_util >= 40.0:
