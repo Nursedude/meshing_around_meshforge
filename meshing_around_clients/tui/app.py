@@ -1283,23 +1283,29 @@ class ConfigScreen(Screen):
         self._cursor = 0
         self._dirty = False  # config has unsaved changes
         self._error = ""
-        self._load()
+        self._loaded = False  # lazy load on first render
 
     def _find_config(self) -> Optional[Path]:
-        """Find upstream config.ini by searching known paths."""
-        # Always check the most common path first (fast path)
-        common = Path("/opt/meshing-around/config.ini")
-        if common.exists():
-            return common
-        # Try the Config class search
+        """Find upstream config.ini by searching all known paths."""
+        # Build a comprehensive search list — check every possible location
+        all_paths = [Path("/opt/meshing-around/config.ini")]
+        all_paths.extend(self._get_search_paths())
+
+        # Also try the Config class search (may find it via CWD)
         if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
-            found = self.app.config.find_upstream_config()
-            if found:
-                return found
-        # Fallback: search our own list
-        for p in self._get_search_paths():
-            if p.exists():
-                return p
+            try:
+                found = self.app.config.find_upstream_config()
+                if found and found not in all_paths:
+                    all_paths.insert(0, found)
+            except (OSError, ValueError):
+                pass
+
+        for p in all_paths:
+            try:
+                if p.exists():
+                    return p
+            except (OSError, PermissionError):
+                continue
         return None
 
     def _load(self) -> None:
@@ -1307,15 +1313,23 @@ class ConfigScreen(Screen):
         import configparser as _cp
         self._parser = _cp.ConfigParser()
         self._error = ""
+        self._loaded = True
         self._config_path = self._find_config()
-        if self._config_path and self._config_path.exists():
+        if self._config_path:
             try:
                 self._parser.read(str(self._config_path))
             except _cp.Error as e:
-                self._error = str(e)
+                self._error = f"Parse error: {e}"
         else:
-            searched = ", ".join(str(p) for p in self._get_search_paths())
-            self._error = f"config.ini not found. Searched: {searched}"
+            all_paths = [Path("/opt/meshing-around/config.ini")]
+            all_paths.extend(self._get_search_paths())
+            searched = ", ".join(str(p) for p in all_paths)
+            self._error = (
+                f"meshing-around config.ini not found.\n"
+                f"Searched: {searched}\n\n"
+                f"If meshing-around is installed elsewhere, create a symlink:\n"
+                f"  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
+            )
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -1338,9 +1352,11 @@ class ConfigScreen(Screen):
         self._items = items
 
     def render(self) -> Panel:
+        if not self._loaded:
+            self._load()
         if self._error:
             return Panel(
-                Text(self._error, style="red"),
+                Text(self._error, style="yellow"),
                 title="[bold]Config Editor[/bold]",
                 border_style="yellow",
             )
