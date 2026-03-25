@@ -926,6 +926,77 @@ def apply_profile(config: ConfigParser, profile: ConfigParser) -> None:
     log("Profile applied to configuration", "OK")
 
 
+def apply_bot_profile(profile_id: str) -> bool:
+    """Apply a regional *_bot.ini profile to the upstream meshing-around config.ini.
+
+    Finds the matching bot profile (e.g., profiles/hawaii_bot.ini) and merges
+    it into the upstream config with backup.  Returns True if applied.
+    """
+    import shutil as _shutil
+
+    bot_profile_path = PROFILES_DIR / f"{profile_id}_bot.ini"
+    if not bot_profile_path.exists():
+        return False
+
+    # Find upstream config
+    try:
+        config_obj = Config()
+        upstream_path = config_obj.find_upstream_config()
+        if not upstream_path:
+            # Try template fallback — create config.ini from it
+            template_path = config_obj.get_upstream_template_path()
+            if template_path:
+                upstream_path = template_path.with_name("config.ini")
+                _shutil.copy2(str(template_path), str(upstream_path))
+                log(f"Created {upstream_path} from template", "OK")
+            else:
+                return False
+    except Exception:
+        return False
+
+    # Load upstream config
+    upstream = ConfigParser()
+    try:
+        upstream.read(str(upstream_path))
+    except Exception:
+        return False
+
+    # Load bot profile
+    bot_profile = ConfigParser()
+    try:
+        bot_profile.read(str(bot_profile_path))
+    except Exception:
+        return False
+
+    # Backup upstream config
+    try:
+        bak = upstream_path.with_suffix(".ini.bak")
+        _shutil.copy2(str(upstream_path), str(bak))
+    except OSError:
+        pass
+
+    # Merge — overwrite with bot profile values (skip metadata sections)
+    skip_sections = {"profile", "notes"}
+    for section in bot_profile.sections():
+        if section in skip_sections:
+            continue
+        if not upstream.has_section(section):
+            upstream.add_section(section)
+        for key, value in bot_profile.items(section):
+            upstream.set(section, key, value)
+
+    # Save
+    try:
+        with open(upstream_path, "w") as f:
+            upstream.write(f)
+        upstream_path.chmod(0o600)
+        log(f"Bot profile '{profile_id}' applied to {upstream_path}", "OK")
+        return True
+    except OSError as e:
+        log(f"Failed to save bot profile: {e}", "ERROR")
+        return False
+
+
 # =============================================================================
 # CONNECTION DETECTION
 # =============================================================================
@@ -1131,17 +1202,21 @@ def interactive_setup():
             profile = load_profile(profile_choice)
             if profile:
                 apply_profile(config, profile)
+                # Also apply matching bot profile to upstream config
+                bot_applied = apply_bot_profile(profile_choice)
                 # Show what was applied
                 profile_name = profile.get("profile", "name", fallback=profile_choice)
                 rec_hw = profile.get("profile", "recommended_hardware", fallback="")
                 topic = profile.get("mqtt", "topic_root", fallback="msh/US")
                 channels = profile.get("mqtt", "channels", fallback="LongFast")
+                bot_msg = "\nBot config also updated!" if bot_applied else ""
                 msgbox(
                     f"Profile: {profile_name}\n"
                     f"Topic root: {topic}\n"
                     f"Channels: {channels}\n"
                     + (f"Recommended hardware: {rec_hw}\n" if rec_hw else "")
-                    + "\nYou can customize further in the next steps.",
+                    + "\nYou can customize further in the next steps."
+                    + bot_msg,
                     title="Profile Applied",
                 )
 
@@ -1812,11 +1887,14 @@ def launcher_menu(config: ConfigParser) -> bool:
                     if profile:
                         apply_profile(config, profile)
                         save_config(config)
+                        bot_applied = apply_bot_profile(pick)
                         pname = profile.get("profile", "name", fallback=pick)
+                        bot_msg = "\nBot config also updated!" if bot_applied else ""
                         profile_msgbox(
                             f"Profile '{pname}' applied and saved.\n"
                             f"Topic: {config.get('mqtt', 'topic_root', fallback='msh/US')}\n"
-                            f"Channels: {config.get('mqtt', 'channels', fallback='LongFast')}",
+                            f"Channels: {config.get('mqtt', 'channels', fallback='LongFast')}"
+                            + bot_msg,
                             title="Profile Applied",
                         )
             continue
@@ -2098,6 +2176,9 @@ Examples:
             save_config(config)
             profile_name = profile.get("profile", "name", fallback=args.profile)
             log(f"Profile '{profile_name}' applied to {CONFIG_FILE}", "OK")
+            # Also apply matching bot profile to upstream config
+            if apply_bot_profile(args.profile):
+                log(f"Bot config also updated with '{args.profile}' profile", "OK")
         else:
             log(f"Profile '{args.profile}' not found. Use --list-profiles to see options.", "ERROR")
             sys.exit(1)

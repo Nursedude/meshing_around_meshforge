@@ -367,8 +367,9 @@ class DashboardScreen(Screen):
                 direction = ">>"
                 dir_style = "green"
 
-            # Check for emergency keywords
-            is_emergency = msg.text and any(
+            # Check for emergency keywords (incoming messages only —
+            # outgoing bot responses listing commands like "tsunami" aren't emergencies)
+            is_emergency = msg.is_incoming and msg.text and any(
                 kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords
             )
 
@@ -1656,44 +1657,47 @@ class ConfigScreen(Screen):
         )
 
     def handle_input(self, key: str) -> bool:
-        if key == "j":
-            self._cursor = min(self._cursor + 1, len(self._items) - 1)
-            return True
-        elif key == "k":
-            self._cursor = max(self._cursor - 1, 0)
-            return True
-        elif key == "t":
-            # Toggle boolean values
-            if self._cursor < len(self._items):
-                section, k, v = self._items[self._cursor]
-                if k and v and v.lower() in ("true", "false"):
-                    new_val = "False" if v.lower() == "true" else "True"
-                    self._parser.set(section, k, new_val)
-                    self._items[self._cursor] = (section, k, new_val)
-                    self._template_keys.discard((section, k))
-                    self._dirty = True
-            return True
-        elif key == "\n" or key == "\r":
-            # Edit value
-            if self._cursor < len(self._items):
-                section, k, v = self._items[self._cursor]
-                if k is not None:
-                    self._edit_value(section, k, v or "")
-            return True
-        elif key == "w":
-            self._save()
-            return True
-        elif key == "C":
-            if self._is_template and self._config_path:
-                self._create_from_template()
-            return True
-        elif key == "P":
-            self._show_profile_picker()
-            return True
-        elif key == "R":
-            self._load()
-            self._dirty = False
-            return True
+        try:
+            if key == "j":
+                self._cursor = min(self._cursor + 1, max(0, len(self._items) - 1))
+                return True
+            elif key == "k":
+                self._cursor = max(self._cursor - 1, 0)
+                return True
+            elif key == "t":
+                # Toggle boolean values
+                if self._items and self._cursor < len(self._items):
+                    section, k, v = self._items[self._cursor]
+                    if k and v and v.lower() in ("true", "false"):
+                        new_val = "False" if v.lower() == "true" else "True"
+                        self._parser.set(section, k, new_val)
+                        self._items[self._cursor] = (section, k, new_val)
+                        self._template_keys.discard((section, k))
+                        self._dirty = True
+                return True
+            elif key == "\n" or key == "\r":
+                # Edit value
+                if self._items and self._cursor < len(self._items):
+                    section, k, v = self._items[self._cursor]
+                    if k is not None:
+                        self._edit_value(section, k, v or "")
+                return True
+            elif key == "w":
+                self._save()
+                return True
+            elif key == "C":
+                if self._is_template and self._config_path:
+                    self._create_from_template()
+                return True
+            elif key == "P":
+                self._show_profile_picker()
+                return True
+            elif key == "R":
+                self._load()
+                self._dirty = False
+                return True
+        except Exception as e:
+            self._error = f"Input error: {e}"
         return False
 
     def _create_from_template(self) -> None:
