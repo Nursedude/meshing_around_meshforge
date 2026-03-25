@@ -865,6 +865,8 @@ def list_profiles() -> List[Dict[str, str]]:
         return profiles
 
     for ini_file in sorted(PROFILES_DIR.glob("*.ini")):
+        if ini_file.stem.endswith("_bot"):
+            continue  # Bot profiles are auto-applied, not user-selectable
         parser = ConfigParser()
         try:
             parser.read(ini_file)
