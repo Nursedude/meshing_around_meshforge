@@ -447,54 +447,11 @@ class DashboardScreen(Screen):
         )
 
     def _create_sidebar_panel(self) -> Panel:
-        """Create sidebar with nodes, alerts, and bot status."""
+        """Create sidebar with bot status, nodes, and alerts."""
         network = self.app.api.network
         content = []
 
-        # --- Active Nodes (compact) ---
-        nodes = sorted(
-            network.get_nodes_snapshot(),
-            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
-            reverse=True,
-        )[:8]
-
-        content.append(Text(f"Nodes ({len(network.online_nodes)} online)", style="bold green"))
-        if nodes:
-            for node in nodes:
-                name = node.display_name[:14]
-                heard = node.time_since_heard
-                if node.is_favorite:
-                    nstyle = "yellow bold"
-                elif not node.is_online:
-                    nstyle = "dim"
-                else:
-                    nstyle = "white"
-                line = Text()
-                line.append(f"  {name:<14s}", style=nstyle)
-                line.append(f" {heard}", style="dim")
-                batt = node.telemetry.battery_level if node.telemetry else None
-                if batt is not None:
-                    line.append(f" {batt}%", style="green" if batt > 20 else "red")
-                content.append(line)
-        else:
-            content.append(Text("  Waiting for nodes...", style="dim"))
-        content.append(Text(""))
-
-        # --- Alerts (compact) ---
-        alerts = network.get_alerts_snapshot()[-3:]
-        alert_count = len(network.unread_alerts)
-        alert_label = f"Alerts ({alert_count} unread)" if alert_count else "Alerts"
-        content.append(Text(alert_label, style="bold red" if alert_count else "bold blue"))
-        if alerts:
-            for alert in reversed(alerts):
-                style = SEVERITY_COLORS.get(alert.severity, "white")
-                icon = SEVERITY_ICONS.get(alert.severity, "*")
-                content.append(Text(f"  {icon} {alert.title[:25]}", style=style))
-        else:
-            content.append(Text("  No alerts", style="dim green"))
-        content.append(Text(""))
-
-        # --- Bot Status ---
+        # --- Bot Status (top — always visible) ---
         bot_running = self._check_bot_running()
         if bot_running:
             content.append(Text("Bot: RUNNING  [b] manage", style="bold green"))
@@ -541,6 +498,49 @@ class DashboardScreen(Screen):
                 content.append(Text("  Could not read bot config", style="dim"))
         else:
             content.append(Text("  N/A", style="dim"))
+        content.append(Text(""))
+
+        # --- Active Nodes (compact) ---
+        nodes = sorted(
+            network.get_nodes_snapshot(),
+            key=lambda n: n.last_heard or DATETIME_MIN_UTC,
+            reverse=True,
+        )[:8]
+
+        content.append(Text(f"Nodes ({len(network.online_nodes)} online)", style="bold green"))
+        if nodes:
+            for node in nodes:
+                name = node.display_name[:14]
+                heard = node.time_since_heard
+                if node.is_favorite:
+                    nstyle = "yellow bold"
+                elif not node.is_online:
+                    nstyle = "dim"
+                else:
+                    nstyle = "white"
+                line = Text()
+                line.append(f"  {name:<14s}", style=nstyle)
+                line.append(f" {heard}", style="dim")
+                batt = node.telemetry.battery_level if node.telemetry else None
+                if batt is not None:
+                    line.append(f" {batt}%", style="green" if batt > 20 else "red")
+                content.append(line)
+        else:
+            content.append(Text("  Waiting for nodes...", style="dim"))
+        content.append(Text(""))
+
+        # --- Alerts (compact) ---
+        alerts = network.get_alerts_snapshot()[-3:]
+        alert_count = len(network.unread_alerts)
+        alert_label = f"Alerts ({alert_count} unread)" if alert_count else "Alerts"
+        content.append(Text(alert_label, style="bold red" if alert_count else "bold blue"))
+        if alerts:
+            for alert in reversed(alerts):
+                style = SEVERITY_COLORS.get(alert.severity, "white")
+                icon = SEVERITY_ICONS.get(alert.severity, "*")
+                content.append(Text(f"  {icon} {alert.title[:25]}", style=style))
+        else:
+            content.append(Text("  No alerts", style="dim green"))
 
         return Panel(
             Group(*content),
