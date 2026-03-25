@@ -344,6 +344,58 @@ SVCEOF
     fi
 }
 
+setup_bot_service() {
+    log_info "Setting up mesh_bot systemd service..."
+
+    # Find the upstream meshing-around install
+    BOT_DIR=""
+    for dir in /opt/meshing-around "$HOME/meshing-around"; do
+        if [[ -f "$dir/mesh_bot.py" && -d "$dir/venv" ]]; then
+            BOT_DIR="$dir"
+            break
+        fi
+    done
+
+    if [[ -z "$BOT_DIR" ]]; then
+        log_warn "meshing-around not found — skipping bot service install"
+        return 1
+    fi
+
+    read -p "Install mesh_bot as systemd service? [y/N]: " INSTALL_BOT
+    if [[ ! "$INSTALL_BOT" =~ ^[Yy]$ ]]; then
+        log_info "Skipping bot service installation"
+        return 0
+    fi
+
+    sudo tee /etc/systemd/system/mesh_bot.service > /dev/null <<BOTEOF
+[Unit]
+Description=Meshing-Around Mesh Bot (mesh_bot.py)
+Documentation=https://github.com/SpudGunMan/meshing-around
+After=network.target meshtasticd.service
+Wants=meshtasticd.service
+
+[Service]
+Type=simple
+User=${USER}
+WorkingDirectory=${BOT_DIR}
+Environment=PYTHONUNBUFFERED=1
+Environment=REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ExecStart=${BOT_DIR}/venv/bin/python3 mesh_bot.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+BOTEOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable mesh_bot.service
+    log_ok "mesh_bot.service installed and enabled"
+    log_info "Start with: sudo systemctl start mesh_bot"
+    log_info "View logs:  sudo journalctl -u mesh_bot -f"
+}
+
 install_local_broker() {
     echo ""
     read -p "Install local MQTT broker (Mosquitto)? Recommended for MQTT mode [y/N]: " INSTALL_MOSQUITTO
@@ -457,6 +509,7 @@ main() {
     install_local_broker
     setup_serial_permissions
     setup_systemd_service
+    setup_bot_service
     print_summary
 }
 

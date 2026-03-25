@@ -3096,12 +3096,32 @@ class MeshingAroundTUI:
             check_service_status,
             get_service_logs,
             manage_service,
+            run_command,
         )
 
         SERVICE_NAME = "mesh_bot.service"
 
         with self._prompt_mode():
             self.console.clear()
+            # Check if service exists
+            ret, _, _ = run_command(["systemctl", "cat", SERVICE_NAME], sudo=False, timeout=5)
+            service_exists = ret == 0
+
+            if not service_exists:
+                self.console.print(Panel(
+                    "[yellow]mesh_bot.service not installed[/yellow]\n\n"
+                    "Run setup to install:\n"
+                    "  [cyan]./setup_headless.sh[/cyan]  (includes bot service setup)\n\n"
+                    "Or install manually:\n"
+                    "  [cyan]sudo cp templates/mesh_bot.service /etc/systemd/system/[/cyan]\n"
+                    "  Edit User= and WorkingDirectory= for your setup\n"
+                    "  [cyan]sudo systemctl daemon-reload && sudo systemctl enable mesh_bot[/cyan]",
+                    title="[bold cyan]Bot Service Management[/bold cyan]",
+                    border_style="yellow",
+                ))
+                input("\nPress Enter to continue...")
+                return
+
             # Check current status
             is_running, status_text = check_service_status(SERVICE_NAME)
             status_style = "bold green" if is_running else "bold red"
