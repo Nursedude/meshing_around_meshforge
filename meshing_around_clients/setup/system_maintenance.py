@@ -872,6 +872,58 @@ def get_service_logs(name: str, lines: int = 50) -> Tuple[bool, str]:
     return False, stderr or "No logs available"
 
 
+def setup_bot_venv(
+    bot_dir: Optional[Path] = None,
+    progress_callback: Optional[Callable[[str], None]] = None,
+) -> Tuple[bool, str]:
+    """Create venv and install dependencies for the meshing-around bot.
+
+    Finds the bot directory, creates a venv at bot_dir/venv/, and installs
+    requirements.txt. Uses MeshForge's robust pip helpers (retries, PEP 668).
+
+    Args:
+        bot_dir: Bot installation directory (auto-detected if None)
+        progress_callback: Optional callback for progress messages
+
+    Returns:
+        Tuple of (success, message)
+    """
+    from meshing_around_clients.setup.pi_utils import create_venv
+
+    def report(msg: str) -> None:
+        if progress_callback:
+            progress_callback(msg)
+
+    # Find bot directory
+    if bot_dir is None:
+        bot_dir = find_meshing_around()
+    if not bot_dir or not (bot_dir / "mesh_bot.py").exists():
+        return False, "meshing-around installation not found"
+
+    report(f"Found bot at: {bot_dir}")
+
+    venv_path = bot_dir / "venv"
+    req_file = bot_dir / "requirements.txt"
+
+    # Create venv
+    report("Creating virtual environment...")
+    ok, msg = create_venv(venv_path)
+    if not ok:
+        return False, f"Venv creation failed: {msg}"
+    report(msg)
+
+    # Install dependencies
+    if req_file.exists():
+        report("Installing bot dependencies (this may take a few minutes on Pi)...")
+        result = install_python_dependencies(req_file, venv_path, progress_callback=report)
+        if not result.success:
+            errors = "; ".join(result.errors[:3])
+            return False, f"Dependency install failed: {errors}"
+        return True, "Bot venv and dependencies installed successfully"
+    else:
+        return True, f"Venv created at {venv_path} (no requirements.txt found)"
+
+
 # =============================================================================
 # Clone/Install meshing-around
 # =============================================================================

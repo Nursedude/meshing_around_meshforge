@@ -3094,15 +3094,47 @@ class MeshingAroundTUI:
         """Interactive bot service management (start/stop/restart/status/logs)."""
         from meshing_around_clients.setup.system_maintenance import (
             check_service_status,
+            find_meshing_around,
             get_service_logs,
             manage_service,
             run_command,
+            setup_bot_venv,
         )
 
         SERVICE_NAME = "mesh_bot.service"
 
         with self._prompt_mode():
             self.console.clear()
+
+            # Check if bot venv exists
+            bot_dir = find_meshing_around()
+            venv_missing = bot_dir and not (bot_dir / "venv" / "bin" / "python3").exists()
+
+            if venv_missing:
+                self.console.print(Panel(
+                    f"[yellow]Bot found at {bot_dir} but venv is missing[/yellow]\n"
+                    "The bot needs a virtual environment with its dependencies.",
+                    title="[bold cyan]Bot Service Management[/bold cyan]",
+                    border_style="yellow",
+                ))
+                try:
+                    install = Prompt.ask("Install bot venv + dependencies?", choices=["y", "n"], default="y")
+                    if install == "y":
+                        self.console.print("[cyan]Creating venv and installing dependencies...[/cyan]")
+                        self.console.print("[dim]This may take several minutes on Pi Zero 2W[/dim]\n")
+                        ok, msg = setup_bot_venv(
+                            bot_dir,
+                            progress_callback=lambda m: self.console.print(f"  [dim]{m}[/dim]"),
+                        )
+                        if ok:
+                            self.console.print(f"\n[green]{msg}[/green]")
+                        else:
+                            self.console.print(f"\n[red]{msg}[/red]")
+                        input("\nPress Enter to continue...")
+                        return
+                except KeyboardInterrupt:
+                    return
+
             # Check if service exists
             ret, _, _ = run_command(["systemctl", "cat", SERVICE_NAME], sudo=False, timeout=5)
             service_exists = ret == 0
