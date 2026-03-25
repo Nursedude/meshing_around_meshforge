@@ -1744,68 +1744,20 @@ class ConfigScreen(_BaseConfigEditor):
     _panel_title = "Bot Config (config.ini)"
     _profile_label = "Regional Bot Config Profile"
     _not_found_hint = (
-        "meshing-around config not found.\n"
-        "Searched: /opt/meshing-around/config.ini and standard paths.\n\n"
-        "If meshing-around is installed elsewhere, create a symlink:\n"
+        "Bot config not found at /opt/meshing-around/config.ini\n"
+        "Install meshing-around or create a symlink:\n"
         "  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
     )
 
-    def _get_search_paths(self) -> "list[Path]":
-        """Get deduplicated upstream config search paths."""
-        paths: list[Path] = []
-        seen: set[str] = set()
-        if hasattr(self.app, "config"):
-            for p in self.app.config._get_upstream_config_paths():
-                key = str(p)
-                if key not in seen:
-                    paths.append(p)
-                    seen.add(key)
-        for p in [Path("/opt/meshing_around/config.ini")]:
-            key = str(p)
-            if key not in seen:
-                paths.append(p)
-                seen.add(key)
-        return paths
-
     def _find_config(self) -> Optional[Path]:
-        """Find upstream config.ini, falling back to config.template."""
+        """Find the upstream bot config.ini — single source of truth."""
         primary = Path("/opt/meshing-around/config.ini")
-        try:
-            if primary.exists():
-                return primary
-        except Exception:
-            pass
-
-        if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
-            try:
-                found = self.app.config.find_upstream_config()
-                if found:
-                    return found
-            except Exception:
-                pass
-
-        for p in self._get_search_paths():
-            try:
-                if p.exists():
-                    return p
-            except (OSError, PermissionError):
-                continue
-
-        primary_template = Path("/opt/meshing-around/config.template")
-        try:
-            if primary_template.exists():
-                return primary_template
-        except Exception:
-            pass
-
-        for p in self._get_search_paths():
-            template = p.with_name("config.template")
-            try:
-                if template.exists():
-                    return template
-            except (OSError, PermissionError):
-                continue
-
+        if primary.exists():
+            return primary
+        # Fallback: config.template for read-only viewing
+        template = Path("/opt/meshing-around/config.template")
+        if template.exists():
+            return template
         return None
 
     def _find_template(self) -> Optional[Path]:
