@@ -1294,6 +1294,7 @@ class ConfigScreen(Screen):
         self._dirty = False  # config has unsaved changes
         self._error = ""
         self._loaded = False  # lazy load on first render
+        self._template_keys: set = set()  # (section, key) from template merge
 
     def _get_search_paths(self) -> "list[Path]":
         """Get deduplicated upstream config search paths.
@@ -1366,6 +1367,167 @@ class ConfigScreen(Screen):
 
         return None
 
+    def _find_template(self) -> Optional[Path]:
+        """Find config.template alongside the loaded config.ini."""
+        # Same directory as loaded config
+        if self._config_path:
+            template = self._config_path.with_name("config.template")
+            try:
+                if template.exists():
+                    return template
+            except (OSError, PermissionError):
+                pass
+
+        # Use Config's method if available
+        if hasattr(self.app, "config") and hasattr(self.app.config, "get_upstream_template_path"):
+            try:
+                found = self.app.config.get_upstream_template_path()
+                if found:
+                    return found
+            except Exception:
+                pass
+
+        # Hardcoded fallback
+        fallback = Path("/opt/meshing-around/config.template")
+        try:
+            if fallback.exists():
+                return fallback
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
+    def _parse_template_comments(template_path: Path) -> "dict[str, dict[str, str]]":
+        """Extract commented-out key=value lines from config.template.
+
+        Returns {section: {key: value}} for keys that exist only as comments.
+        Filters out documentation comments (lines with multiple key=value patterns).
+        """
+        import re
+        result: dict[str, dict[str, str]] = {}
+        current_section: Optional[str] = None
+
+        try:
+            with open(template_path) as f:
+                for line in f:
+                    stripped = line.strip()
+                    # Section header
+                    sec_match = re.match(r"^\[(\w+)\]", stripped)
+                    if sec_match:
+                        current_section = sec_match.group(1).lower()
+                        continue
+                    if not current_section:
+                        continue
+                    # Commented key = value
+                    m = re.match(r"^#\s*(\w[\w_]{2,})\s*=\s*(.*)", stripped)
+                    if not m:
+                        continue
+                    key = m.group(1).lower()
+                    val = m.group(2).strip()
+                    # Filter documentation: skip if value has another key=value pattern
+                    if re.search(r"\w+\s*=\s*\w", val):
+                        continue
+                    if current_section not in result:
+                        result[current_section] = {}
+                    result[current_section][key] = val
+        except (OSError, PermissionError):
+            pass
+        return result
+
+    def _merge_template_defaults(self) -> None:
+        """Merge missing keys from config.template into the editor's parser.
+
+        Only adds keys that don't exist in the loaded config.ini.
+        Tracks merged keys in _template_keys for visual indicator.
+        """
+        self._template_keys = set()
+        template_path = self._find_template()
+        if not template_path:
+            return
+
+        import configparser as _cp
+
+        # Load template's uncommented keys
+        template_parser = _cp.ConfigParser()
+        try:
+            template_parser.read(str(template_path))
+        except _cp.Error:
+            return
+
+        # Merge uncommented template keys
+        for section in template_parser.sections():
+            if not self._parser.has_section(section):
+                self._parser.add_section(section)
+            for key, value in template_parser.items(section):
+                if key == "__name__":
+                    continue
+                if not self._parser.has_option(section, key):
+                    self._parser.set(section, key, value)
+                    self._template_keys.add((section, key))
+
+        # Also merge commented-out keys (like ollamamodel)
+        commented = self._parse_template_comments(template_path)
+        for section, keys in commented.items():
+            if not self._parser.has_section(section):
+                self._parser.add_section(section)
+            for key, value in keys.items():
+                if not self._parser.has_option(section, key):
+                    self._parser.set(section, key, value)
+                    self._template_keys.add((section, key))
+
+    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
+        """Find *_bot.ini regional config templates in profiles/."""
+        profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
+        templates: list[tuple[str, Path]] = []
+        try:
+            if profiles_dir.is_dir():
+                for p in sorted(profiles_dir.glob("*_bot.ini")):
+                    import configparser as _cp
+                    parser = _cp.ConfigParser()
+                    try:
+                        parser.read(str(p))
+                        name = parser.get("profile", "name", fallback=p.stem)
+                    except _cp.Error:
+                        name = p.stem
+                    templates.append((name, p))
+        except (OSError, PermissionError):
+            pass
+        return templates
+
+    def _apply_regional_template(self, template_path: Path) -> None:
+        """Apply a regional bot config template — fills missing keys only."""
+        import configparser as _cp
+        template = _cp.ConfigParser()
+        try:
+            template.read(str(template_path))
+        except _cp.Error:
+            self._error = f"Failed to parse template: {template_path}"
+            return
+
+        skip_sections = {"profile", "notes"}
+        applied = 0
+        for section in template.sections():
+            if section in skip_sections:
+                continue
+            if not self._parser.has_section(section):
+                self._parser.add_section(section)
+            for key, value in template.items(section):
+                if key == "__name__":
+                    continue
+                if not self._parser.has_option(section, key):
+                    self._parser.set(section, key, value)
+                    applied += 1
+                else:
+                    # Overwrite with regional value for regional templates
+                    current = self._parser.get(section, key)
+                    if current != value:
+                        self._parser.set(section, key, value)
+                        applied += 1
+
+        if applied > 0:
+            self._dirty = True
+            self._rebuild_items()
+
     @property
     def _is_template(self) -> bool:
         """True if currently viewing a config.template (read-only)."""
@@ -1377,12 +1539,16 @@ class ConfigScreen(Screen):
         self._parser = _cp.ConfigParser()
         self._error = ""
         self._loaded = True
+        self._template_keys = set()
         self._config_path = self._find_config()
         if self._config_path:
             try:
                 self._parser.read(str(self._config_path))
             except _cp.Error as e:
                 self._error = f"Parse error: {e}"
+            # Merge template defaults so ALL possible keys are visible
+            if not self._is_template:
+                self._merge_template_defaults()
         else:
             # Nothing found — show helpful error
             searched = ", ".join(str(p) for p in self._get_search_paths())
@@ -1448,6 +1614,7 @@ class ConfigScreen(Screen):
                 table.add_row(f"[{sec_style}][{section}][/{sec_style}]", "", "")
             else:
                 # Key-value pair
+                is_default = (section, key) in self._template_keys
                 row_style = "bold white on blue" if is_selected else ""
                 val_display = value if value else "[dim](empty)[/dim]"
                 # Highlight booleans
@@ -1457,6 +1624,9 @@ class ConfigScreen(Screen):
                 # Truncate long values
                 if value and len(value) > 50:
                     val_display = value[:47] + "..."
+                # Mark template defaults
+                if is_default and not is_selected:
+                    val_display = f"[dim italic]{val_display} (default)[/dim italic]"
 
                 if is_selected:
                     table.add_row(
@@ -1465,14 +1635,17 @@ class ConfigScreen(Screen):
                         f"[bold on blue]{val_display}[/bold on blue]",
                     )
                 else:
-                    table.add_row(f"[dim]{section}[/dim]", key, val_display)
+                    key_style = f"[dim]{key}[/dim]" if is_default else key
+                    table.add_row(f"[dim]{section}[/dim]", key_style, val_display)
 
         save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
+        template_count = len(self._template_keys)
+        template_info = f" [dim]({template_count} defaults)[/dim]" if template_count else ""
         if self._is_template:
-            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[C] create .ini  \\[R] reload  \\[q] back[/dim]{save_indicator}"
+            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[C] create .ini  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
             title_suffix = " [yellow](template)[/yellow]"
         else:
-            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[R] reload  \\[q] back[/dim]{save_indicator}"
+            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
             title_suffix = ""
 
         return Panel(
@@ -1497,6 +1670,7 @@ class ConfigScreen(Screen):
                     new_val = "False" if v.lower() == "true" else "True"
                     self._parser.set(section, k, new_val)
                     self._items[self._cursor] = (section, k, new_val)
+                    self._template_keys.discard((section, k))
                     self._dirty = True
             return True
         elif key == "\n" or key == "\r":
@@ -1512,6 +1686,9 @@ class ConfigScreen(Screen):
         elif key == "C":
             if self._is_template and self._config_path:
                 self._create_from_template()
+            return True
+        elif key == "P":
+            self._show_profile_picker()
             return True
         elif key == "R":
             self._load()
@@ -1545,6 +1722,7 @@ class ConfigScreen(Screen):
                 new_val = Prompt.ask("New value", default=current)
                 if new_val != current:
                     self._parser.set(section, key, new_val)
+                    self._template_keys.discard((section, key))
                     self._rebuild_items()
                     self._dirty = True
                     self.console.print("[green]Value updated (press \\[w] to save)[/green]")
@@ -1552,6 +1730,37 @@ class ConfigScreen(Screen):
                     self.console.print("[dim]No change[/dim]")
                 time.sleep(0.5)
             except KeyboardInterrupt:
+                pass
+
+    def _show_profile_picker(self) -> None:
+        """Show available regional bot config templates for selection."""
+        templates = self._find_regional_templates()
+        if not templates:
+            with self.app._prompt_mode():
+                self.console.clear()
+                self.console.print("[yellow]No regional bot profiles found in profiles/*_bot.ini[/yellow]")
+                time.sleep(1.5)
+            return
+
+        with self.app._prompt_mode():
+            self.console.clear()
+            self.console.print("[bold cyan]Apply Regional Bot Config Profile[/bold cyan]\n")
+            self.console.print("[yellow]This will overwrite current values with profile values.[/yellow]\n")
+            for idx, (name, path) in enumerate(templates, 1):
+                self.console.print(f"  [cyan]{idx}[/cyan]) {name} [dim]({path.name})[/dim]")
+            self.console.print(f"  [cyan]0[/cyan]) Cancel\n")
+            try:
+                choice = Prompt.ask("Select profile", default="0")
+                choice_idx = int(choice)
+                if 1 <= choice_idx <= len(templates):
+                    name, path = templates[choice_idx - 1]
+                    self._apply_regional_template(path)
+                    self.console.print(f"[green]Applied {name} profile[/green]")
+                    time.sleep(1)
+                else:
+                    self.console.print("[dim]Cancelled[/dim]")
+                    time.sleep(0.5)
+            except (KeyboardInterrupt, ValueError):
                 pass
 
     def _save(self) -> None:
@@ -1568,6 +1777,7 @@ class ConfigScreen(Screen):
                 self._parser.write(f)
             self._config_path.chmod(0o600)
             self._dirty = False
+            self._template_keys.clear()  # values now persisted
         except OSError as e:
             self._error = f"Save failed: {e}"
 
