@@ -7,7 +7,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 [![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-743-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-790-brightgreen.svg)](tests/)
 [![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
 
 > **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
@@ -16,7 +16,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 
 > **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
-> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (743 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
+> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (790 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
 
 > **NO RADIO REQUIRED** - meshing_around_meshforge can connect to the Meshtastic mesh via MQTT broker without any radio hardware. Use Demo mode to explore the interface with simulated data, or MQTT mode to participate in live mesh channels using only a network connection.
 
@@ -60,6 +60,7 @@ graph LR
         CMDS[Bot Commands]
         PROF[Regional Profiles]
         TCP[TCP Mode]
+        CHUNK[Chunk Reassembly]
     end
 
     subgraph "Partial"
@@ -85,22 +86,25 @@ graph LR
     style PROF fill:#27ae60,color:#fff
     style SERIAL fill:#e74c3c,color:#fff
     style TCP fill:#27ae60,color:#fff
+    style CHUNK fill:#27ae60,color:#fff
     style BLE fill:#e74c3c,color:#fff
     style SMS fill:#e74c3c,color:#fff
 ```
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **TUI Client** | Working | 9 screens (Dashboard, Nodes, Messages, Alerts, Topology, Devices, Log, Config Editor, Help) |
+| **TUI Client** | Working | 10 screens (Client Config, Dashboard, Nodes, Messages, Alerts, Topology, Devices, Log, Bot Config, Maps) |
 | **Demo Mode** | Working | Simulated data for testing |
-| **Config System** | Working | INI-based configuration + TUI config editor for meshing-around |
+| **Config System** | Working | INI-based config + dual TUI editors (client & bot) + external editor (nano) |
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
 | **Alert Detection** | Working | Emergency keywords, proximity |
 | **Launcher Menu** | Working | Interactive mode selection, config editor, updater |
 | **MQTT Mode** | Partial | Connects but limited testing |
 | **Notifications** | Partial | Email framework exists, untested |
 | **Bot Commands** | Working | 51 commands: 15 data (via bot engine), 11 local, 25 bot relay |
-| **Config Editor** | Working | View/edit meshing-around config.ini from TUI (screen 8) |
+| **Config Editors** | Working | Screen 0: mesh_client.ini (client). Screen 8: config.ini (bot). Both support `e` for nano. |
+| **Chunk Reassembly** | Working | Auto-reassembles 160-char mesh chunks from bot into single messages |
+| **Regional Profiles** | Working | Hawaii, US, Europe, ANZ, Local Broker — include [interface] sections |
 | **Serial Mode** | Untested | Requires hardware testing |
 | **TCP Mode** | Working | Tested with remote nodes (port 4403) |
 | **BLE Mode** | Untested | Requires Bluetooth setup |
@@ -357,7 +361,12 @@ python3 mesh_client.py --demo
 
 ## Configuration
 
-All settings live in `mesh_client.ini` (or `config.enhanced.ini` for full alert configuration). Every feature is configurable — nothing is hardcoded.
+Two config files serve different purposes:
+
+- **`mesh_client.ini`** — Controls the **monitoring client** (TUI, MQTT connection, alerts, display, logging). Editable from TUI screen `0` or nano.
+- **`config.ini`** (upstream bot) — Controls the **meshing-around bot** (games, BBS, sentry, scheduler, location). Editable from TUI screen `8` or nano.
+
+Every feature is configurable — nothing is hardcoded. `mesh_client.ini.template` is the canonical reference with all options documented.
 
 **Config file search order:**
 1. `~/.config/meshing-around-clients/config.ini` (recommended)
@@ -549,16 +558,19 @@ phone_numbers =                # Comma-separated phone numbers
 
 ```mermaid
 graph LR
-    D[Dashboard<br/>Key: 1] --> N[Nodes<br/>Key: 2]
+    CC[Client Cfg<br/>Key: 0] --> D[Dashboard<br/>Key: 1]
+    D --> N[Nodes<br/>Key: 2]
     N --> M[Messages<br/>Key: 3]
     M --> A[Alerts<br/>Key: 4]
     A --> T[Topology<br/>Key: 5]
     T --> DV[Devices<br/>Key: 6]
     DV --> L[Log<br/>Key: 7]
-    L --> CF[Config<br/>Key: 8]
-    CF --> H[Help<br/>Key: ?]
-    H --> D
+    L --> BC[Bot Cfg<br/>Key: 8]
+    BC --> MP[Maps<br/>Key: 9]
+    MP --> H[Help<br/>Key: ?]
+    H --> CC
 
+    style CC fill:#f39c12,color:#fff
     style D fill:#4a9eff,color:#fff
     style N fill:#27ae60,color:#fff
     style M fill:#9b59b6,color:#fff
@@ -566,19 +578,21 @@ graph LR
     style T fill:#e67e22,color:#fff
     style DV fill:#2c3e50,color:#fff
     style L fill:#27ae60,color:#fff
-    style CF fill:#f39c12,color:#fff
-    style H fill:#f39c12,color:#fff
+    style BC fill:#f39c12,color:#fff
+    style MP fill:#3498db,color:#fff
+    style H fill:#95a5a6,color:#fff
 ```
 
-The TUI works with or without the Rich library. When Rich is installed you get the full 9-screen interface; without it, a plain-text fallback displays connection status and recent messages.
+The TUI works with or without the Rich library. When Rich is installed you get the full 10-screen interface; without it, a plain-text fallback displays connection status and recent messages.
 
 | Key | Action |
 |-----|--------|
-| `1-8` | Switch screens (Dashboard, Nodes, Messages, Alerts, Topology, Devices, Log, Config) |
+| `0-9` | Switch screens (Client Cfg, Dashboard, Nodes, Messages, Alerts, Topology, Devices, Log, Bot Cfg, Maps) |
 | `/` | Search (Nodes, Messages, Alerts) |
 | `s` | Send message to mesh |
 | `r` | Run command (smart routing: local, bot engine, or mesh relay) |
-| `e` / `E` | Export messages (JSON / CSV) |
+| `b` | Bot service management (start/stop/restart/status/logs) |
+| `e` / `E` | Export messages (JSON / CSV) — in config screens: open nano/$EDITOR |
 | `c` | Connect/Disconnect |
 | `?` | Help |
 | `q` | Quit |
@@ -587,9 +601,14 @@ The TUI works with or without the Rich library. When Rich is installed you get t
 
 The main dashboard is a **live message feed** showing all mesh traffic with color-coded channel labels (`ch0`, `ch1`, etc.), direction arrows, and sender names. The sidebar shows online nodes, alerts, and upstream bot feature status.
 
-### Config Editor (Screen 8)
+### Config Editors (Screens 0 & 8)
 
-View and edit the meshing-around `config.ini` directly from the TUI. Browse all sections (`[general]`, `[location]`, `[bbs]`, `[sentry]`, `[games]`, etc.), toggle booleans with `t`, edit values with `Enter`, and save with `w` (creates `.ini.bak` backup).
+Two config editors, each targeting a different file:
+
+- **Screen 0 — Client Config** (`mesh_client.ini`): Connection settings, MQTT, alerts, display, logging. Template defaults shown as `(default)`. Regional client profiles via `P`.
+- **Screen 8 — Bot Config** (`config.ini`): Bot features, games, BBS, sentry, scheduler, location. Regional bot profiles via `P`.
+
+Both editors: scroll with `j/k`, toggle booleans with `t`, edit values with `Enter`, save with `w` (creates `.ini.bak` backup), or press `e` to open in nano/$EDITOR for fast bulk editing.
 
 ## Alert System
 
@@ -651,11 +670,13 @@ sudo journalctl -u mesh-client -f    # View logs
 ```
 meshing_around_meshforge/
 ├── mesh_client.py          # Main launcher (zero-dep bootstrap)
-├── mesh_client.ini         # Configuration
+├── mesh_client.ini         # Client configuration
+├── mesh_client.ini.template # Canonical template (all options documented)
 ├── configure_bot.py        # Bot setup wizard
 ├── setup_headless.sh       # Pi/headless installer
 ├── profiles/               # Regional config templates
-│   ├── hawaii.ini          # Hawaii (tsunami/volcano/hurricane keywords)
+│   ├── hawaii.ini          # Hawaii client profile (tsunami/volcano keywords)
+│   ├── hawaii_bot.ini      # Hawaii bot profile (complete bot config)
 │   ├── default_us.ini      # Continental US defaults
 │   ├── europe.ini          # EU 868 MHz band
 │   ├── australia_nz.ini    # ANZ (bushfire/cyclone keywords)
@@ -676,7 +697,7 @@ meshing_around_meshforge/
     │   ├── alert_configurators.py
     │   └── config_schema.py
     └── tui/
-        ├── app.py          # Rich terminal UI (9 screens + PlainTextTUI fallback)
+        ├── app.py          # Rich terminal UI (10 screens + PlainTextTUI fallback)
         └── helpers.py      # Shared formatting, safe panel rendering
 ```
 
@@ -706,7 +727,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **743 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, and more.
+The project has **790 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and more.
 
 ```bash
 # Run all tests
