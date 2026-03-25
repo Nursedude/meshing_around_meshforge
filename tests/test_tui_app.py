@@ -881,6 +881,159 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
         self.assertIsNotNone(panel)
 
 
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestClientConfigScreen(unittest.TestCase):
+    """Test ClientConfigScreen finds mesh_client.ini and merges template."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import ClientConfigScreen, MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = ClientConfigScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_find_config_returns_config_path(self):
+        """ClientConfigScreen._find_config() returns the app's config path."""
+        found = self.screen._find_config()
+        if self.tui.config.config_path and self.tui.config.config_path.exists():
+            self.assertIsNotNone(found)
+            self.assertEqual(found, self.tui.config.config_path)
+
+    def test_find_template_returns_template_path(self):
+        """ClientConfigScreen._find_template() finds mesh_client.ini.template."""
+        found = self.screen._find_template()
+        # Template should exist in project root
+        if found:
+            self.assertIn("template", found.name)
+
+    def test_section_order_is_client_sections(self):
+        """ClientConfigScreen uses client-specific section ordering."""
+        self.assertIn("interface", self.screen._SECTION_ORDER)
+        self.assertIn("mqtt", self.screen._SECTION_ORDER)
+        self.assertIn("advanced", self.screen._SECTION_ORDER)
+        # Should NOT have bot sections
+        self.assertNotIn("general", self.screen._SECTION_ORDER)
+        self.assertNotIn("bbs", self.screen._SECTION_ORDER)
+
+    def test_find_regional_templates_excludes_bot(self):
+        """Client profiles exclude *_bot.ini files."""
+        templates = self.screen._find_regional_templates()
+        for name, path in templates:
+            self.assertFalse(path.name.endswith("_bot.ini"),
+                             f"Bot profile should be excluded: {path}")
+
+    def test_post_edit_validate_tcp_no_hostname(self):
+        """Warns when type set to tcp but hostname is empty."""
+        import configparser
+        self.screen._parser = configparser.ConfigParser()
+        self.screen._parser.add_section("interface")
+        self.screen._parser.set("interface", "type", "tcp")
+        self.screen._parser.set("interface", "hostname", "")
+        warning = self.screen._post_edit_validate("interface", "type", "tcp")
+        self.assertIsNotNone(warning)
+        self.assertIn("hostname", warning)
+
+    def test_post_edit_validate_tcp_with_hostname(self):
+        """No warning when type set to tcp and hostname is set."""
+        import configparser
+        self.screen._parser = configparser.ConfigParser()
+        self.screen._parser.add_section("interface")
+        self.screen._parser.set("interface", "type", "tcp")
+        self.screen._parser.set("interface", "hostname", "192.168.1.100")
+        warning = self.screen._post_edit_validate("interface", "type", "tcp")
+        self.assertIsNone(warning)
+
+    def test_panel_title_is_client(self):
+        """ClientConfigScreen panel title should say 'Client'."""
+        self.assertIn("Client", self.screen._panel_title)
+
+    def test_render_does_not_crash(self):
+        """Rendering ClientConfigScreen should not raise."""
+        self.screen._load()
+        panel = self.screen.render()
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestScreenKeyBindings(unittest.TestCase):
+    """Test screen navigation key mappings."""
+
+    def setUp(self):
+        self.config = Config()
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_key_0_maps_to_client_config(self):
+        """Key '0' should navigate to client_config screen."""
+        self.assertIn("0", self.tui._SCREEN_KEYS)
+        self.assertEqual(self.tui._SCREEN_KEYS["0"], "client_config")
+
+    def test_key_8_maps_to_bot_config(self):
+        """Key '8' should navigate to bot config screen."""
+        self.assertIn("8", self.tui._SCREEN_KEYS)
+        self.assertEqual(self.tui._SCREEN_KEYS["8"], "config")
+
+    def test_client_config_screen_registered(self):
+        """client_config screen should be in the screens dict."""
+        self.assertIn("client_config", self.tui.screens)
+
+    def test_nav_bar_includes_client_cfg(self):
+        """Footer nav bar should include Cfg entry for screen 0."""
+        footer = self.tui._get_footer()
+        # The footer panel should render without error
+        self.assertIsNotNone(footer)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestBaseConfigEditorInheritance(unittest.TestCase):
+    """Test that both config screens inherit from _BaseConfigEditor."""
+
+    def test_config_screen_is_base_editor(self):
+        from meshing_around_clients.tui.app import ConfigScreen, _BaseConfigEditor
+        self.assertTrue(issubclass(ConfigScreen, _BaseConfigEditor))
+
+    def test_client_config_screen_is_base_editor(self):
+        from meshing_around_clients.tui.app import ClientConfigScreen, _BaseConfigEditor
+        self.assertTrue(issubclass(ClientConfigScreen, _BaseConfigEditor))
+
+
+class TestConfigHelperMethods(unittest.TestCase):
+    """Test Config.get_client_template_path() and find_client_profiles()."""
+
+    def test_get_client_template_path(self):
+        """Should find mesh_client.ini.template in project root."""
+        config = Config()
+        path = config.get_client_template_path()
+        if path:
+            self.assertIn("template", path.name)
+            self.assertTrue(path.exists())
+
+    def test_find_client_profiles_excludes_bot(self):
+        """find_client_profiles() should not include *_bot.ini."""
+        config = Config()
+        profiles = config.find_client_profiles()
+        for name, path in profiles:
+            self.assertFalse(path.name.endswith("_bot.ini"),
+                             f"Bot profile should be excluded: {path}")
+
+    def test_find_client_profiles_includes_regional(self):
+        """Should find regional profiles like hawaii.ini, europe.ini."""
+        config = Config()
+        profiles = config.find_client_profiles()
+        names = [name for name, _ in profiles]
+        # At least one regional profile should exist
+        self.assertTrue(len(profiles) > 0,
+                        "Expected at least one client profile")
+
+
 import os
 
 

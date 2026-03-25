@@ -283,5 +283,106 @@ class TestSetupLogging(unittest.TestCase):
             mesh_client.log("test message", "INFO")
 
 
+class TestCleanInterfaceForType(unittest.TestCase):
+    """Test _clean_interface_for_type() clears stale interface fields."""
+
+    def _make_config(self):
+        config = ConfigParser()
+        config.add_section("interface")
+        config.set("interface", "type", "serial")
+        config.set("interface", "port", "/dev/ttyACM0")
+        config.set("interface", "hostname", "192.168.1.100")
+        config.set("interface", "http_url", "http://192.168.1.100")
+        config.set("interface", "mac", "AA:BB:CC:DD:EE:FF")
+        return config
+
+    def test_tcp_clears_port(self):
+        """Switching to TCP should clear serial port."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "tcp")
+        self.assertEqual(config.get("interface", "port"), "")
+
+    def test_tcp_preserves_hostname(self):
+        """Switching to TCP should keep hostname."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "tcp")
+        self.assertEqual(config.get("interface", "hostname"), "192.168.1.100")
+
+    def test_serial_clears_hostname(self):
+        """Switching to serial should clear hostname and http_url."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "serial")
+        self.assertEqual(config.get("interface", "hostname"), "")
+        self.assertEqual(config.get("interface", "http_url"), "")
+
+    def test_serial_preserves_port(self):
+        """Switching to serial should keep serial port."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "serial")
+        self.assertEqual(config.get("interface", "port"), "/dev/ttyACM0")
+
+    def test_mqtt_clears_all_device_fields(self):
+        """Switching to MQTT should clear port, hostname, http_url, mac."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "mqtt")
+        self.assertEqual(config.get("interface", "port"), "")
+        self.assertEqual(config.get("interface", "hostname"), "")
+        self.assertEqual(config.get("interface", "http_url"), "")
+        self.assertEqual(config.get("interface", "mac"), "")
+
+    def test_auto_clears_nothing(self):
+        """Auto-detect should preserve all fields."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "auto")
+        self.assertEqual(config.get("interface", "port"), "/dev/ttyACM0")
+        self.assertEqual(config.get("interface", "hostname"), "192.168.1.100")
+
+    def test_http_clears_port_and_mac(self):
+        """HTTP mode clears port and mac but keeps hostname for fallback."""
+        config = self._make_config()
+        mesh_client._clean_interface_for_type(config, "http")
+        self.assertEqual(config.get("interface", "port"), "")
+        self.assertEqual(config.get("interface", "mac"), "")
+        self.assertEqual(config.get("interface", "hostname"), "192.168.1.100")
+
+
+class TestDefaultConfigTemplate(unittest.TestCase):
+    """Test DEFAULT_CONFIG loads from template file with embedded fallback."""
+
+    def test_default_config_is_nonempty(self):
+        """DEFAULT_CONFIG should be loaded successfully."""
+        self.assertTrue(len(mesh_client.DEFAULT_CONFIG) > 100)
+
+    def test_default_config_has_interface_section(self):
+        """DEFAULT_CONFIG should contain [interface] section."""
+        config = ConfigParser()
+        config.read_string(mesh_client.DEFAULT_CONFIG)
+        self.assertTrue(config.has_section("interface"))
+
+    def test_default_config_has_all_sections(self):
+        """DEFAULT_CONFIG should have all expected sections."""
+        config = ConfigParser()
+        config.read_string(mesh_client.DEFAULT_CONFIG)
+        expected = ["interface", "mqtt", "features", "commands",
+                    "data_sources", "maps", "alerts", "network",
+                    "display", "logging", "advanced"]
+        for section in expected:
+            self.assertTrue(config.has_section(section),
+                            f"Missing section: {section}")
+
+    def test_embedded_fallback_is_valid(self):
+        """The embedded fallback config should parse correctly."""
+        config = ConfigParser()
+        config.read_string(mesh_client._EMBEDDED_DEFAULT_CONFIG)
+        self.assertTrue(config.has_section("interface"))
+        self.assertTrue(config.has_section("mqtt"))
+
+    def test_template_file_exists(self):
+        """mesh_client.ini.template should exist in project root."""
+        template = Path(mesh_client.SCRIPT_DIR) / "mesh_client.ini.template"
+        self.assertTrue(template.exists(),
+                        f"Template not found at {template}")
+
+
 if __name__ == "__main__":
     unittest.main()

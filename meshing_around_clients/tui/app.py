@@ -1317,158 +1317,75 @@ class DevicesScreen(Screen):
         return False
 
 
-class ConfigScreen(Screen):
-    """Config editor for meshing-around config.ini — view and edit all settings."""
+class _BaseConfigEditor(Screen):
+    """Shared base for INI config editors (bot config and client config).
 
-    # Preferred section display order
-    _SECTION_ORDER = [
-        "general", "location", "interface", "interface2", "bbs", "sentry",
-        "emergencyHandler", "scheduler", "games", "radioMon", "fileMon",
-        "smtp", "messagingSettings", "repeater", "checklist", "inventory",
-        "qrz", "dataPersistence", "weatherAlert", "femaAlert", "deAlert",
-    ]
+    Subclasses override _find_config(), _find_template(),
+    _find_regional_templates(), _SECTION_ORDER, and _panel_title.
+    """
+
+    _SECTION_ORDER: "list[str]" = []
+    _panel_title: str = "Config Editor"
+    _profile_label: str = "Profile"
+    _not_found_hint: str = "Config file not found."
 
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self._parser = None  # type: ignore
         self._config_path = None  # type: Optional[Path]
-        self._items = []  # flat list of (section, key, value) for scrolling
+        self._items: list = []  # flat list of (section, key, value)
         self._cursor = 0
-        self._scroll_top = 0  # stable scroll position
-        self._dirty = False  # config has unsaved changes
+        self._scroll_top = 0
+        self._dirty = False
         self._error = ""
-        self._loaded = False  # lazy load on first render
-        self._template_keys: set = set()  # (section, key) from template merge
+        self._loaded = False
+        self._template_keys: set = set()
 
-    def _get_search_paths(self) -> "list[Path]":
-        """Get deduplicated upstream config search paths.
-
-        Delegates to Config._get_upstream_config_paths() for consistency,
-        then adds ConfigScreen-specific paths.
-        """
-        paths: list[Path] = []
-        seen: set[str] = set()
-
-        # Primary: use Config's canonical search paths
-        if hasattr(self.app, "config"):
-            for p in self.app.config._get_upstream_config_paths():
-                key = str(p)
-                if key not in seen:
-                    paths.append(p)
-                    seen.add(key)
-
-        # Additional path (underscore variant)
-        for p in [Path("/opt/meshing_around/config.ini")]:
-            key = str(p)
-            if key not in seen:
-                paths.append(p)
-                seen.add(key)
-
-        return paths
+    # -- Subclass hooks (override these) ------------------------------------
 
     def _find_config(self) -> Optional[Path]:
-        """Find upstream config.ini, falling back to config.template."""
-        # Hardcoded primary check — most common install location
-        primary = Path("/opt/meshing-around/config.ini")
-        try:
-            if primary.exists():
-                return primary
-        except Exception:
-            pass
-
-        # Try Config's canonical search
-        if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
-            try:
-                found = self.app.config.find_upstream_config()
-                if found:
-                    return found
-            except Exception:
-                pass
-
-        # Comprehensive search for config.ini
-        for p in self._get_search_paths():
-            try:
-                if p.exists():
-                    return p
-            except (OSError, PermissionError):
-                continue
-
-        # Fallback: search for config.template
-        primary_template = Path("/opt/meshing-around/config.template")
-        try:
-            if primary_template.exists():
-                return primary_template
-        except Exception:
-            pass
-
-        for p in self._get_search_paths():
-            template = p.with_name("config.template")
-            try:
-                if template.exists():
-                    return template
-            except (OSError, PermissionError):
-                continue
-
+        """Return path to the config file, or None."""
         return None
 
     def _find_template(self) -> Optional[Path]:
-        """Find config.template alongside the loaded config.ini."""
-        # Same directory as loaded config
-        if self._config_path:
-            template = self._config_path.with_name("config.template")
-            try:
-                if template.exists():
-                    return template
-            except (OSError, PermissionError):
-                pass
-
-        # Use Config's method if available
-        if hasattr(self.app, "config") and hasattr(self.app.config, "get_upstream_template_path"):
-            try:
-                found = self.app.config.get_upstream_template_path()
-                if found:
-                    return found
-            except Exception:
-                pass
-
-        # Hardcoded fallback
-        fallback = Path("/opt/meshing-around/config.template")
-        try:
-            if fallback.exists():
-                return fallback
-        except Exception:
-            pass
+        """Return path to the template file, or None."""
         return None
+
+    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
+        """Return list of (name, Path) for regional profile templates."""
+        return []
+
+    def _post_edit_validate(self, section: str, key: str, value: str) -> Optional[str]:
+        """Return a warning string after editing a value, or None."""
+        return None
+
+    def _post_save_hook(self) -> None:
+        """Called after a successful save. Override for app-specific reload."""
+        pass
+
+    # -- Shared logic -------------------------------------------------------
 
     @staticmethod
     def _parse_template_comments(template_path: Path) -> "dict[str, dict[str, str]]":
-        """Extract commented-out key=value lines from config.template.
-
-        Returns {section: {key: value}} for keys that exist only as comments.
-        Filters out documentation comments (lines with multiple key=value patterns).
-        """
+        """Extract commented-out key=value lines from a template file."""
         import re
         result: dict[str, dict[str, str]] = {}
         current_section: Optional[str] = None
-
         try:
             with open(template_path) as f:
                 for line in f:
                     stripped = line.strip()
-                    # Section header
                     sec_match = re.match(r"^\[(\w+)\]", stripped)
                     if sec_match:
                         current_section = sec_match.group(1).lower()
                         continue
                     if not current_section:
                         continue
-                    # Commented key = value
                     m = re.match(r"^#\s*(\w[\w_]{2,})\s*=\s*(.*)", stripped)
                     if not m:
                         continue
                     key = m.group(1).lower()
                     val = m.group(2).strip()
-                    # Filter documentation: skip if value has another key=value pattern
                     if re.search(r"\w+\s*=\s*\w", val):
                         continue
                     if current_section not in result:
@@ -1479,26 +1396,19 @@ class ConfigScreen(Screen):
         return result
 
     def _merge_template_defaults(self) -> None:
-        """Merge missing keys from config.template into the editor's parser.
-
-        Only adds keys that don't exist in the loaded config.ini.
-        Tracks merged keys in _template_keys for visual indicator.
-        """
+        """Merge missing keys from template into the editor's parser."""
         self._template_keys = set()
         template_path = self._find_template()
         if not template_path:
             return
 
         import configparser as _cp
-
-        # Load template's uncommented keys
         template_parser = _cp.ConfigParser()
         try:
             template_parser.read(str(template_path))
         except _cp.Error:
             return
 
-        # Merge uncommented template keys
         for section in template_parser.sections():
             if not self._parser.has_section(section):
                 self._parser.add_section(section)
@@ -1509,7 +1419,6 @@ class ConfigScreen(Screen):
                     self._parser.set(section, key, value)
                     self._template_keys.add((section, key))
 
-        # Also merge commented-out keys (like ollamamodel)
         commented = self._parse_template_comments(template_path)
         for section, keys in commented.items():
             if not self._parser.has_section(section):
@@ -1519,27 +1428,8 @@ class ConfigScreen(Screen):
                     self._parser.set(section, key, value)
                     self._template_keys.add((section, key))
 
-    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
-        """Find *_bot.ini regional config templates in profiles/."""
-        profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
-        templates: list[tuple[str, Path]] = []
-        try:
-            if profiles_dir.is_dir():
-                for p in sorted(profiles_dir.glob("*_bot.ini")):
-                    import configparser as _cp
-                    parser = _cp.ConfigParser()
-                    try:
-                        parser.read(str(p))
-                        name = parser.get("profile", "name", fallback=p.stem)
-                    except _cp.Error:
-                        name = p.stem
-                    templates.append((name, p))
-        except (OSError, PermissionError):
-            pass
-        return templates
-
     def _apply_regional_template(self, template_path: Path) -> None:
-        """Apply a regional bot config template — fills missing keys only."""
+        """Apply a regional config template — overwrites with profile values."""
         import configparser as _cp
         template = _cp.ConfigParser()
         try:
@@ -1562,7 +1452,6 @@ class ConfigScreen(Screen):
                     self._parser.set(section, key, value)
                     applied += 1
                 else:
-                    # Overwrite with regional value for regional templates
                     current = self._parser.get(section, key)
                     if current != value:
                         self._parser.set(section, key, value)
@@ -1574,11 +1463,11 @@ class ConfigScreen(Screen):
 
     @property
     def _is_template(self) -> bool:
-        """True if currently viewing a config.template (read-only)."""
-        return bool(self._config_path and self._config_path.name == "config.template")
+        """True if currently viewing a template file (read-only hint)."""
+        return bool(self._config_path and "template" in self._config_path.name)
 
     def _load(self) -> None:
-        """Load the upstream config.ini (or config.template) into memory."""
+        """Load config into memory, merging template defaults."""
         import configparser as _cp
         self._parser = _cp.ConfigParser()
         self._error = ""
@@ -1590,18 +1479,10 @@ class ConfigScreen(Screen):
                 self._parser.read(str(self._config_path))
             except _cp.Error as e:
                 self._error = f"Parse error: {e}"
-            # Merge template defaults so ALL possible keys are visible
             if not self._is_template:
                 self._merge_template_defaults()
         else:
-            # Nothing found — show helpful error
-            searched = ", ".join(str(p) for p in self._get_search_paths())
-            self._error = (
-                f"meshing-around config not found.\n"
-                f"Searched: {searched}\n\n"
-                f"If meshing-around is installed elsewhere, create a symlink:\n"
-                f"  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
-            )
+            self._error = self._not_found_hint
         self._rebuild_items()
 
     def _rebuild_items(self) -> None:
@@ -1609,14 +1490,11 @@ class ConfigScreen(Screen):
         if not self._parser:
             self._items = []
             return
-        items = []
-        # Ordered sections first, then any remaining
-        seen = set()
+        items: list = []
         ordered = [s for s in self._SECTION_ORDER if self._parser.has_section(s)]
         remaining = [s for s in self._parser.sections() if s not in self._SECTION_ORDER]
         for section in ordered + remaining:
-            seen.add(section)
-            items.append((section, None, None))  # section header
+            items.append((section, None, None))
             for key, value in self._parser.items(section):
                 if key == "__name__":
                     continue
@@ -1629,7 +1507,7 @@ class ConfigScreen(Screen):
         if self._error:
             return Panel(
                 Text(self._error, style="yellow"),
-                title="[bold]Config Editor[/bold]",
+                title=f"[bold]{self._panel_title}[/bold]",
                 border_style="yellow",
             )
 
@@ -1638,7 +1516,6 @@ class ConfigScreen(Screen):
         table.add_column("Key", style="white", width=28)
         table.add_column("Value", style="green")
 
-        # Stable scroll — only moves when cursor exits visible range
         window = 28
         if self._cursor < self._scroll_top:
             self._scroll_top = self._cursor
@@ -1653,22 +1530,16 @@ class ConfigScreen(Screen):
             is_selected = i == self._cursor
 
             if key is None:
-                # Section header
                 sec_style = "bold cyan on dark_blue" if is_selected else "bold cyan"
                 table.add_row(f"[{sec_style}][{section}][/{sec_style}]", "", "")
             else:
-                # Key-value pair
                 is_default = (section, key) in self._template_keys
-                row_style = "bold white on blue" if is_selected else ""
                 val_display = value if value else "[dim](empty)[/dim]"
-                # Highlight booleans
                 if value and value.lower() in ("true", "false"):
                     val_color = "green" if value.lower() == "true" else "red"
                     val_display = f"[{val_color}]{value}[/{val_color}]"
-                # Truncate long values
                 if value and len(value) > 50:
                     val_display = value[:47] + "..."
-                # Mark template defaults
                 if is_default and not is_selected:
                     val_display = f"[dim italic]{val_display} (default)[/dim italic]"
 
@@ -1694,7 +1565,7 @@ class ConfigScreen(Screen):
 
         return Panel(
             table,
-            title=f"[bold]Config Editor[/bold] [dim]({self._config_path})[/dim]{title_suffix}",
+            title=f"[bold]{self._panel_title}[/bold] [dim]({self._config_path})[/dim]{title_suffix}",
             subtitle=subtitle,
             border_style="yellow",
         )
@@ -1708,7 +1579,6 @@ class ConfigScreen(Screen):
                 self._cursor = max(self._cursor - 1, 0)
                 return True
             elif key == "t":
-                # Toggle boolean values
                 if self._items and self._cursor < len(self._items):
                     section, k, v = self._items[self._cursor]
                     if k and v and v.lower() in ("true", "false"):
@@ -1719,7 +1589,6 @@ class ConfigScreen(Screen):
                         self._dirty = True
                 return True
             elif key == "\n" or key == "\r":
-                # Edit value
                 if self._items and self._cursor < len(self._items):
                     section, k, v = self._items[self._cursor]
                     if k is not None:
@@ -1744,20 +1613,22 @@ class ConfigScreen(Screen):
         return False
 
     def _create_from_template(self) -> None:
-        """Create config.ini from the current config.template."""
+        """Create config.ini from the current template."""
         import shutil as _shutil
         if not self._config_path:
             return
-        target = self._config_path.with_name("config.ini")
+        target = self._config_path.with_name(
+            self._config_path.name.replace(".template", "")
+        )
         if target.exists():
-            self._error = f"config.ini already exists at {target}"
+            self._error = f"Config already exists at {target}"
             return
         try:
             _shutil.copy2(str(self._config_path), str(target))
             target.chmod(0o600)
-            self._load()  # reload — will now find the new config.ini
+            self._load()
         except OSError as e:
-            self._error = f"Failed to create config.ini: {e}"
+            self._error = f"Failed to create config: {e}"
 
     def _edit_value(self, section: str, key: str, current: str) -> None:
         """Edit a config value using prompt mode."""
@@ -1773,6 +1644,10 @@ class ConfigScreen(Screen):
                     self._rebuild_items()
                     self._dirty = True
                     self.console.print("[green]Value updated (press \\[w] to save)[/green]")
+                    # Post-edit validation warning
+                    warning = self._post_edit_validate(section, key, new_val)
+                    if warning:
+                        self.console.print(f"[yellow]{warning}[/yellow]")
                 else:
                     self.console.print("[dim]No change[/dim]")
                 time.sleep(0.5)
@@ -1780,18 +1655,18 @@ class ConfigScreen(Screen):
                 pass
 
     def _show_profile_picker(self) -> None:
-        """Show available regional bot config templates for selection."""
+        """Show available regional config templates for selection."""
         templates = self._find_regional_templates()
         if not templates:
             with self.app._prompt_mode():
                 self.console.clear()
-                self.console.print("[yellow]No regional bot profiles found in profiles/*_bot.ini[/yellow]")
+                self.console.print(f"[yellow]No {self._profile_label.lower()} profiles found.[/yellow]")
                 time.sleep(1.5)
             return
 
         with self.app._prompt_mode():
             self.console.clear()
-            self.console.print("[bold cyan]Apply Regional Bot Config Profile[/bold cyan]\n")
+            self.console.print(f"[bold cyan]Apply {self._profile_label}[/bold cyan]\n")
             self.console.print("[yellow]This will overwrite current values with profile values.[/yellow]\n")
             for idx, (name, path) in enumerate(templates, 1):
                 self.console.print(f"  [cyan]{idx}[/cyan]) {name} [dim]({path.name})[/dim]")
@@ -1811,12 +1686,11 @@ class ConfigScreen(Screen):
                 pass
 
     def _save(self) -> None:
-        """Save config back to file with backup."""
+        """Save config back to file with .ini.bak backup."""
         import shutil as _shutil
         if not self._dirty or not self._config_path:
             return
         try:
-            # Backup
             if self._config_path.exists():
                 bak = self._config_path.with_suffix(".ini.bak")
                 _shutil.copy2(str(self._config_path), str(bak))
@@ -1824,9 +1698,202 @@ class ConfigScreen(Screen):
                 self._parser.write(f)
             self._config_path.chmod(0o600)
             self._dirty = False
-            self._template_keys.clear()  # values now persisted
+            self._template_keys.clear()
+            self._post_save_hook()
         except OSError as e:
             self._error = f"Save failed: {e}"
+
+
+class ConfigScreen(_BaseConfigEditor):
+    """Bot config editor — edits meshing-around config.ini."""
+
+    _SECTION_ORDER = [
+        "general", "location", "interface", "interface2", "bbs", "sentry",
+        "emergencyHandler", "scheduler", "games", "radioMon", "fileMon",
+        "smtp", "messagingSettings", "repeater", "checklist", "inventory",
+        "qrz", "dataPersistence", "weatherAlert", "femaAlert", "deAlert",
+    ]
+    _panel_title = "Bot Config Editor"
+    _profile_label = "Regional Bot Config Profile"
+    _not_found_hint = (
+        "meshing-around config not found.\n"
+        "Searched: /opt/meshing-around/config.ini and standard paths.\n\n"
+        "If meshing-around is installed elsewhere, create a symlink:\n"
+        "  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
+    )
+
+    def _get_search_paths(self) -> "list[Path]":
+        """Get deduplicated upstream config search paths."""
+        paths: list[Path] = []
+        seen: set[str] = set()
+        if hasattr(self.app, "config"):
+            for p in self.app.config._get_upstream_config_paths():
+                key = str(p)
+                if key not in seen:
+                    paths.append(p)
+                    seen.add(key)
+        for p in [Path("/opt/meshing_around/config.ini")]:
+            key = str(p)
+            if key not in seen:
+                paths.append(p)
+                seen.add(key)
+        return paths
+
+    def _find_config(self) -> Optional[Path]:
+        """Find upstream config.ini, falling back to config.template."""
+        primary = Path("/opt/meshing-around/config.ini")
+        try:
+            if primary.exists():
+                return primary
+        except Exception:
+            pass
+
+        if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
+            try:
+                found = self.app.config.find_upstream_config()
+                if found:
+                    return found
+            except Exception:
+                pass
+
+        for p in self._get_search_paths():
+            try:
+                if p.exists():
+                    return p
+            except (OSError, PermissionError):
+                continue
+
+        primary_template = Path("/opt/meshing-around/config.template")
+        try:
+            if primary_template.exists():
+                return primary_template
+        except Exception:
+            pass
+
+        for p in self._get_search_paths():
+            template = p.with_name("config.template")
+            try:
+                if template.exists():
+                    return template
+            except (OSError, PermissionError):
+                continue
+
+        return None
+
+    def _find_template(self) -> Optional[Path]:
+        """Find config.template alongside the loaded config.ini."""
+        if self._config_path:
+            template = self._config_path.with_name("config.template")
+            try:
+                if template.exists():
+                    return template
+            except (OSError, PermissionError):
+                pass
+
+        if hasattr(self.app, "config") and hasattr(self.app.config, "get_upstream_template_path"):
+            try:
+                found = self.app.config.get_upstream_template_path()
+                if found:
+                    return found
+            except Exception:
+                pass
+
+        fallback = Path("/opt/meshing-around/config.template")
+        try:
+            if fallback.exists():
+                return fallback
+        except Exception:
+            pass
+        return None
+
+    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
+        """Find *_bot.ini regional config templates in profiles/."""
+        profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
+        templates: list[tuple[str, Path]] = []
+        try:
+            if profiles_dir.is_dir():
+                for p in sorted(profiles_dir.glob("*_bot.ini")):
+                    import configparser as _cp
+                    parser = _cp.ConfigParser()
+                    try:
+                        parser.read(str(p))
+                        name = parser.get("profile", "name", fallback=p.stem)
+                    except _cp.Error:
+                        name = p.stem
+                    templates.append((name, p))
+        except (OSError, PermissionError):
+            pass
+        return templates
+
+
+class ClientConfigScreen(_BaseConfigEditor):
+    """Client config editor — edits mesh_client.ini with full template visibility.
+
+    Screen [0] in the TUI. Shows all sections from mesh_client.ini.template
+    as the single source of truth, with user values overlaid.
+    """
+
+    _SECTION_ORDER = [
+        "interface", "mqtt", "features", "commands", "data_sources",
+        "maps", "alerts", "network", "display", "logging", "advanced",
+    ]
+    _panel_title = "Client Config Editor"
+    _profile_label = "Regional Client Profile"
+    _not_found_hint = (
+        "mesh_client.ini not found.\n"
+        "Run: python3 mesh_client.py --setup  to create one."
+    )
+
+    def _find_config(self) -> Optional[Path]:
+        """Return the client's own mesh_client.ini path."""
+        if hasattr(self.app, "config") and self.app.config.config_path:
+            try:
+                if self.app.config.config_path.exists():
+                    return self.app.config.config_path
+            except (OSError, PermissionError):
+                pass
+        return None
+
+    def _find_template(self) -> Optional[Path]:
+        """Return the mesh_client.ini.template path."""
+        if hasattr(self.app, "config") and hasattr(self.app.config, "get_client_template_path"):
+            try:
+                found = self.app.config.get_client_template_path()
+                if found:
+                    return found
+            except Exception:
+                pass
+        return None
+
+    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
+        """Find client regional profiles (not *_bot.ini)."""
+        if hasattr(self.app, "config") and hasattr(self.app.config, "find_client_profiles"):
+            try:
+                return self.app.config.find_client_profiles()
+            except Exception:
+                pass
+        return []
+
+    def _post_edit_validate(self, section: str, key: str, value: str) -> Optional[str]:
+        """Warn about incomplete connection configs after editing."""
+        if section == "interface" and key == "type" and value == "tcp":
+            hostname = self._parser.get("interface", "hostname", fallback="")
+            if not hostname:
+                return "TCP requires hostname -- edit [interface] hostname next"
+        if section == "interface" and key == "type" and value == "http":
+            http_url = self._parser.get("interface", "http_url", fallback="")
+            hostname = self._parser.get("interface", "hostname", fallback="")
+            if not http_url and not hostname:
+                return "HTTP requires http_url or hostname"
+        return None
+
+    def _post_save_hook(self) -> None:
+        """Reload the app's Config object so saved changes take effect."""
+        if hasattr(self.app, "config") and hasattr(self.app.config, "load"):
+            try:
+                self.app.config.load()
+            except Exception:
+                pass  # Non-fatal — config on disk is saved
 
 
 class MapsScreen(Screen):
@@ -2009,6 +2076,7 @@ class HelpScreen(Screen):
 # Keyboard Shortcuts
 
 ## Navigation
+- **0** - Client Config Editor (mesh_client.ini)
 - **1** - Dashboard
 - **2** - Nodes view
 - **3** - Messages view
@@ -2016,7 +2084,7 @@ class HelpScreen(Screen):
 - **5** - Topology view
 - **6** - Devices view
 - **7** - Log / Diagnostics
-- **8** - Config Editor (meshing-around config.ini)
+- **8** - Bot Config Editor (meshing-around config.ini)
 - **9** - Maps (meshforge-maps integration)
 - **q** - Return to dashboard / Quit
 
@@ -2068,7 +2136,16 @@ class HelpScreen(Screen):
 - **r** - Set as bot output radio
 - **j/k** - Navigate device list
 
-## Config Editor (screen 8)
+## Client Config Editor (screen 0)
+- **j/k** - Scroll through settings
+- **t** - Toggle boolean (True/False)
+- **Enter** - Edit selected value
+- **w** - Save changes (creates .bak backup)
+- **P** - Apply regional client profile
+- **R** - Reload from disk (discard unsaved changes)
+- Template defaults shown as (default) in dim italic
+
+## Bot Config Editor (screen 8)
 - **j/k** - Scroll through settings
 - **t** - Toggle boolean (True/False)
 - **Enter** - Edit selected value
@@ -2199,6 +2276,7 @@ class MeshingAroundTUI:
             "devices": DevicesScreen(self),
             "log": LogScreen(self),
             "config": ConfigScreen(self),
+            "client_config": ClientConfigScreen(self),
             "maps": MapsScreen(self),
             "help": HelpScreen(self),
         }
@@ -2456,6 +2534,7 @@ class MeshingAroundTUI:
 
         # Map screen keys to names and their screen identifiers
         nav_items = [
+            ("0", "Cfg", "client_config"),
             ("1", "Dashboard", "dashboard"),
             ("2", "Nodes", "nodes"),
             ("3", "Messages", "messages"),
@@ -2463,7 +2542,7 @@ class MeshingAroundTUI:
             ("5", "Topology", "topology"),
             ("6", "Devices", "devices"),
             ("7", "Log", "log"),
-            ("8", "Config", "config"),
+            ("8", "Bot Cfg", "config"),
             ("9", "Maps", "maps"),
         ]
 
@@ -2920,6 +2999,7 @@ class MeshingAroundTUI:
 
     # Screen navigation keys — maps key to screen name
     _SCREEN_KEYS = {
+        "0": "client_config",
         "1": "dashboard",
         "2": "nodes",
         "3": "messages",

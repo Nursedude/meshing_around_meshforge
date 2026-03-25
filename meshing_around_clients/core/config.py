@@ -907,6 +907,53 @@ class Config:
                 continue
         return None
 
+    def get_client_template_path(self) -> Optional[Path]:
+        """Find the mesh_client.ini.template file (canonical client template).
+
+        Searches next to the loaded config, then in the project root.
+        """
+        # Same directory as loaded config
+        if self.config_path:
+            template = self.config_path.with_name("mesh_client.ini.template")
+            try:
+                if template.exists():
+                    return template
+            except (OSError, PermissionError):
+                pass
+        # Project root (relative to this source file)
+        project_root = Path(__file__).resolve().parent.parent.parent
+        template = project_root / "mesh_client.ini.template"
+        try:
+            if template.exists():
+                return template
+        except (OSError, PermissionError):
+            pass
+        return None
+
+    def find_client_profiles(self) -> "List[tuple]":
+        """Find client regional profiles (not *_bot.ini) in the profiles directory.
+
+        Returns list of (name, Path) tuples.
+        """
+        profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
+        profiles: list = []
+        try:
+            if not profiles_dir.is_dir():
+                return profiles
+            for p in sorted(profiles_dir.glob("*.ini")):
+                if p.name.endswith("_bot.ini"):
+                    continue  # Bot profiles are separate
+                parser = configparser.ConfigParser()
+                try:
+                    parser.read(str(p))
+                    name = parser.get("profile", "name", fallback=p.stem)
+                except configparser.Error:
+                    name = p.stem
+                profiles.append((name, p))
+        except (OSError, PermissionError):
+            pass
+        return profiles
+
     def read_upstream_commands(self) -> Dict[str, bool]:
         """Read upstream meshing-around config to discover enabled bot commands.
 

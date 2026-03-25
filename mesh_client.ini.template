@@ -1,0 +1,238 @@
+# ============================================================================
+# MESHING-AROUND CLIENT CONFIGURATION
+# ============================================================================
+# This file controls all aspects of the mesh client.
+# Edit this file to customize your setup.
+# ============================================================================
+
+[interface]
+# Connection type: auto, serial, tcp, http, mqtt, ble
+# - auto: Try serial first, then tcp, then http, then mqtt
+# - serial: Direct USB/serial connection to radio
+# - tcp: TCP connection to Meshtastic device
+# - http: HTTP connection to Meshtastic device API
+# - mqtt: MQTT broker connection (no radio needed)
+# - ble: Bluetooth LE connection
+type = auto
+
+# Serial port (for type=serial or auto)
+# Set to specific port like /dev/ttyUSB0, /dev/ttyACM0, or leave empty for auto-detect
+port =
+
+# Serial baudrate
+baudrate = 115200
+
+# TCP hostname (for type=tcp)
+# Use 127.0.0.1 for local meshtasticd, host:port for remote (default port 4403)
+# Do NOT use the node's web interface port (9443) - that is for browsers only
+hostname =
+
+# HTTP URL for meshtasticd HTTP API (for type=http)
+# e.g. http://meshtastic.local or http://192.168.1.100
+# If empty and type=http, falls back to http://<hostname>
+http_url =
+
+# BLE MAC address (for type=ble)
+# MAC address like AA:BB:CC:DD:EE:FF or "scan" for discovery
+mac =
+
+# Radio hardware model (for reference and device management)
+# Options: TBEAM, TLORA, TECHO, TDECK, HELTEC, RAK4631, STATION_G2
+hardware_model =
+
+# Connection behavior
+auto_reconnect = true
+reconnect_delay = 5
+connection_timeout = 30
+
+[mqtt]
+# MQTT broker connection (no radio needed)
+# Enable MQTT mode
+enabled = false
+
+# Broker settings
+broker = mqtt.meshtastic.org
+port = 1883
+use_tls = false
+
+# Authentication (default public broker credentials)
+username = meshdev
+password = large4cats
+
+# Topic configuration
+topic_root = msh/US
+channel = LongFast
+# Subscribe to multiple channels (comma-separated)
+# Add your own channels here (e.g., LongFast,meshforge,MyLab)
+channels = LongFast
+
+# Your node ID for MQTT (leave empty to receive only)
+node_id =
+
+# Connection settings
+qos = 1
+reconnect_delay = 5
+max_reconnect_attempts = 10
+
+[features]
+# Main interface mode: tui, headless
+mode = tui
+
+# TUI settings
+tui_enabled = true
+tui_refresh_rate = 1.0
+tui_mouse_support = false
+tui_color_scheme = default
+
+# Features to enable/disable
+messages_enabled = true
+nodes_enabled = true
+alerts_enabled = true
+location_enabled = true
+telemetry_enabled = true
+
+[commands]
+# Bot command processing
+# When enabled, recognized commands (cmd, help, ping, etc.) are handled
+# instead of triggering emergency keyword alerts
+enabled = true
+
+# Auto-respond to commands received from the mesh
+# When true, the client will send command responses back to the mesh
+auto_respond = false
+
+# Recognized commands (comma-separated)
+# Messages matching these are treated as commands, not emergency keywords
+commands = cmd,help,ping,info,nodes,status,version,uptime
+
+[data_sources]
+# External data sources for command responses.
+# Each source is tied to a command keyword and fetches live data.
+# Set enabled = true and configure the URL/codes for your area.
+
+# NOAA Weather (requires station code for your area)
+# Find your station: https://www.weather.gov/
+weather_enabled = false
+weather_station =
+weather_zone =
+weather_url = https://api.weather.gov
+
+# Tsunami alerts (Pacific Tsunami Warning Center)
+tsunami_enabled = false
+tsunami_url = https://www.tsunami.gov/events/xml/PAAQAtom.xml
+tsunami_region =
+
+# USGS Volcano alerts (CAP elevated alerts feed)
+volcano_enabled = false
+volcano_url = https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated
+# Latitude/longitude for proximity filtering (shows alerts within ~10 degrees)
+# Leave at 0.0 to show all elevated alerts worldwide
+volcano_lat = 0.0
+volcano_lon = 0.0
+
+# Custom data source (user-defined)
+# custom_enabled = false
+# custom_name = MySource
+# custom_url =
+# custom_command = mysource
+
+[maps]
+# meshforge-maps server connection (local or remote)
+enabled = true
+host = 127.0.0.1
+port = 8808
+# Set to remote IP if maps runs on different Pi:
+# host = 192.168.1.100
+
+[alerts]
+# Master alert enable
+enabled = true
+
+# Emergency keyword detection
+emergency_enabled = true
+emergency_keywords = emergency,911,112,999,sos,mayday
+
+# Alert types
+battery_alerts = true
+battery_threshold = 20
+
+new_node_alerts = true
+disconnect_alerts = true
+disconnect_timeout = 3600
+
+# Notification settings
+sound_enabled = false
+sound_file = /usr/share/sounds/freedesktop/stereo/bell.oga
+
+# Logging
+log_alerts = true
+log_file = logs/alerts.log
+
+[network]
+# Node filtering
+favorite_nodes =
+admin_nodes =
+blocked_nodes =
+# Comma-separated node IDs or numbers
+
+# Channel to send commands and messages on (0-7)
+# Set this to YOUR mesh channel — this is where [r] and [s] send
+# Note: the bot's defaultchannel may have ignoredefaultchannel=True
+default_channel = 0
+monitored_channels = 0,1,2
+
+# Message settings
+message_history = 500
+max_message_length = 200
+
+[display]
+# Display preferences
+show_timestamps = true
+show_node_ids = false
+show_snr = true
+show_battery = true
+show_position = false
+
+# Time format: 12h or 24h
+time_format = 24h
+
+# Node name display: short, long, both
+node_name_style = long
+
+[logging]
+# Logging configuration
+enabled = true
+level = INFO
+# Levels: DEBUG, INFO, WARNING, ERROR
+file = logs/mesh_client.log
+max_size_mb = 10
+backup_count = 3
+
+# Log specific events
+log_messages = true
+log_nodes = true
+log_telemetry = false
+
+[advanced]
+# Advanced settings - modify with care
+
+# Use virtual environment for dependencies
+use_venv = true
+
+# Auto-install missing dependencies (set to true to skip prompts)
+auto_install_deps = false
+
+# Demo mode (no real connection, simulated data)
+demo_mode = false
+
+# Startup behavior
+check_updates = false
+show_splash = true
+
+# Performance
+update_interval = 1.0
+node_timeout = 3600
+
+# Debug
+debug_mode = false
+verbose = false
