@@ -9,9 +9,7 @@ Type=simple
 User=__USER__
 WorkingDirectory=__BOT_DIR__
 Environment=PYTHONUNBUFFERED=1
-Environment=REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-ExecStart=__BOT_DIR__/venv/bin/python3 mesh_bot.py
+ExecStart=/bin/bash __BOT_DIR__/launch.sh mesh
 Restart=on-failure
 RestartSec=10
 

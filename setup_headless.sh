@@ -378,17 +378,10 @@ setup_bot_service() {
         return 0
     fi
 
-    # Detect python: prefer venv, fallback to system
-    if [[ -f "$BOT_DIR/venv/bin/python3" ]]; then
-        BOT_PYTHON="$BOT_DIR/venv/bin/python3"
-    else
-        BOT_PYTHON="/usr/bin/python3"
-        log_warn "No venv found — using system python3"
-    fi
-
     # Determine service user
     SERVICE_USER="${SUDO_USER:-$USER}"
 
+    # Use launch.sh which handles venv activation and SSL certs
     sudo tee /etc/systemd/system/mesh_bot.service > /dev/null <<BOTEOF
 [Unit]
 Description=Meshing-Around Mesh Bot (mesh_bot.py)
@@ -401,9 +394,7 @@ Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${BOT_DIR}
 Environment=PYTHONUNBUFFERED=1
-Environment=REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-Environment=SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-ExecStart=${BOT_PYTHON} mesh_bot.py
+ExecStart=/bin/bash ${BOT_DIR}/launch.sh mesh
 Restart=on-failure
 RestartSec=10
 
