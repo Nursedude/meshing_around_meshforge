@@ -24,6 +24,81 @@ CONNECT_TIMEOUT_SECONDS = 30.0
 # Hostname validation: alphanumeric, dots, hyphens, underscores, optional port
 _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 
+# Chunk reassembly: bot splits long responses into ~160-char chunks sent in
+# rapid succession.  No markers are embedded in the payload, so we reassemble
+# by buffering sequential messages from the same sender+channel within a
+# configurable time window.
+_CHUNK_BYTE_THRESHOLD = 140  # Start buffering when a text payload is >= this
+
+
+class _ChunkBuffer:
+    """Reassembles sequential text chunks from the same sender.
+
+    The meshing-around bot's messageChunker() splits responses into <=160-char
+    chunks sent back-to-back.  Chunks carry NO sequence markers — reassembly
+    relies on sender+channel identity and a short time window.
+    """
+
+    def __init__(self, timeout: float = 5.0):
+        self._timeout = timeout
+        self._buffers: Dict[str, list] = {}  # key -> [(text, mono_ts, packet)]
+        self._timers: Dict[str, threading.Timer] = {}
+        self._lock = threading.Lock()
+        self._flush_callback: Optional[Any] = None
+
+    @staticmethod
+    def _key(sender_id: str, channel: int) -> str:
+        return f"{sender_id}:{channel}"
+
+    @property
+    def enabled(self) -> bool:
+        return self._timeout > 0
+
+    def add(self, sender_id: str, channel: int, text: str, packet: dict) -> bool:
+        """Buffer a text fragment.  Returns True if buffered, False to pass through."""
+        if not self.enabled:
+            return False
+        key = self._key(sender_id, channel)
+        with self._lock:
+            if key in self._buffers:
+                self._buffers[key].append((text, time.monotonic(), packet))
+                self._reset_timer(key)
+                return True
+            elif len(text.encode("utf-8")) >= _CHUNK_BYTE_THRESHOLD:
+                self._buffers[key] = [(text, time.monotonic(), packet)]
+                self._reset_timer(key)
+                return True
+            return False
+
+    def _reset_timer(self, key: str) -> None:
+        """Reset the flush timer.  Caller must hold _lock."""
+        old = self._timers.pop(key, None)
+        if old is not None:
+            old.cancel()
+        t = threading.Timer(self._timeout, self._flush, args=(key,))
+        t.daemon = True
+        t.start()
+        self._timers[key] = t
+
+    def _flush(self, key: str) -> None:
+        """Timer expired — concatenate and emit."""
+        with self._lock:
+            chunks = self._buffers.pop(key, [])
+            self._timers.pop(key, None)
+        if chunks and self._flush_callback:
+            combined = "\n".join(text for text, _, _ in chunks)
+            first_packet = chunks[0][2]
+            self._flush_callback(combined, first_packet, len(chunks))
+
+    def cancel_all(self) -> None:
+        """Cancel pending timers (called on disconnect)."""
+        with self._lock:
+            for t in self._timers.values():
+                t.cancel()
+            self._timers.clear()
+            self._buffers.clear()
+
+
 from .callbacks import CallbackMixin, extract_position, safe_float, safe_int  # noqa: E402
 from .config import Config  # noqa: E402
 from .models import (  # noqa: E402
@@ -511,6 +586,9 @@ class MeshtasticAPI(CallbackMixin):
         self._init_callbacks()
         # Wire INI cooldown_period to runtime (default 300s)
         self._alert_cooldown_seconds = config.alerts.cooldown_period
+        # Chunk reassembly buffer
+        self._chunk_buffer = _ChunkBuffer(timeout=config.chunk_reassembly_timeout)
+        self._chunk_buffer._flush_callback = self._emit_reassembled_message
         self._running = threading.Event()
         self._stop_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
@@ -867,6 +945,9 @@ class MeshtasticAPI(CallbackMixin):
 
     def disconnect(self) -> None:
         """Disconnect from the Meshtastic device."""
+        # Cancel chunk reassembly timers
+        self._chunk_buffer.cancel_all()
+
         # Save state before disconnecting
         if self.connection_info.connected:
             self._save_state()
@@ -1044,10 +1125,28 @@ class MeshtasticAPI(CallbackMixin):
             logger.warning("Error processing packet (%s): %s", type(e).__name__, e)
 
     def _handle_text_message(self, packet: dict) -> None:
-        """Handle incoming text message."""
+        """Handle incoming text message, with chunk reassembly."""
         decoded = packet.get("decoded", {})
         text = decoded.get("text", decoded.get("payload", b"").decode("utf-8", errors="replace"))
 
+        sender_id = packet.get("fromId", "")
+        channel = packet.get("channel", 0)
+
+        # Try chunk reassembly buffer — buffers long messages that may be chunks
+        if self._chunk_buffer.add(sender_id, channel, text, packet):
+            logger.debug("Buffered chunk from %s ch%d (%d bytes)", sender_id, channel, len(text))
+            return
+
+        # Short message — emit immediately
+        self._emit_message(text, packet)
+
+    def _emit_reassembled_message(self, combined_text: str, packet: dict, chunk_count: int) -> None:
+        """Called by _ChunkBuffer when a buffered sequence is complete."""
+        logger.info("Reassembled %d chunks (%d chars)", chunk_count, len(combined_text))
+        self._emit_message(combined_text, packet)
+
+    def _emit_message(self, text: str, packet: dict) -> None:
+        """Create and store a Message, check commands and emergency keywords."""
         sender_id = packet.get("fromId", "")
         sender_name = ""
         if sender_id in self.network.nodes:

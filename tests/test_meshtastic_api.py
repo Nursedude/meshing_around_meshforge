@@ -903,5 +903,86 @@ class TestRefreshNonImportError(unittest.TestCase):
         self.assertTrue(found, f"Expected log call not found in: {mock_info.call_args_list}")
 
 
+class TestChunkBuffer(unittest.TestCase):
+    """Test _ChunkBuffer message reassembly."""
+
+    def setUp(self):
+        from meshing_around_clients.core.meshtastic_api import _ChunkBuffer
+        self.flushed = []
+        self.buffer = _ChunkBuffer(timeout=0.3)
+        self.buffer._flush_callback = lambda text, pkt, count: self.flushed.append((text, count))
+
+    def tearDown(self):
+        self.buffer.cancel_all()
+
+    def _packet(self, sender="!aabb1234", channel=0):
+        return {"fromId": sender, "toId": "^all", "channel": channel,
+                "decoded": {}, "hopStart": 3, "hopLimit": 2, "snr": 5.0, "rssi": -80}
+
+    def test_short_message_passes_through(self):
+        """Messages shorter than threshold are not buffered."""
+        result = self.buffer.add("!aabb1234", 0, "hello", self._packet())
+        self.assertFalse(result)
+
+    def test_long_message_buffered(self):
+        """Messages >= 140 bytes start buffering."""
+        long_text = "A" * 145
+        result = self.buffer.add("!aabb1234", 0, long_text, self._packet())
+        self.assertTrue(result)
+
+    def test_sequential_chunks_concatenated(self):
+        """Multiple rapid chunks from same sender/channel are concatenated."""
+        chunk1 = "W" * 150
+        chunk2 = "X" * 150
+        chunk3 = "short end"
+        self.buffer.add("!aabb1234", 0, chunk1, self._packet())
+        self.buffer.add("!aabb1234", 0, chunk2, self._packet())
+        self.buffer.add("!aabb1234", 0, chunk3, self._packet())
+        # Wait for flush
+        time.sleep(0.5)
+        self.assertEqual(len(self.flushed), 1)
+        text, count = self.flushed[0]
+        self.assertEqual(count, 3)
+        self.assertIn(chunk1, text)
+        self.assertIn(chunk2, text)
+        self.assertIn(chunk3, text)
+
+    def test_different_senders_separate(self):
+        """Chunks from different senders are buffered separately."""
+        self.buffer.add("!sender1", 0, "A" * 150, self._packet(sender="!sender1"))
+        self.buffer.add("!sender2", 0, "B" * 150, self._packet(sender="!sender2"))
+        time.sleep(0.5)
+        self.assertEqual(len(self.flushed), 2)
+
+    def test_different_channels_separate(self):
+        """Same sender on different channels are buffered separately."""
+        self.buffer.add("!aabb1234", 0, "A" * 150, self._packet(channel=0))
+        self.buffer.add("!aabb1234", 1, "B" * 150, self._packet(channel=1))
+        time.sleep(0.5)
+        self.assertEqual(len(self.flushed), 2)
+
+    def test_timeout_flushes_buffer(self):
+        """Buffer emits after timeout expires."""
+        self.buffer.add("!aabb1234", 0, "A" * 150, self._packet())
+        self.assertEqual(len(self.flushed), 0)
+        time.sleep(0.5)
+        self.assertEqual(len(self.flushed), 1)
+
+    def test_reassembly_disabled_when_zero(self):
+        """Timeout=0 disables buffering entirely."""
+        from meshing_around_clients.core.meshtastic_api import _ChunkBuffer
+        buf = _ChunkBuffer(timeout=0)
+        self.assertFalse(buf.enabled)
+        result = buf.add("!aabb1234", 0, "A" * 200, self._packet())
+        self.assertFalse(result)
+
+    def test_cancel_all_clears_state(self):
+        """cancel_all() stops pending timers and clears buffers."""
+        self.buffer.add("!aabb1234", 0, "A" * 150, self._packet())
+        self.buffer.cancel_all()
+        time.sleep(0.5)
+        self.assertEqual(len(self.flushed), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

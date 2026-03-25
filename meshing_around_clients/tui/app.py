@@ -1557,10 +1557,10 @@ class _BaseConfigEditor(Screen):
         template_count = len(self._template_keys)
         template_info = f" [dim]({template_count} defaults)[/dim]" if template_count else ""
         if self._is_template:
-            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[C] create .ini  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
+            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[e] editor  \\[w] save  \\[C] create .ini  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
             title_suffix = " [yellow](template)[/yellow]"
         else:
-            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[w] save  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
+            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[e] editor  \\[w] save  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
             title_suffix = ""
 
         return Panel(
@@ -1607,6 +1607,9 @@ class _BaseConfigEditor(Screen):
             elif key == "R":
                 self._load()
                 self._dirty = False
+                return True
+            elif key == "e":
+                self._open_in_editor()
                 return True
         except Exception as e:
             self._error = f"Input error: {e}"
@@ -1685,6 +1688,31 @@ class _BaseConfigEditor(Screen):
             except (KeyboardInterrupt, ValueError):
                 pass
 
+    def _open_in_editor(self) -> None:
+        """Open the config file in an external editor (nano/vi/vim)."""
+        if not self._config_path:
+            self._error = "No config file to edit"
+            return
+        import os
+        import shutil as _shutil
+        import subprocess as _sp
+
+        editor = os.environ.get("EDITOR", "")
+        if not editor:
+            for name in ("nano", "vi", "vim"):
+                if _shutil.which(name):
+                    editor = name
+                    break
+        if not editor:
+            self._error = "No editor found (set $EDITOR or install nano)"
+            return
+        with self.app._prompt_mode():
+            self.console.clear()
+            _sp.run([editor, str(self._config_path)])
+        # Reload after external edit
+        self._load()
+        self._dirty = False
+
     def _save(self) -> None:
         """Save config back to file with .ini.bak backup."""
         import shutil as _shutil
@@ -1713,7 +1741,7 @@ class ConfigScreen(_BaseConfigEditor):
         "smtp", "messagingSettings", "repeater", "checklist", "inventory",
         "qrz", "dataPersistence", "weatherAlert", "femaAlert", "deAlert",
     ]
-    _panel_title = "Bot Config Editor"
+    _panel_title = "Bot Config (config.ini)"
     _profile_label = "Regional Bot Config Profile"
     _not_found_hint = (
         "meshing-around config not found.\n"
@@ -1837,7 +1865,7 @@ class ClientConfigScreen(_BaseConfigEditor):
         "interface", "mqtt", "features", "commands", "data_sources",
         "maps", "alerts", "network", "display", "logging", "advanced",
     ]
-    _panel_title = "Client Config Editor"
+    _panel_title = "Client Config (mesh_client.ini)"
     _profile_label = "Regional Client Profile"
     _not_found_hint = (
         "mesh_client.ini not found.\n"
@@ -2113,6 +2141,7 @@ class HelpScreen(Screen):
 - **a** - Show all channels
 - **e** - Export messages as JSON
 - **E** - Export messages as CSV
+- Long bot responses (weather, etc.) are auto-reassembled from chunks
 
 ## Alerts View
 - **/** - Search by title or message text
@@ -2140,6 +2169,7 @@ class HelpScreen(Screen):
 - **j/k** - Scroll through settings
 - **t** - Toggle boolean (True/False)
 - **Enter** - Edit selected value
+- **e** - Open in external editor ($EDITOR or nano)
 - **w** - Save changes (creates .bak backup)
 - **P** - Apply regional client profile
 - **R** - Reload from disk (discard unsaved changes)
@@ -2149,6 +2179,7 @@ class HelpScreen(Screen):
 - **j/k** - Scroll through settings
 - **t** - Toggle boolean (True/False)
 - **Enter** - Edit selected value
+- **e** - Open in external editor ($EDITOR or nano)
 - **w** - Save changes (creates .bak backup)
 - **P** - Apply regional bot config profile
 - **C** - Create config.ini from template

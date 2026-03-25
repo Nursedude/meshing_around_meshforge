@@ -321,6 +321,9 @@ class Config:
         self.admin_nodes: List[str] = []
         self.favorite_nodes: List[str] = []
 
+        # Advanced settings
+        self.chunk_reassembly_timeout: float = 5.0  # seconds; 0 disables
+
         # Config format tracking
         self.config_format = "meshforge"  # or "upstream"
 
@@ -579,6 +582,12 @@ class Config:
                 self.logging.file = self._parser.get("logging", "file", fallback="mesh_client.log")
                 self.logging.max_size_mb = max(1, min(self._parser.getint("logging", "max_size_mb", fallback=10), 1000))
                 self.logging.backup_count = max(0, min(self._parser.getint("logging", "backup_count", fallback=3), 100))
+
+            # Advanced
+            if self._parser.has_section("advanced"):
+                self.chunk_reassembly_timeout = max(
+                    0.0, self._parser.getfloat("advanced", "chunk_reassembly_timeout", fallback=5.0)
+                )
 
             # Apply environment variable overrides (highest priority)
             self._apply_env_overrides()

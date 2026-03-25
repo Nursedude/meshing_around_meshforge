@@ -1004,6 +1004,25 @@ class TestBaseConfigEditorInheritance(unittest.TestCase):
         from meshing_around_clients.tui.app import ClientConfigScreen, _BaseConfigEditor
         self.assertTrue(issubclass(ClientConfigScreen, _BaseConfigEditor))
 
+    def test_base_editor_has_open_in_editor(self):
+        """_BaseConfigEditor should have _open_in_editor method."""
+        from meshing_around_clients.tui.app import _BaseConfigEditor
+        self.assertTrue(hasattr(_BaseConfigEditor, "_open_in_editor"))
+
+    def test_e_key_handled_by_base_editor(self):
+        """The 'e' key should be handled by _BaseConfigEditor.handle_input."""
+        from meshing_around_clients.tui.app import ClientConfigScreen, MeshingAroundTUI
+        config = Config()
+        tui = MeshingAroundTUI(config=config, demo_mode=True)
+        tui.api.connect()
+        screen = ClientConfigScreen(tui)
+        screen._loaded = True
+        screen._config_path = None  # Prevents actual editor launch
+        # 'e' should return True (handled) even if no file
+        result = screen.handle_input("e")
+        self.assertTrue(result)
+        tui.api.disconnect()
+
 
 class TestConfigHelperMethods(unittest.TestCase):
     """Test Config.get_client_template_path() and find_client_profiles()."""

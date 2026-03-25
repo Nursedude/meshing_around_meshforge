@@ -1,7 +1,8 @@
 # ============================================================================
 # MESHING-AROUND CLIENT CONFIGURATION
 # ============================================================================
-# This file controls all aspects of the mesh client.
+# This file configures the MONITORING CLIENT (TUI, alerts, display).
+# The BOT is configured separately in /opt/meshing-around/config.ini.
 # Edit this file to customize your setup.
 # ============================================================================
 
@@ -232,6 +233,12 @@ show_splash = true
 # Performance
 update_interval = 1.0
 node_timeout = 3600
+
+# Chunk reassembly timeout (seconds). Messages from the same sender arriving
+# within this window are concatenated into one message. The meshing-around bot
+# splits long responses (weather, etc.) into 160-char chunks — this reassembles
+# them. Set to 0 to disable reassembly.
+chunk_reassembly_timeout = 5.0
 
 # Debug
 debug_mode = false
