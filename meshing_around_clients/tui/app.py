@@ -211,6 +211,26 @@ class Screen:
 class DashboardScreen(Screen):
     """Main dashboard screen — message-centric live feed with network status."""
 
+    _bot_running: Optional[bool] = None
+    _bot_check_time: float = 0.0
+
+    def _check_bot_running(self) -> bool:
+        """Check if the meshing-around bot process is running (cached 10s)."""
+        now = time.monotonic()
+        if self._bot_running is not None and now - self._bot_check_time < 10.0:
+            return self._bot_running
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["pgrep", "-f", "mesh_bot.py"],
+                capture_output=True, timeout=2,
+            )
+            self._bot_running = result.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            self._bot_running = False
+        self._bot_check_time = now
+        return self._bot_running
+
     def render(self) -> Panel:
         layout = Layout()
 
@@ -460,7 +480,12 @@ class DashboardScreen(Screen):
             content.append(Text("  No alerts", style="dim green"))
         content.append(Text(""))
 
-        # --- Bot Status (upstream features) ---
+        # --- Bot Status ---
+        bot_running = self._check_bot_running()
+        if bot_running:
+            content.append(Text("Bot: RUNNING", style="bold green"))
+        else:
+            content.append(Text("Bot: STOPPED", style="bold red"))
         content.append(Text("Bot Features", style="bold cyan"))
         if hasattr(self.app, "config") and hasattr(self.app.config, "read_upstream_commands"):
             try:
@@ -3054,20 +3079,12 @@ class MeshingAroundTUI:
         with self._prompt_mode():
             self.console.clear()
             self.console.print(Panel("[bold cyan]Send Message[/bold cyan]", border_style="cyan"))
-            self.console.print("[dim]Type 'cmd' for commands, or a message to send[/dim]\n")
+            self.console.print("[dim]Message is sent to the mesh — use \\[r] for local commands[/dim]\n")
 
             try:
                 text = Prompt.ask("Message")
                 if not text:
                     return
-
-                # Intercept recognized commands — run locally
-                text_lower = text.strip().lower()
-                if self.config.commands.enabled:
-                    recognized = [c.lower() for c in self.config.commands.commands]
-                    if text_lower in recognized:
-                        self._run_command_local(text_lower)
-                        return
 
                 msg_len = len(text.encode("utf-8"))
                 if msg_len > MAX_MESSAGE_BYTES:
