@@ -231,6 +231,12 @@ class DashboardScreen(Screen):
         self._bot_check_time = now
         return self._bot_running
 
+    def handle_input(self, key: str) -> bool:
+        if key == "b":
+            self.app._manage_bot_prompt()
+            return True
+        return False
+
     def render(self) -> Panel:
         layout = Layout()
 
@@ -483,9 +489,9 @@ class DashboardScreen(Screen):
         # --- Bot Status ---
         bot_running = self._check_bot_running()
         if bot_running:
-            content.append(Text("Bot: RUNNING", style="bold green"))
+            content.append(Text("Bot: RUNNING  [b] manage", style="bold green"))
         else:
-            content.append(Text("Bot: STOPPED", style="bold red"))
+            content.append(Text("Bot: STOPPED  [b] manage", style="bold red"))
         content.append(Text("Bot Features", style="bold cyan"))
         if hasattr(self.app, "config") and hasattr(self.app.config, "read_upstream_commands"):
             try:
@@ -2003,8 +2009,9 @@ class HelpScreen(Screen):
 - **q** - Return to dashboard / Quit
 
 ## Actions
-- **s** - Send message (commands auto-detected)
-- **r** - Run command (sends to bot via mesh; local if disconnected)
+- **s** - Send message to mesh
+- **r** - Run command (local or via mesh)
+- **b** - Bot service management (start/stop/restart/status/logs)
 - **c** - Connect/Disconnect
 - **?** / **h** - This help
 
@@ -2054,6 +2061,8 @@ class HelpScreen(Screen):
 - **t** - Toggle boolean (True/False)
 - **Enter** - Edit selected value
 - **w** - Save changes (creates .bak backup)
+- **P** - Apply regional bot config profile
+- **C** - Create config.ini from template
 - **R** - Reload from disk (discard unsaved changes)
 
 ## Maps (screen 9)
@@ -3069,11 +3078,74 @@ class MeshingAroundTUI:
             except KeyboardInterrupt:
                 pass
 
-    def _send_message_prompt(self) -> None:
-        """Prompt user to send a message.
+    def _manage_bot_prompt(self) -> None:
+        """Interactive bot service management (start/stop/restart/status/logs)."""
+        from meshing_around_clients.setup.system_maintenance import (
+            check_service_status,
+            get_service_logs,
+            manage_service,
+        )
 
-        Intercepts recognized commands and runs them locally with output
-        on default_channel, or sends a regular message.
+        SERVICE_NAME = "mesh_bot.service"
+
+        with self._prompt_mode():
+            self.console.clear()
+            # Check current status
+            is_running, status_text = check_service_status(SERVICE_NAME)
+            status_style = "bold green" if is_running else "bold red"
+            self.console.print(Panel(
+                f"[{status_style}]{SERVICE_NAME}: {status_text}[/{status_style}]",
+                title="[bold cyan]Bot Service Management[/bold cyan]",
+                border_style="cyan",
+            ))
+            self.console.print("  [cyan]1[/cyan]) Status (detailed)")
+            self.console.print("  [cyan]2[/cyan]) Start")
+            self.console.print("  [cyan]3[/cyan]) Stop")
+            self.console.print("  [cyan]4[/cyan]) Restart")
+            self.console.print("  [cyan]5[/cyan]) View Logs (last 50 lines)")
+            self.console.print("  [cyan]0[/cyan]) Cancel\n")
+
+            try:
+                choice = Prompt.ask("Select", default="0")
+                if choice == "1":
+                    ok, output = manage_service(SERVICE_NAME, "status")
+                    self.console.print(Panel(output or "No status", border_style="cyan"))
+                    input("\nPress Enter to continue...")
+                elif choice == "2":
+                    ok, output = manage_service(SERVICE_NAME, "start")
+                    style = "green" if ok else "red"
+                    self.console.print(f"[{style}]{output}[/{style}]")
+                    time.sleep(1.5)
+                elif choice == "3":
+                    ok, output = manage_service(SERVICE_NAME, "stop")
+                    style = "green" if ok else "red"
+                    self.console.print(f"[{style}]{output}[/{style}]")
+                    time.sleep(1.5)
+                elif choice == "4":
+                    ok, output = manage_service(SERVICE_NAME, "restart")
+                    style = "green" if ok else "red"
+                    self.console.print(f"[{style}]{output}[/{style}]")
+                    time.sleep(1.5)
+                elif choice == "5":
+                    ok, output = get_service_logs(SERVICE_NAME, lines=50)
+                    self.console.print(Panel(
+                        output or "No logs available",
+                        title=f"[bold]journalctl -u {SERVICE_NAME}[/bold]",
+                        border_style="cyan",
+                    ))
+                    input("\nPress Enter to continue...")
+            except KeyboardInterrupt:
+                pass
+
+            # Force refresh bot status cache
+            dashboard = self.screens.get("dashboard")
+            if dashboard and hasattr(dashboard, "_bot_check_time"):
+                dashboard._bot_check_time = 0.0
+
+    def _send_message_prompt(self) -> None:
+        """Prompt user to send a message — always sends to the mesh.
+
+        Use [r] (run command) for local command execution.
         """
         default_ch = str(self.config.network_cfg.default_channel)
         with self._prompt_mode():

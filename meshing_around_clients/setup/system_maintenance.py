@@ -853,6 +853,25 @@ def check_service_status(name: str) -> Tuple[bool, str]:
     return is_running, stdout.strip()
 
 
+def get_service_logs(name: str, lines: int = 50) -> Tuple[bool, str]:
+    """Get recent journalctl logs for a systemd service.
+
+    Args:
+        name: Service name
+        lines: Number of recent log lines to return
+
+    Returns:
+        Tuple of (success, log_output)
+    """
+    ret, stdout, stderr = run_command(
+        ["journalctl", "-u", name, "-n", str(lines), "--no-pager"],
+        sudo=False, timeout=10,
+    )
+    if ret == 0:
+        return True, stdout
+    return False, stderr or "No logs available"
+
+
 # =============================================================================
 # Clone/Install meshing-around
 # =============================================================================
