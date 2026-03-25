@@ -1744,20 +1744,31 @@ class ConfigScreen(_BaseConfigEditor):
     _panel_title = "Bot Config (config.ini)"
     _profile_label = "Regional Bot Config Profile"
     _not_found_hint = (
-        "Bot config not found at /opt/meshing-around/config.ini\n"
+        "Bot config.ini not found.\n"
+        "Searched: /opt/meshing-around/ and sibling directory.\n\n"
         "Install meshing-around or create a symlink:\n"
         "  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
     )
 
     def _find_config(self) -> Optional[Path]:
-        """Find the upstream bot config.ini — single source of truth."""
+        """Find the upstream bot config.ini — single source of truth.
+
+        Search order: /opt install, sibling of project, template fallback.
+        """
+        # Standard system install
         primary = Path("/opt/meshing-around/config.ini")
         if primary.exists():
             return primary
-        # Fallback: config.template for read-only viewing
-        template = Path("/opt/meshing-around/config.template")
-        if template.exists():
-            return template
+        # Sibling of this project (e.g. /opt/meshing_around_meshforge/../meshing-around/)
+        project_root = Path(__file__).resolve().parent.parent.parent
+        sibling = project_root.parent / "meshing-around" / "config.ini"
+        if sibling.exists():
+            return sibling
+        # Read-only template fallback
+        for base in (Path("/opt/meshing-around"), project_root.parent / "meshing-around"):
+            template = base / "config.template"
+            if template.exists():
+                return template
         return None
 
     def _find_template(self) -> Optional[Path]:
