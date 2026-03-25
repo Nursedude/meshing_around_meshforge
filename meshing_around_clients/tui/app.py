@@ -213,11 +213,15 @@ class DashboardScreen(Screen):
 
     _bot_running: Optional[bool] = None
     _bot_check_time: float = 0.0
+    _upstream_settings: Optional[dict] = None
+    _upstream_settings_time: float = 0.0
+    _upstream_commands: Optional[dict] = None
+    _upstream_commands_time: float = 0.0
 
     def _check_bot_running(self) -> bool:
-        """Check if the meshing-around bot process is running (cached 10s)."""
+        """Check if the meshing-around bot process is running (cached 30s)."""
         now = time.monotonic()
-        if self._bot_running is not None and now - self._bot_check_time < 10.0:
+        if self._bot_running is not None and now - self._bot_check_time < 30.0:
             return self._bot_running
         import subprocess
         try:
@@ -351,8 +355,12 @@ class DashboardScreen(Screen):
         # Row 4: Default channel + avg SNR + channel utilization
         default_ch = "--"
         if hasattr(self.app, "config"):
-            upstream = self.app.config.read_upstream_settings()
-            if upstream and "defaultchannel" in upstream:
+            now = time.monotonic()
+            if self._upstream_settings is None or now - self._upstream_settings_time > 60.0:
+                self._upstream_settings = self.app.config.read_upstream_settings()
+                self._upstream_settings_time = now
+            upstream = self._upstream_settings or {}
+            if "defaultchannel" in upstream:
                 default_ch = "ch" + str(upstream["defaultchannel"])
         avg_snr = health.get("avg_snr", 0)
         avg_util = health.get("avg_channel_utilization", 0)
@@ -495,7 +503,11 @@ class DashboardScreen(Screen):
         content.append(Text("Bot Features", style="bold cyan"))
         if hasattr(self.app, "config") and hasattr(self.app.config, "read_upstream_commands"):
             try:
-                upstream = self.app.config.read_upstream_commands()
+                now = time.monotonic()
+                if self._upstream_commands is None or now - self._upstream_commands_time > 60.0:
+                    self._upstream_commands = self.app.config.read_upstream_commands()
+                    self._upstream_commands_time = now
+                upstream = self._upstream_commands
                 if upstream:
                     on_features = [name for name, enabled in sorted(upstream.items()) if enabled]
                     off_features = [name for name, enabled in sorted(upstream.items()) if not enabled]
