@@ -26,20 +26,18 @@ _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 
 # Chunk reassembly: bot splits long responses into <=160-char chunks
 # (Meshtastic max ~200 chars) sent in rapid succession.  No markers are
-# embedded in the payload, so we reassemble by buffering ALL messages from
-# the same sender+channel within a configurable time window.  Single messages
-# flush after the timeout with no change; multi-chunk sequences are
-# concatenated.  Works across all connection modes (TCP, MQTT, serial, BLE).
+# embedded in the payload, so we reassemble by buffering messages from
+# the same sender+channel within a configurable time window.
+# Short messages (<40 bytes) pass through instantly — keeps TUI snappy on Pi.
+_CHUNK_BYTE_THRESHOLD = 40
 
 
 class _ChunkBuffer:
     """Reassembles sequential text chunks from the same sender.
 
-    The meshing-around bot's messageChunker() splits responses into <=160-char
-    chunks sent back-to-back.  Chunks carry NO sequence markers and can be any
-    length — reassembly relies on sender+channel identity and a short time
-    window.  ALL messages are buffered; single messages flush after timeout
-    with no modification.
+    Messages under 40 bytes pass through instantly (chat: "hello", "73").
+    Longer messages are buffered; if more arrive from the same sender+channel
+    within the timeout, they're concatenated into one message.
     """
 
     def __init__(self, timeout: float = 3.0):
@@ -58,17 +56,22 @@ class _ChunkBuffer:
         return self._timeout > 0
 
     def add(self, sender_id: str, channel: int, text: str, packet: dict) -> bool:
-        """Buffer a text fragment.  Returns True if buffered, False if disabled."""
+        """Buffer a text fragment.  Returns True if buffered, False to pass through."""
         if not self.enabled:
             return False
         key = self._key(sender_id, channel)
         with self._lock:
             if key in self._buffers:
+                # Already buffering this sender — add regardless of size
                 self._buffers[key].append((text, time.monotonic(), packet))
-            else:
+                self._reset_timer(key)
+                return True
+            elif len(text.encode("utf-8")) >= _CHUNK_BYTE_THRESHOLD:
+                # Long enough to be a bot chunk — start buffering
                 self._buffers[key] = [(text, time.monotonic(), packet)]
-            self._reset_timer(key)
-            return True
+                self._reset_timer(key)
+                return True
+            return False  # Short message, pass through instantly
 
     def _reset_timer(self, key: str) -> None:
         """Reset the flush timer.  Caller must hold _lock."""
