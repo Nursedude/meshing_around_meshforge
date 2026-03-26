@@ -322,7 +322,7 @@ class Config:
         self.favorite_nodes: List[str] = []
 
         # Advanced settings
-        self.chunk_reassembly_timeout: float = 3.0  # seconds; 0 disables
+        self.chunk_reassembly_timeout: float = 8.0  # seconds; 0 disables
 
         # Config format tracking
         self.config_format = "meshforge"  # or "upstream"
