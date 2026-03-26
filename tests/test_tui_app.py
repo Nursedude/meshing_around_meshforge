@@ -713,18 +713,18 @@ class TestMeshtasticAPIConnectionHealth(unittest.TestCase):
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
 class TestConfigScreenTemplateMerge(unittest.TestCase):
-    """Test ConfigScreen template merging and regional profile support."""
+    """Test _BaseConfigEditor template merging (used by ClientConfigScreen)."""
 
     def setUp(self):
         import tempfile
         import configparser
 
-        from meshing_around_clients.tui.app import ConfigScreen, MeshingAroundTUI
+        from meshing_around_clients.tui.app import ClientConfigScreen, MeshingAroundTUI
 
         self.config = Config()
         self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
         self.tui.api.connect()
-        self.screen = ConfigScreen(self.tui)
+        self.screen = ClientConfigScreen(self.tui)
 
         # Create temp config.ini with minimal content
         self.tmp_dir = tempfile.mkdtemp()
@@ -761,17 +761,17 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def test_parse_template_comments_extracts_keys(self):
         """Commented key=value lines are extracted from template."""
-        from meshing_around_clients.tui.app import ConfigScreen
+        from meshing_around_clients.tui.app import _BaseConfigEditor
         from pathlib import Path
 
-        result = ConfigScreen._parse_template_comments(Path(self.template_path))
+        result = _BaseConfigEditor._parse_template_comments(Path(self.template_path))
         self.assertIn("general", result)
         self.assertIn("ollamamodel", result["general"])
         self.assertEqual(result["general"]["ollamamodel"], "gemma2:2b")
 
     def test_parse_template_comments_skips_documentation(self):
         """Documentation comments with multiple key=value are filtered."""
-        from meshing_around_clients.tui.app import ConfigScreen
+        from meshing_around_clients.tui.app import _BaseConfigEditor
         from pathlib import Path
         import tempfile
 
@@ -782,7 +782,7 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
             doc_template = f.name
 
         try:
-            result = ConfigScreen._parse_template_comments(Path(doc_template))
+            result = _BaseConfigEditor._parse_template_comments(Path(doc_template))
             # "pz" should be filtered (documentation), "coastalenabled" should be kept
             location_keys = result.get("location", {})
             self.assertNotIn("pz", location_keys)
@@ -790,17 +790,21 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
         finally:
             os.unlink(doc_template)
 
-    def test_merge_adds_missing_keys(self):
-        """Template merge adds keys missing from config.ini."""
+    def _setup_merge_test(self):
+        """Helper: set up screen with test config and test template."""
         from pathlib import Path
         import configparser
-
         self.screen._parser = configparser.ConfigParser()
         self.screen._parser.read(self.config_path)
         self.screen._config_path = Path(self.config_path)
         self.screen._template_keys = set()
-
+        # Point _find_template at our test template, not the real one
+        self.screen._find_template = lambda: Path(self.template_path)
         self.screen._merge_template_defaults()
+
+    def test_merge_adds_missing_keys(self):
+        """Template merge adds keys missing from config.ini."""
+        self._setup_merge_test()
 
         # whoami was in template but not config.ini
         self.assertTrue(self.screen._parser.has_option("general", "whoami"))
@@ -809,15 +813,7 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def test_merge_does_not_overwrite_user_values(self):
         """Template merge never overwrites existing user values."""
-        from pathlib import Path
-        import configparser
-
-        self.screen._parser = configparser.ConfigParser()
-        self.screen._parser.read(self.config_path)
-        self.screen._config_path = Path(self.config_path)
-        self.screen._template_keys = set()
-
-        self.screen._merge_template_defaults()
+        self._setup_merge_test()
 
         # User's motd should remain unchanged
         self.assertEqual(self.screen._parser.get("general", "motd"), "Hello")
@@ -825,15 +821,7 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def test_merge_adds_missing_sections(self):
         """Template merge adds entire sections missing from config.ini."""
-        from pathlib import Path
-        import configparser
-
-        self.screen._parser = configparser.ConfigParser()
-        self.screen._parser.read(self.config_path)
-        self.screen._config_path = Path(self.config_path)
-        self.screen._template_keys = set()
-
-        self.screen._merge_template_defaults()
+        self._setup_merge_test()
 
         # [sentry] section was in template but not config.ini
         self.assertTrue(self.screen._parser.has_section("sentry"))
@@ -841,27 +829,18 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def test_merge_adds_commented_keys(self):
         """Template merge adds keys from commented lines (e.g., ollamamodel)."""
-        from pathlib import Path
-        import configparser
-
-        self.screen._parser = configparser.ConfigParser()
-        self.screen._parser.read(self.config_path)
-        self.screen._config_path = Path(self.config_path)
-        self.screen._template_keys = set()
-
-        self.screen._merge_template_defaults()
+        self._setup_merge_test()
 
         # ollamamodel was commented in template, should now be available
         self.assertTrue(self.screen._parser.has_option("general", "ollamamodel"))
         self.assertIn(("general", "ollamamodel"), self.screen._template_keys)
 
     def test_find_regional_templates(self):
-        """Regional bot templates are discovered in profiles/ directory."""
+        """Regional client templates are discovered in profiles/ directory."""
         templates = self.screen._find_regional_templates()
-        # hawaii_bot.ini should be found
-        names = [name for name, path in templates]
-        self.assertTrue(any("Hawaii" in n for n in names),
-                        f"Expected 'Hawaii' in template names, got: {names}")
+        # Client profiles (not *_bot.ini) should be found
+        self.assertTrue(len(templates) > 0,
+                        "Expected at least one client profile")
 
     def test_render_shows_default_indicator(self):
         """Template-sourced values show (default) indicator in render output."""
@@ -996,9 +975,9 @@ class TestScreenKeyBindings(unittest.TestCase):
 class TestBaseConfigEditorInheritance(unittest.TestCase):
     """Test that both config screens inherit from _BaseConfigEditor."""
 
-    def test_config_screen_is_base_editor(self):
-        from meshing_around_clients.tui.app import ConfigScreen, _BaseConfigEditor
-        self.assertTrue(issubclass(ConfigScreen, _BaseConfigEditor))
+    def test_config_screen_is_screen(self):
+        from meshing_around_clients.tui.app import ConfigScreen, Screen
+        self.assertTrue(issubclass(ConfigScreen, Screen))
 
     def test_client_config_screen_is_base_editor(self):
         from meshing_around_clients.tui.app import ClientConfigScreen, _BaseConfigEditor

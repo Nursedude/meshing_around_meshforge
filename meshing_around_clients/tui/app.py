@@ -1739,113 +1739,86 @@ class _BaseConfigEditor(Screen):
             self._error = f"Save failed: {e}"
 
 
-class ConfigScreen(_BaseConfigEditor):
-    """Bot config editor — shows the real config.ini, no template merge.
+class ConfigScreen(Screen):
+    """Bot config — opens nano on the real config.ini. One file, one truth."""
 
-    Press [e] to edit in nano (recommended). Auto-reloads when file changes.
-    """
-
-    _SECTION_ORDER = [
-        "general", "location", "interface", "interface2", "bbs", "sentry",
-        "emergencyHandler", "scheduler", "games", "radioMon", "fileMon",
-        "smtp", "messagingSettings", "repeater", "checklist", "inventory",
-        "qrz", "dataPersistence", "weatherAlert", "femaAlert", "deAlert",
-    ]
-    _panel_title = "Bot Config (config.ini)"
-    _profile_label = "Regional Bot Config Profile"
-    _auto_reload = True  # Detect edits from nano and refresh
-    _not_found_hint = (
-        "Bot config.ini not found.\n"
-        "Searched: /opt/meshing-around/ and sibling directory.\n\n"
-        "Install meshing-around or create a symlink:\n"
-        "  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
-    )
-
-    def _load(self) -> None:
-        """Load bot config WITHOUT template merge — show exactly what's in the file."""
-        import configparser as _cp
-        self._parser = _cp.ConfigParser()
-        self._error = ""
-        self._loaded = True
-        self._template_keys = set()  # No template merging for bot config
+    def __init__(self, app: "MeshingAroundTUI"):
+        super().__init__(app)
         self._config_path = self._find_config()
-        if self._config_path:
-            try:
-                self._parser.read(str(self._config_path))
-                self._last_mtime = self._config_path.stat().st_mtime
-            except _cp.Error as e:
-                self._error = f"Parse error: {e}"
-            except OSError:
-                pass
-        else:
-            self._error = self._not_found_hint
-        self._rebuild_items()
+        self._status = ""
 
-    def _find_config(self) -> Optional[Path]:
-        """Find the upstream bot config.ini — single source of truth.
-
-        Search order: /opt install, sibling of project, template fallback.
-        """
-        # Standard system install
+    @staticmethod
+    def _find_config() -> Optional[Path]:
+        """Find the bot config.ini."""
         primary = Path("/opt/meshing-around/config.ini")
         if primary.exists():
             return primary
-        # Sibling of this project (e.g. /opt/meshing_around_meshforge/../meshing-around/)
         project_root = Path(__file__).resolve().parent.parent.parent
         sibling = project_root.parent / "meshing-around" / "config.ini"
         if sibling.exists():
             return sibling
-        # Read-only template fallback
-        for base in (Path("/opt/meshing-around"), project_root.parent / "meshing-around"):
-            template = base / "config.template"
-            if template.exists():
-                return template
         return None
 
-    def _find_template(self) -> Optional[Path]:
-        """Find config.template alongside the loaded config.ini."""
+    def render(self) -> Panel:
+        lines = Text()
         if self._config_path:
-            template = self._config_path.with_name("config.template")
+            lines.append(f"  File: {self._config_path}\n\n", style="cyan")
             try:
-                if template.exists():
-                    return template
-            except (OSError, PermissionError):
+                size = self._config_path.stat().st_size
+                from datetime import datetime as _dt
+                mtime = _dt.fromtimestamp(self._config_path.stat().st_mtime)
+                lines.append(f"  Size: {size} bytes\n", style="dim")
+                lines.append(f"  Modified: {mtime:%Y-%m-%d %H:%M:%S}\n\n", style="dim")
+            except OSError:
                 pass
+            lines.append("  Press ", style="white")
+            lines.append("Enter", style="bold green")
+            lines.append(" to edit in nano\n", style="white")
+        else:
+            lines.append(
+                "  Bot config.ini not found.\n"
+                "  Searched: /opt/meshing-around/ and sibling directory.\n\n"
+                "  Install meshing-around or create a symlink:\n"
+                "    ln -s /path/to/meshing-around/config.ini "
+                "/opt/meshing-around/config.ini\n",
+                style="yellow",
+            )
+        if self._status:
+            lines.append(f"\n  {self._status}\n", style="green")
+        return Panel(
+            lines,
+            title="[bold]Bot Config (config.ini)[/bold]",
+            subtitle="[dim]\\[Enter] edit in nano  \\[q] back[/dim]",
+            border_style="yellow",
+        )
 
-        if hasattr(self.app, "config") and hasattr(self.app.config, "get_upstream_template_path"):
-            try:
-                found = self.app.config.get_upstream_template_path()
-                if found:
-                    return found
-            except Exception:
-                pass
+    def handle_input(self, key: str) -> bool:
+        if key in ("\n", "\r", "e"):
+            self._open_nano()
+            return True
+        return False
 
-        fallback = Path("/opt/meshing-around/config.template")
-        try:
-            if fallback.exists():
-                return fallback
-        except Exception:
-            pass
-        return None
+    def _open_nano(self) -> None:
+        if not self._config_path:
+            self._status = "No config.ini found"
+            return
+        import os
+        import shutil as _shutil
+        import subprocess as _sp
 
-    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
-        """Find *_bot.ini regional config templates in profiles/."""
-        profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
-        templates: list[tuple[str, Path]] = []
-        try:
-            if profiles_dir.is_dir():
-                for p in sorted(profiles_dir.glob("*_bot.ini")):
-                    import configparser as _cp
-                    parser = _cp.ConfigParser()
-                    try:
-                        parser.read(str(p))
-                        name = parser.get("profile", "name", fallback=p.stem)
-                    except _cp.Error:
-                        name = p.stem
-                    templates.append((name, p))
-        except (OSError, PermissionError):
-            pass
-        return templates
+        editor = os.environ.get("EDITOR", "")
+        if not editor:
+            for name in ("nano", "vi", "vim"):
+                if _shutil.which(name):
+                    editor = name
+                    break
+        if not editor:
+            self._status = "No editor found (set $EDITOR or install nano)"
+            return
+        with self.app._prompt_mode():
+            self.console.clear()
+            _sp.run([editor, str(self._config_path)])
+        self._status = "Saved. Restart bot: sudo systemctl restart mesh_bot.service"
 
 
 class ClientConfigScreen(_BaseConfigEditor):

@@ -887,6 +887,11 @@ def apply_bot_profile(profile_id: str) -> bool:
         for key, value in bot_profile.items(section):
             upstream.set(section, key, value)
 
+    # Remove profile metadata — doesn't belong in bot config
+    for section in ("profile", "notes"):
+        if upstream.has_section(section):
+            upstream.remove_section(section)
+
     # Clean stale interface fields — prevents port=/dev/ttyACM0 crash on TCP
     for iface_section in ("interface", "interface2", "interface3"):
         if upstream.has_section(iface_section):
