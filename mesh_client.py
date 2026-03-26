@@ -820,6 +820,11 @@ def apply_profile(config: ConfigParser, profile: ConfigParser) -> None:
         for key, value in profile.items(section):
             config.set(section, key, value)
 
+    # Clean stale interface fields after profile merge
+    if config.has_section("interface"):
+        iface_type = config.get("interface", "type", fallback="auto")
+        _clean_interface_for_type(config, iface_type)
+
     log("Profile applied to configuration", "OK")
 
 
@@ -881,6 +886,16 @@ def apply_bot_profile(profile_id: str) -> bool:
             upstream.add_section(section)
         for key, value in bot_profile.items(section):
             upstream.set(section, key, value)
+
+    # Clean stale interface fields — prevents port=/dev/ttyACM0 crash on TCP
+    for iface_section in ("interface", "interface2", "interface3"):
+        if upstream.has_section(iface_section):
+            iface_type = upstream.get(iface_section, "type", fallback="serial")
+            if iface_type == "tcp":
+                upstream.remove_option(iface_section, "port")
+            elif iface_type == "serial":
+                for field in ("hostname", "http_url"):
+                    upstream.remove_option(iface_section, field)
 
     # Save
     try:
