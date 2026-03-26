@@ -42,6 +42,7 @@ from meshing_around_clients.setup.config_schema import (
     _str_to_int_list,
     _str_to_list,
 )
+from meshing_around_clients.core.config import MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
 
 
 class TestHelperFunctions(unittest.TestCase):
@@ -199,8 +200,8 @@ class TestMQTTConfig(unittest.TestCase):
         self.assertFalse(cfg.enabled)
         self.assertEqual(cfg.broker, "mqtt.meshtastic.org")
         self.assertEqual(cfg.port, 1883)
-        self.assertEqual(cfg.username, "meshdev")
-        self.assertEqual(cfg.password, "large4cats")
+        self.assertEqual(cfg.username, MQTT_PUBLIC_USERNAME)
+        self.assertEqual(cfg.password, MQTT_PUBLIC_PASSWORD)
 
     def test_from_dict(self):
         """Test MQTT config from dictionary."""

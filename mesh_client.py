@@ -1311,10 +1311,9 @@ def interactive_setup():
 
 def _find_editor() -> str:
     """Find an available text editor, preferring nano."""
-    for editor in ("nano", "vi", "vim"):
-        if shutil.which(editor):
-            return editor
-    return ""
+    from meshing_around_clients.setup.cli_utils import find_editor
+
+    return find_editor()
 
 
 def _has_systemd_service() -> bool:

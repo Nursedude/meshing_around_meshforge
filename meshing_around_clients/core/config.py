@@ -238,6 +238,12 @@ class LoggingConfig:
     backup_count: int = 3
 
 
+# Public Meshtastic MQTT broker defaults (see meshtastic.org/docs/software/mqtt).
+# Defined as named constants so credentials never appear as scattered string literals.
+MQTT_PUBLIC_USERNAME: str = "meshdev"
+MQTT_PUBLIC_PASSWORD: str = "large4cats"
+
+
 @dataclass
 class MQTTConfig:
     """MQTT connection configuration for radio-less operation."""
@@ -246,10 +252,9 @@ class MQTTConfig:
     broker: str = "mqtt.meshtastic.org"
     port: int = 1883
     use_tls: bool = False
-    # Public credentials for mqtt.meshtastic.org (see meshtastic.org/docs/software/mqtt).
-    # These are intentionally public and shared by all Meshtastic clients.
-    username: str = "meshdev"
-    password: str = "large4cats"
+    # Public credentials for mqtt.meshtastic.org — see constants above.
+    username: str = MQTT_PUBLIC_USERNAME
+    password: str = MQTT_PUBLIC_PASSWORD
     topic_root: str = "msh/US"
     channel: str = "LongFast"
     channels: str = "LongFast"  # Comma-separated channel list, e.g. "LongFast,meshforge,2"
@@ -265,6 +270,32 @@ class MQTTConfig:
     reconnect_delay: int = 5
     max_reconnect_delay: int = 300  # Max backoff between reconnect attempts
     max_reconnect_attempts: int = 10
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "MQTTConfig":
+        """Create from dictionary, handling string-to-type conversion.
+
+        Used by config_schema.ConfigLoader to parse INI section data.
+        """
+        return cls(
+            enabled=_str_to_bool(data.get("enabled", False)),
+            broker=str(data.get("broker", "mqtt.meshtastic.org")),
+            port=int(data.get("port", 1883)),
+            use_tls=_str_to_bool(data.get("use_tls", False)),
+            username=str(data.get("username", MQTT_PUBLIC_USERNAME)),
+            password=str(data.get("password", MQTT_PUBLIC_PASSWORD)),
+            topic_root=str(data.get("topic_root", "msh/US")),
+            channel=str(data.get("channel", "LongFast")),
+            channels=str(data.get("channels", data.get("channel", "LongFast"))),
+            node_id=str(data.get("node_id", "")),
+            client_id=str(data.get("client_id", "")),
+            encryption_key=str(data.get("encryption_key", "")),
+            qos=int(data.get("qos", 1)),
+            connect_timeout=int(data.get("connect_timeout", 10)),
+            reconnect_delay=int(data.get("reconnect_delay", 5)),
+            max_reconnect_delay=int(data.get("max_reconnect_delay", 300)),
+            max_reconnect_attempts=int(data.get("max_reconnect_attempts", 10)),
+        )
 
 
 class Config:
@@ -541,8 +572,8 @@ class Config:
                     except ValueError:
                         pass  # Not a port number, keep as-is
                 self.mqtt.use_tls = self._parser.getboolean("mqtt", "use_tls", fallback=False)
-                self.mqtt.username = self._parser.get("mqtt", "username", fallback="meshdev")
-                self.mqtt.password = self._parser.get("mqtt", "password", fallback="large4cats")
+                self.mqtt.username = self._parser.get("mqtt", "username", fallback=MQTT_PUBLIC_USERNAME)
+                self.mqtt.password = self._parser.get("mqtt", "password", fallback=MQTT_PUBLIC_PASSWORD)
                 self.mqtt.topic_root = self._parser.get("mqtt", "topic_root", fallback="msh/US")
                 self.mqtt.channel = self._parser.get("mqtt", "channel", fallback="LongFast")
                 self.mqtt.channels = self._parser.get("mqtt", "channels", fallback=self.mqtt.channel)
@@ -1131,7 +1162,7 @@ class Config:
             issues.append("MQTT enabled but no topic_root configured")
 
         # TLS consistency check
-        is_default_creds = self.mqtt.username == "meshdev" and self.mqtt.password == "large4cats"
+        is_default_creds = self.mqtt.username == MQTT_PUBLIC_USERNAME and self.mqtt.password == MQTT_PUBLIC_PASSWORD
         if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:
             issues.append("Non-default MQTT credentials configured without TLS — credentials sent in cleartext")
 

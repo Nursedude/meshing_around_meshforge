@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .callbacks import CallbackMixin, extract_position, safe_float, safe_int
-from .config import Config, MQTTConfig
+from .config import Config, MQTTConfig, MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
     CHUTIL_WARNING_THRESHOLD,
@@ -314,7 +314,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._client.username_pw_set(self.mqtt_config.username, self.mqtt_config.password)
 
                 # SEC-07: Warn when non-default credentials are sent without TLS
-                _is_default_creds = self.mqtt_config.username == "meshdev" and self.mqtt_config.password == "large4cats"
+                _is_default_creds = self.mqtt_config.username == MQTT_PUBLIC_USERNAME and self.mqtt_config.password == MQTT_PUBLIC_PASSWORD
                 if not _is_default_creds and not self.mqtt_config.use_tls and self.mqtt_config.port != DEFAULT_PORT_TLS:
                     logger.warning(
                         "Non-default MQTT credentials configured without TLS (port %d). "

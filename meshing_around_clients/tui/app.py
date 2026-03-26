@@ -1700,25 +1700,13 @@ class _BaseConfigEditor(Screen):
         if not self._config_path:
             self._error = "No config file to edit"
             return
-        import os
-        import shutil as _shutil
-        import subprocess as _sp
+        from meshing_around_clients.setup.cli_utils import open_in_editor
 
-        editor = os.environ.get("EDITOR", "")
-        if not editor:
-            for name in ("nano", "vi", "vim"):
-                if _shutil.which(name):
-                    editor = name
-                    break
-        if not editor:
-            self._error = "No editor found (set $EDITOR or install nano)"
-            return
         with self.app._prompt_mode():
             self.console.clear()
-            try:
-                _sp.run([editor, str(self._config_path)], timeout=7200)
-            except (OSError, _sp.TimeoutExpired) as e:
-                self._error = f"Editor failed: {e}"
+            error = open_in_editor(str(self._config_path))
+            if error:
+                self._error = error
         # Reload after external edit
         self._load()
         self._dirty = False
@@ -1805,26 +1793,15 @@ class ConfigScreen(Screen):
         if not self._config_path:
             self._status = "No config.ini found"
             return
-        import os
-        import shutil as _shutil
-        import subprocess as _sp
+        from meshing_around_clients.setup.cli_utils import open_in_editor
 
-        editor = os.environ.get("EDITOR", "")
-        if not editor:
-            for name in ("nano", "vi", "vim"):
-                if _shutil.which(name):
-                    editor = name
-                    break
-        if not editor:
-            self._status = "No editor found (set $EDITOR or install nano)"
-            return
         with self.app._prompt_mode():
             self.console.clear()
-            try:
-                _sp.run([editor, str(self._config_path)], timeout=7200)
+            error = open_in_editor(str(self._config_path))
+            if error:
+                self._status = error
+            else:
                 self._status = "Saved. Restart bot: sudo systemctl restart mesh_bot.service"
-            except (OSError, _sp.TimeoutExpired) as e:
-                self._status = f"Editor failed: {e}"
 
 
 class ClientConfigScreen(_BaseConfigEditor):

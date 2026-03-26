@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
-from meshing_around_clients.core.config import Config
+from meshing_around_clients.core.config import Config, MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
 from meshing_around_clients.core.models import Alert, AlertType, Message, Node
 
 
@@ -31,8 +31,8 @@ class TestMQTTConfigDataclass(unittest.TestCase):
         cfg = MQTTConfig()
         self.assertEqual(cfg.broker, "mqtt.meshtastic.org")
         self.assertEqual(cfg.port, 1883)
-        self.assertEqual(cfg.username, "meshdev")
-        self.assertEqual(cfg.password, "large4cats")
+        self.assertEqual(cfg.username, MQTT_PUBLIC_USERNAME)
+        self.assertEqual(cfg.password, MQTT_PUBLIC_PASSWORD)
         self.assertEqual(cfg.topic_root, "msh/US")
 
     def test_mqtt_config_custom(self):

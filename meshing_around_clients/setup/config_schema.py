@@ -364,47 +364,10 @@ class GlobalAlertConfig:
 
 
 # =============================================================================
-# MQTT Configuration
+# MQTT Configuration — imported from core.config (single canonical definition)
 # =============================================================================
 
-
-@dataclass
-class MQTTConfig:
-    """MQTT broker configuration for radio-less operation."""
-
-    enabled: bool = False
-    broker: str = "mqtt.meshtastic.org"
-    port: int = 1883
-    use_tls: bool = False
-    username: str = "meshdev"
-    password: str = "large4cats"
-    topic_root: str = "msh/US"
-    channel: str = "LongFast"
-    node_id: str = ""
-    client_id: str = ""
-    encryption_key: str = ""
-    qos: int = 1
-    reconnect_delay: int = 5
-    max_reconnect_attempts: int = 10
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "MQTTConfig":
-        return cls(
-            enabled=_str_to_bool(data.get("enabled", False)),
-            broker=str(data.get("broker", "mqtt.meshtastic.org")),
-            port=int(data.get("port", 1883)),
-            use_tls=_str_to_bool(data.get("use_tls", False)),
-            username=str(data.get("username", "meshdev")),
-            password=str(data.get("password", "large4cats")),
-            topic_root=str(data.get("topic_root", "msh/US")),
-            channel=str(data.get("channel", "LongFast")),
-            node_id=str(data.get("node_id", "")),
-            client_id=str(data.get("client_id", "")),
-            encryption_key=str(data.get("encryption_key", "")),
-            qos=int(data.get("qos", 1)),
-            reconnect_delay=int(data.get("reconnect_delay", 5)),
-            max_reconnect_attempts=int(data.get("max_reconnect_attempts", 10)),
-        )
+from meshing_around_clients.core.config import MQTTConfig  # noqa: E402
 
 
 # =============================================================================

@@ -10,7 +10,10 @@ Provides:
 Extracted from configure_bot.py for reusability across MeshForge CLI tools.
 """
 
+import os
 import re
+import shutil
+import subprocess
 import sys
 from getpass import getpass
 from typing import Any, Callable, List, Optional, TypeVar
@@ -580,3 +583,46 @@ class Menu:
                 except KeyboardInterrupt:
                     print()
                     continue
+
+
+# =============================================================================
+# Editor Utilities
+# =============================================================================
+
+
+def find_editor() -> str:
+    """Find an available text editor.
+
+    Checks $EDITOR environment variable first, then falls back to
+    nano, vi, vim in order. Returns the editor command name, or
+    empty string if none found.
+    """
+    editor = os.environ.get("EDITOR", "")
+    if editor:
+        return editor
+    for name in ("nano", "vi", "vim"):
+        if shutil.which(name):
+            return name
+    return ""
+
+
+def open_in_editor(file_path: str, timeout: int = 7200) -> Optional[str]:
+    """Open a file in the user's preferred text editor.
+
+    Args:
+        file_path: Path to the file to edit.
+        timeout: Maximum time in seconds to wait for the editor (default 2 hours).
+
+    Returns:
+        None on success, or an error message string on failure.
+    """
+    editor = find_editor()
+    if not editor:
+        return "No editor found (set $EDITOR or install nano)"
+    try:
+        subprocess.run([editor, file_path], timeout=timeout)
+    except OSError as e:
+        return f"Editor failed: {e}"
+    except subprocess.TimeoutExpired as e:
+        return f"Editor timed out: {e}"
+    return None
