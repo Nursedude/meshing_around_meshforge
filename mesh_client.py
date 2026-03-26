@@ -1165,39 +1165,53 @@ def interactive_setup():
             ]
 
     hw_items = [
-        ("TBEAM", "LILYGO T-Beam (ESP32, GPS)", "TBEAM" in rec_hw_list),
-        ("TLORA", "LILYGO T-Lora (ESP32, compact)", "TLORA" in rec_hw_list),
-        ("TECHO", "LILYGO T-Echo (nRF52840, e-ink)", "TECHO" in rec_hw_list),
-        ("TDECK", "LILYGO T-Deck (ESP32-S3, keyboard)", "TDECK" in rec_hw_list),
-        ("HELTEC", "Heltec LoRa 32 (ESP32, OLED)", "HELTEC" in rec_hw_list),
-        ("RAK4631", "RAK WisBlock 4631 (nRF52840)", "RAK4631" in rec_hw_list),
-        ("STATION_G2", "Station G2 (ESP32-S3, high-power)", "STATION_G2" in rec_hw_list),
-        ("none", "No radio hardware (MQTT/Demo)", False),
-        ("other", "Other / not sure", not rec_hw_list),
+        # Standalone radios (USB/WiFi/BLE to Pi)
+        ("TBEAM", "LILYGO T-Beam (ESP32, GPS) [USB/TCP/BLE]", "TBEAM" in rec_hw_list),
+        ("TLORA", "LILYGO T-Lora (ESP32, compact) [USB/TCP/BLE]", "TLORA" in rec_hw_list),
+        ("TECHO", "LILYGO T-Echo (nRF52840, e-ink) [USB/BLE]", "TECHO" in rec_hw_list),
+        ("TDECK", "LILYGO T-Deck (ESP32-S3, keyboard) [USB/TCP/BLE]", "TDECK" in rec_hw_list),
+        ("HELTEC", "Heltec LoRa 32 (ESP32, OLED) [USB/TCP/BLE]", "HELTEC" in rec_hw_list),
+        ("RAK4631", "RAK WisBlock 4631 (nRF52840) [USB/BLE]", "RAK4631" in rec_hw_list),
+        ("STATION_G2", "Station G2 (high-power, needs USB power) [USB/TCP]", "STATION_G2" in rec_hw_list),
+        # Pi HATs & SPI modules (meshtasticd on this Pi)
+        ("PI_HAT", "Raspberry Pi LoRa HAT (SPI via meshtasticd) [TCP]", "PI_HAT" in rec_hw_list),
+        # USB-SPI adapters
+        ("USB_ADAPTER", "USB LoRa adapter (MeshStick, Meshtoad) [USB]", "USB_ADAPTER" in rec_hw_list),
+        # No radio / skip
+        ("none", "No radio / MQTT only / Demo mode", False),
+        ("skip", "Skip - configure later", not rec_hw_list),
     ]
 
     hw_choice = radiolist("Select Your Radio Hardware", hw_items)
     if hw_choice is None:
         return
 
-    if hw_choice not in ("none", "other"):
+    if hw_choice not in ("none", "skip"):
         config.set("interface", "hardware_model", hw_choice)
 
-    # Set connection type default based on hardware
+    # Smart connection default based on hardware category
     if hw_choice == "none":
         conn_default = "mqtt"
-    elif hw_choice == "other":
+    elif hw_choice == "skip":
         conn_default = "auto"
+    elif hw_choice == "PI_HAT":
+        conn_default = "tcp"  # HATs use meshtasticd on localhost:4403
+    elif hw_choice == "USB_ADAPTER":
+        conn_default = "serial"  # USB-SPI bridges appear as serial devices
     else:
-        conn_default = "serial"
+        conn_default = "serial"  # Standalone radios default to USB serial
 
-    # Connection type
+    # Connection type — mark recommended choice per hardware
+    def _rec(label: str, is_rec: bool) -> str:
+        return f"{label} (recommended)" if is_rec else label
+
     conn_items = [
-        ("serial", "Serial (USB radio connected)", conn_default == "serial"),
-        ("tcp", "TCP (Remote device, protobuf port)", False),
+        ("serial", _rec("Serial (USB radio)", conn_default == "serial"), conn_default == "serial"),
+        ("tcp", _rec("TCP (meshtasticd port 4403)", conn_default == "tcp"), conn_default == "tcp"),
         ("http", "HTTP (meshtasticd HTTP API)", False),
-        ("mqtt", "MQTT (No radio, connect via broker)", conn_default == "mqtt"),
-        ("auto", "Auto-detect", conn_default == "auto"),
+        ("mqtt", _rec("MQTT (no radio, via broker)", conn_default == "mqtt"), conn_default == "mqtt"),
+        ("ble", "BLE (Bluetooth)", False),
+        ("auto", _rec("Auto-detect", conn_default == "auto"), conn_default == "auto"),
     ]
 
     conn_type = radiolist("Connection Type", conn_items)
@@ -1217,11 +1231,17 @@ def interactive_setup():
             config.set("interface", "port", port)
 
     elif conn_type == "tcp":
-        tcp_items = [
-            ("local", "Local meshtasticd (127.0.0.1:4403)"),
-            ("remote", "Remote device (TCP protobuf port 4403)"),
-        ]
-        tcp_target = menu("TCP Target", tcp_items, default="local")
+        # Pi HAT: meshtasticd is always local, skip the prompt
+        if hw_choice == "PI_HAT":
+            config.set("interface", "hostname", "127.0.0.1")
+            log("Pi HAT: meshtasticd TCP on localhost:4403", "INFO")
+            tcp_target = "local"
+        else:
+            tcp_items = [
+                ("local", "Local meshtasticd (127.0.0.1:4403)"),
+                ("remote", "Remote device (TCP protobuf port 4403)"),
+            ]
+            tcp_target = menu("TCP Target", tcp_items, default="local")
         if tcp_target == "remote":
             host = inputbox(
                 "Remote device IP or hostname:port\n(default port 4403)",
