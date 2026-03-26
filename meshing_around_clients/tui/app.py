@@ -1715,7 +1715,10 @@ class _BaseConfigEditor(Screen):
             return
         with self.app._prompt_mode():
             self.console.clear()
-            _sp.run([editor, str(self._config_path)])
+            try:
+                _sp.run([editor, str(self._config_path)], timeout=7200)
+            except (OSError, _sp.TimeoutExpired) as e:
+                self._error = f"Editor failed: {e}"
         # Reload after external edit
         self._load()
         self._dirty = False
@@ -1817,8 +1820,11 @@ class ConfigScreen(Screen):
             return
         with self.app._prompt_mode():
             self.console.clear()
-            _sp.run([editor, str(self._config_path)])
-        self._status = "Saved. Restart bot: sudo systemctl restart mesh_bot.service"
+            try:
+                _sp.run([editor, str(self._config_path)], timeout=7200)
+                self._status = "Saved. Restart bot: sudo systemctl restart mesh_bot.service"
+            except (OSError, _sp.TimeoutExpired) as e:
+                self._status = f"Editor failed: {e}"
 
 
 class ClientConfigScreen(_BaseConfigEditor):

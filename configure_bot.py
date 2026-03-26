@@ -268,7 +268,7 @@ if not MODULES_AVAILABLE:
     def check_user_groups() -> Tuple[bool, bool]:
         """Check if user is in dialout and gpio groups"""
         try:
-            groups = subprocess.run(["groups"], capture_output=True, text=True).stdout
+            groups = subprocess.run(["groups"], capture_output=True, text=True, timeout=10).stdout
             return "dialout" in groups, "gpio" in groups
         except (subprocess.SubprocessError, FileNotFoundError):
             return False, False

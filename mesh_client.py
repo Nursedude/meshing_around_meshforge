@@ -1326,11 +1326,7 @@ def _view_logs() -> None:
     """View logs using journalctl (preferred) or fall back to less/tail on log file."""
     if _has_systemd_service() and shutil.which("journalctl"):
         log("Opening service logs via journalctl...", "INFO")
-        less = shutil.which("less")
-        if less:
-            subprocess.run(["bash", "-c", "journalctl -u mesh-client.service --no-pager -n 200 | less"])
-        else:
-            subprocess.run(["journalctl", "-u", "mesh-client.service", "--no-pager", "-n", "200"])
+        subprocess.run(["journalctl", "-u", "mesh-client.service", "--no-pager", "-n", "200"], timeout=30)
     else:
         log_path = LOG_FILE
         if not log_path.exists():
@@ -1338,9 +1334,9 @@ def _view_logs() -> None:
             return
         less = shutil.which("less")
         if less:
-            subprocess.run([less, str(log_path)])
+            subprocess.run([less, str(log_path)], timeout=7200)
         else:
-            subprocess.run(["tail", "-n", "200", str(log_path)])
+            subprocess.run(["tail", "-n", "200", str(log_path)], timeout=30)
 
 
 def _follow_logs() -> None:
@@ -1348,8 +1344,8 @@ def _follow_logs() -> None:
     if _has_systemd_service() and shutil.which("journalctl"):
         log("Following service logs (Ctrl+C to stop)...", "INFO")
         try:
-            subprocess.run(["journalctl", "-u", "mesh-client.service", "-f"])
-        except KeyboardInterrupt:
+            subprocess.run(["journalctl", "-u", "mesh-client.service", "-f"], timeout=7200)
+        except (KeyboardInterrupt, subprocess.TimeoutExpired):
             pass
     else:
         log_path = LOG_FILE
@@ -1358,8 +1354,8 @@ def _follow_logs() -> None:
             return
         log("Following log file (Ctrl+C to stop)...", "INFO")
         try:
-            subprocess.run(["tail", "-f", str(log_path)])
-        except KeyboardInterrupt:
+            subprocess.run(["tail", "-f", str(log_path)], timeout=7200)
+        except (KeyboardInterrupt, subprocess.TimeoutExpired):
             pass
 
 
@@ -1455,9 +1451,9 @@ def logs_menu(config: ConfigParser):
             else:
                 less = shutil.which("less")
                 if less:
-                    subprocess.run([less, str(log_path)])
+                    subprocess.run([less, str(log_path)], timeout=7200)
                 else:
-                    subprocess.run(["tail", "-n", "200", str(log_path)])
+                    subprocess.run(["tail", "-n", "200", str(log_path)], timeout=30)
 
         elif choice == "messages":
             msg_path = Path(config.get("logging", "message_log_file", fallback="logs/mesh_messages.log"))
@@ -1468,9 +1464,9 @@ def logs_menu(config: ConfigParser):
             else:
                 less = shutil.which("less")
                 if less:
-                    subprocess.run([less, str(msg_path)])
+                    subprocess.run([less, str(msg_path)], timeout=7200)
                 else:
-                    subprocess.run(["tail", "-n", "200", str(msg_path)])
+                    subprocess.run(["tail", "-n", "200", str(msg_path)], timeout=30)
 
         elif choice == "journal":
             _view_logs()
@@ -1873,7 +1869,7 @@ def launcher_menu(config: ConfigParser) -> bool:
                             continue
                     else:
                         continue
-                subprocess.run([editor, str(ini_path)])
+                subprocess.run([editor, str(ini_path)], timeout=7200)
             continue
         elif choice == "setup":
             interactive_setup()
