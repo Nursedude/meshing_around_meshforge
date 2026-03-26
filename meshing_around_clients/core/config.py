@@ -589,6 +589,10 @@ class Config:
                     0.0, self._parser.getfloat("advanced", "chunk_reassembly_timeout", fallback=5.0)
                 )
 
+            # Fall back to bot's config.ini for shared settings
+            self._load_upstream_interface_fallback()
+            self._load_upstream_channel_fallback()
+
             # Apply environment variable overrides (highest priority)
             self._apply_env_overrides()
 
@@ -596,6 +600,59 @@ class Config:
         except (configparser.Error, OSError) as e:
             print(f"Error loading config: {e}")
             return False
+
+    def _load_upstream_interface_fallback(self) -> None:
+        """Fall back to bot's config.ini for interface settings if not configured.
+
+        If mesh_client.ini has default interface (type=auto, no hostname/port),
+        read from the bot's config.ini instead. This avoids config drift.
+        """
+        iface = self.interface
+        # Only fall back if mesh_client.ini has default/empty settings
+        if iface.type != "auto" or iface.hostname or iface.port:
+            return  # User explicitly configured mesh_client.ini
+
+        upstream_path = self.find_upstream_config()
+        if not upstream_path:
+            return
+
+        upstream = configparser.ConfigParser()
+        try:
+            upstream.read(str(upstream_path))
+        except configparser.Error:
+            return
+
+        if not upstream.has_section("interface"):
+            return
+
+        up_type = upstream.get("interface", "type", fallback="serial")
+        up_host = upstream.get("interface", "hostname", fallback="")
+        up_port = upstream.get("interface", "port", fallback="")
+        up_mac = upstream.get("interface", "mac", fallback="")
+
+        if up_type != "serial" or up_host or up_port:
+            iface.type = up_type
+            iface.hostname = up_host
+            iface.port = up_port
+            iface.mac = up_mac
+            logger.info("Interface from bot config.ini: type=%s host=%s", up_type, up_host)
+
+    def _load_upstream_channel_fallback(self) -> None:
+        """Use bot's defaultchannel if client default_channel is 0 (unset)."""
+        if self.network_cfg.default_channel != 0:
+            return  # User explicitly set a channel
+
+        try:
+            upstream_settings = self.read_upstream_settings()
+        except Exception:
+            return
+        if not upstream_settings:
+            return
+
+        bot_channel = upstream_settings.get("defaultchannel")
+        if bot_channel is not None and bot_channel != 0:
+            self.network_cfg.default_channel = int(bot_channel)
+            logger.info("default_channel from bot config.ini: %d", bot_channel)
 
     # Explicit allowlist of environment variable overrides.
     # Convention: MESHFORGE_SECTION_KEY -> dataclass attribute.
