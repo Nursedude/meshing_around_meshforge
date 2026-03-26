@@ -1323,6 +1323,7 @@ class _BaseConfigEditor(Screen):
     _panel_title: str = "Config Editor"
     _profile_label: str = "Profile"
     _not_found_hint: str = "Config file not found."
+    _auto_reload: bool = False  # Auto-reload when file changes on disk
 
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
@@ -1335,6 +1336,7 @@ class _BaseConfigEditor(Screen):
         self._error = ""
         self._loaded = False
         self._template_keys: set = set()
+        self._last_mtime: float = 0  # File modification time for auto-reload
 
     # -- Subclass hooks (override these) ------------------------------------
 
@@ -1472,8 +1474,11 @@ class _BaseConfigEditor(Screen):
         if self._config_path:
             try:
                 self._parser.read(str(self._config_path))
+                self._last_mtime = self._config_path.stat().st_mtime
             except _cp.Error as e:
                 self._error = f"Parse error: {e}"
+            except OSError:
+                pass
             if not self._is_template:
                 self._merge_template_defaults()
         else:
@@ -1499,6 +1504,13 @@ class _BaseConfigEditor(Screen):
     def render(self) -> Panel:
         if not self._loaded:
             self._load()
+        elif self._auto_reload and self._config_path:
+            try:
+                mtime = self._config_path.stat().st_mtime
+                if mtime != self._last_mtime:
+                    self._load()
+            except OSError:
+                pass
         if self._error:
             return Panel(
                 Text(self._error, style="yellow"),
@@ -1728,7 +1740,10 @@ class _BaseConfigEditor(Screen):
 
 
 class ConfigScreen(_BaseConfigEditor):
-    """Bot config editor — edits meshing-around config.ini."""
+    """Bot config editor — shows the real config.ini, no template merge.
+
+    Press [e] to edit in nano (recommended). Auto-reloads when file changes.
+    """
 
     _SECTION_ORDER = [
         "general", "location", "interface", "interface2", "bbs", "sentry",
@@ -1738,12 +1753,33 @@ class ConfigScreen(_BaseConfigEditor):
     ]
     _panel_title = "Bot Config (config.ini)"
     _profile_label = "Regional Bot Config Profile"
+    _auto_reload = True  # Detect edits from nano and refresh
     _not_found_hint = (
         "Bot config.ini not found.\n"
         "Searched: /opt/meshing-around/ and sibling directory.\n\n"
         "Install meshing-around or create a symlink:\n"
         "  ln -s /path/to/meshing-around/config.ini /opt/meshing-around/config.ini"
     )
+
+    def _load(self) -> None:
+        """Load bot config WITHOUT template merge — show exactly what's in the file."""
+        import configparser as _cp
+        self._parser = _cp.ConfigParser()
+        self._error = ""
+        self._loaded = True
+        self._template_keys = set()  # No template merging for bot config
+        self._config_path = self._find_config()
+        if self._config_path:
+            try:
+                self._parser.read(str(self._config_path))
+                self._last_mtime = self._config_path.stat().st_mtime
+            except _cp.Error as e:
+                self._error = f"Parse error: {e}"
+            except OSError:
+                pass
+        else:
+            self._error = self._not_found_hint
+        self._rebuild_items()
 
     def _find_config(self) -> Optional[Path]:
         """Find the upstream bot config.ini — single source of truth.
