@@ -67,6 +67,7 @@ class TestMQTTMeshtasticClient(unittest.TestCase):
         self.config.storage.enabled = False
         self.config.alerts.enabled = True
         self.config.alerts.emergency_keywords = ["help", "sos", "emergency"]
+        self.config.chunk_reassembly_timeout = 0  # Disable buffering for unit tests
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_client_initialization(self, mock_mqtt):
@@ -380,6 +381,7 @@ class TestMQTTDecodedPacketPaths(unittest.TestCase):
         self.config = Config(config_path="/nonexistent/path")
         self.config.alerts.enabled = True
         self.config.alerts.emergency_keywords = ["help", "sos"]
+        self.config.chunk_reassembly_timeout = 0  # Disable buffering for unit tests
 
     def _make_client(self, mock_mqtt):
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient

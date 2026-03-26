@@ -558,7 +558,7 @@ check_updates = false
 show_splash = true
 update_interval = 1.0
 node_timeout = 3600
-chunk_reassembly_timeout = 5.0
+chunk_reassembly_timeout = 3.0
 debug_mode = false
 verbose = false
 """

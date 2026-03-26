@@ -238,7 +238,7 @@ node_timeout = 3600
 # within this window are concatenated into one message. The meshing-around bot
 # splits long responses (weather, etc.) into 160-char chunks — this reassembles
 # them. Set to 0 to disable reassembly.
-chunk_reassembly_timeout = 5.0
+chunk_reassembly_timeout = 3.0
 
 # Debug
 debug_mode = false

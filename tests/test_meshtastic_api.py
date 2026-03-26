@@ -919,16 +919,19 @@ class TestChunkBuffer(unittest.TestCase):
         return {"fromId": sender, "toId": "^all", "channel": channel,
                 "decoded": {}, "hopStart": 3, "hopLimit": 2, "snr": 5.0, "rssi": -80}
 
-    def test_short_message_passes_through(self):
-        """Messages shorter than threshold are not buffered."""
+    def test_short_message_buffered(self):
+        """ALL messages are buffered (no size threshold)."""
         result = self.buffer.add("!aabb1234", 0, "hello", self._packet())
-        self.assertFalse(result)
-
-    def test_long_message_buffered(self):
-        """Messages >= 140 bytes start buffering."""
-        long_text = "A" * 145
-        result = self.buffer.add("!aabb1234", 0, long_text, self._packet())
         self.assertTrue(result)
+
+    def test_single_message_flushes_unchanged(self):
+        """A single buffered message flushes as-is after timeout."""
+        self.buffer.add("!aabb1234", 0, "hello world", self._packet())
+        time.sleep(0.5)
+        self.assertEqual(len(self.flushed), 1)
+        text, count = self.flushed[0]
+        self.assertEqual(text, "hello world")
+        self.assertEqual(count, 1)
 
     def test_sequential_chunks_concatenated(self):
         """Multiple rapid chunks from same sender/channel are concatenated."""
