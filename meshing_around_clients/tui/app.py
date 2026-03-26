@@ -3090,80 +3090,39 @@ class MeshingAroundTUI:
             self._dirty = True
 
     def _run_command_prompt(self) -> None:
-        """Smart command router: local, upstream venv, or send to bot via mesh."""
-        from meshing_around_clients.core.meshtastic_api import (
-            _BOT_ONLY_COMMANDS, _LOCAL_COMMANDS, _UPSTREAM_CMD_MAP,
-        )
-
+        """Send a bot command to mesh on default_channel."""
         default_ch = self.config.network_cfg.default_channel
-        connected = self.api.is_connected
         with self._prompt_mode():
             self.console.clear()
             self.console.print(Panel("[bold cyan]Run Command[/bold cyan]", border_style="cyan"))
-            if connected:
-                self.console.print(
-                    f"[bold green]Connected on ch{default_ch}[/bold green] — "
-                    "data cmds run locally, bot cmds sent via mesh\n"
-                )
-            else:
-                self.console.print(
-                    f"[yellow]Not connected — data cmds run locally, "
-                    "bot cmds unavailable[/yellow]\n"
-                )
+
+            if not self.api.is_connected:
+                self.console.print("[red]Not connected — connect first[/red]")
+                time.sleep(2)
+                return
+
+            self.console.print(
+                f"[bold green]Connected[/bold green] — "
+                f"commands sent to bot on ch{default_ch}\n"
+            )
             self.console.print(MeshtasticAPI.get_command_list(self.config))
             self.console.print()
 
             try:
-                cmd = Prompt.ask("Command").strip().lower()
+                cmd = Prompt.ask("Command").strip()
                 if not cmd:
                     return
 
-                # Route 1: Local commands — always run locally
-                # Route 2: Upstream venv commands — run locally via bot engine
-                if cmd in _LOCAL_COMMANDS or cmd in _UPSTREAM_CMD_MAP:
-                    self._run_command_local(cmd)
-                    return
-
-                # Route 3: Bot-only commands — send via mesh
-                if cmd in _BOT_ONLY_COMMANDS:
-                    if connected:
-                        if self.api.send_message(cmd, "^all", default_ch):
-                            self.console.print(
-                                f"\n[green]Sent '{cmd}' to bot on ch{default_ch}[/green]"
-                                f"\n[dim]Bot response will appear in Live Feed (screen 1)."
-                                f"\nIf no response, bot may not be running or listening on ch{default_ch}."
-                                f"\nPress Enter...[/dim]"
-                            )
-                            self._dirty = True
-                            input()
-                        else:
-                            self.console.print("[red]Failed to send message[/red]")
-                            time.sleep(1)
-                    else:
-                        self.console.print(
-                            f"\n[yellow]'{cmd}' requires the running meshing-around bot.[/yellow]"
-                            "\n[dim]Connect to mesh first, then this sends via mesh to the bot.[/dim]"
-                        )
-                        time.sleep(2)
-                    return
-
-                # Route 4: Try local execution first, then send via mesh
-                response = self.api._get_command_response(cmd)
-                if response and not response.startswith("__BOT_ONLY__"):
-                    self._run_command_local(cmd)
-                elif connected:
-                    if self.api.send_message(cmd, "^all", default_ch):
-                        self.console.print(
-                            f"\n[green]Sent '{cmd}' on ch{default_ch}[/green]"
-                            "\n[dim]Watch Live Feed for response. Press Enter...[/dim]"
-                        )
-                        self._dirty = True
-                        input()
-                    else:
-                        self.console.print(f"[red]Unknown command: {cmd}[/red]")
-                        time.sleep(1)
+                if self.api.send_message(cmd, "^all", default_ch):
+                    self.console.print(
+                        f"\n[green]Sent '{cmd}' on ch{default_ch}[/green]"
+                        f"\n[dim]Bot response will appear in Live Feed (screen 1)."
+                        f"\nPress Enter...[/dim]"
+                    )
+                    self._dirty = True
+                    input()
                 else:
-                    self.console.print(f"[red]Unknown command: {cmd}[/red]")
+                    self.console.print("[red]Failed to send message[/red]")
                     time.sleep(1)
             except KeyboardInterrupt:
                 pass
@@ -3338,42 +3297,6 @@ class MeshingAroundTUI:
                 time.sleep(1)
             except KeyboardInterrupt:
                 pass
-
-    def _run_command_local(self, command: str) -> None:
-        """Execute a command locally and show output on default_channel."""
-        import uuid as _uuid
-
-        response = self.api._get_command_response(command)
-        if not response:
-            self.console.print(f"[yellow]No response for: {command}[/yellow]")
-            time.sleep(1)
-            return
-        # Bot-only commands can't run locally
-        if response.startswith("__BOT_ONLY__"):
-            self.console.print(f"[yellow]'{command}' requires the running bot (send via mesh)[/yellow]")
-            time.sleep(1.5)
-            return
-
-        default_ch = self.config.network_cfg.default_channel
-        self.console.print()
-        self.console.print(Panel(response, title=f"[green]{command}[/green]", border_style="green"))
-
-        # Add as a local message on default_channel
-        msg = Message(
-            id=str(_uuid.uuid4()),
-            sender_id=getattr(self.api.network, "my_node_id", "") or "local",
-            sender_name=f"{self.config.bot_name} (local)",
-            channel=default_ch,
-            text=f"[{command}] {response}",
-            message_type=MessageType.TEXT,
-            timestamp=datetime.now(timezone.utc),
-            is_incoming=False,
-        )
-        self.api.network.add_message(msg)
-        self._dirty = True
-
-        self.console.print(f"\n[dim]Output on ch{default_ch}. Press Enter...[/dim]")
-        input()
 
     def _add_device_prompt(self) -> None:
         """Prompt user to add a new device/interface."""
