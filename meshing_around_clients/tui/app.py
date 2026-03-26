@@ -166,7 +166,7 @@ class PlainTextTUI:
                 for msg in reversed(recent):
                     ts = msg.timestamp.strftime("%H:%M:%S") if msg.timestamp else "??:??:??"
                     sender = msg.sender_name or msg.sender_id or "unknown"
-                    text = (msg.text or "")[:50]
+                    text = (msg.text or "")[:200]
                     print(f"  [{ts}] {sender}: {text}")
 
                 print(f"\n{'─' * 60}")
@@ -414,11 +414,9 @@ class DashboardScreen(Screen):
             line.append(f" {direction} ", style=dir_style)
             line.append(f"{sender}: ", style="cyan bold" if msg.is_incoming else "green")
             line.append(
-                text[:120] if not is_emergency else text[:120],
+                text,
                 style="bold red" if is_emergency else "white",
             )
-            if len(text) > 120:
-                line.append("...", style="dim")
 
             content.append(line)
 
@@ -747,10 +745,7 @@ class MessagesScreen(Screen):
             to_str = "broadcast" if msg.is_broadcast else (msg.recipient_id or "?")[-6:]
             from_str = msg.sender_name or (msg.sender_id or "?")[-6:]
 
-            # Truncate message
-            text = (msg.text or "")[:50]
-            if len(msg.text or "") > 50:
-                text += "..."
+            text = msg.text or ""
 
             snr_str = format_snr(msg.snr)
 

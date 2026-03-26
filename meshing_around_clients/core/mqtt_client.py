@@ -133,6 +133,11 @@ class MQTTMeshtasticClient(CallbackMixin):
         # Wire INI cooldown_period to runtime (default 300s)
         self._alert_cooldown_seconds = config.alerts.cooldown_period
 
+        # Chunk reassembly buffer (bot splits long responses into ~160-char chunks)
+        from .meshtastic_api import _ChunkBuffer
+        self._chunk_buffer = _ChunkBuffer(timeout=config.chunk_reassembly_timeout)
+        self._chunk_buffer._flush_callback = self._emit_reassembled_message
+
         # Connection health tracking
         self._last_message_time: Optional[datetime] = None
         self._message_count = 0
@@ -443,6 +448,7 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def disconnect(self) -> None:
         """Disconnect from MQTT broker."""
+        self._chunk_buffer.cancel_all()
         # Save state before disconnecting
         self._save_state()
 
@@ -805,6 +811,41 @@ class MQTTMeshtasticClient(CallbackMixin):
         except (KeyError, TypeError, ValueError) as e:
             logger.warning("JSON message parse error (%s): %s", type(e).__name__, e)
 
+    def _emit_mqtt_message(self, text: str, meta: dict) -> None:
+        """Create and store a Message from MQTT metadata, check commands/keywords."""
+        sender_id = meta.get("sender_id", "")
+        sender_name = ""
+        node = self.network.get_node(sender_id)
+        if node:
+            sender_name = node.display_name
+
+        message = Message(
+            id=meta.get("msg_id") or str(uuid.uuid4()),
+            sender_id=sender_id,
+            sender_name=sender_name,
+            recipient_id=str(meta.get("recipient_id", "")),
+            channel=meta.get("channel", 0),
+            text=text,
+            message_type=MessageType.TEXT,
+            timestamp=datetime.now(timezone.utc),
+            hop_count=meta.get("hop_count", 0),
+            snr=float(meta.get("snr") or 0),
+            rssi=int(meta.get("rssi") or 0),
+            is_incoming=True,
+        )
+
+        self.network.add_message(message)
+        _message_logger.info("ch%d %s (%s): %s", message.channel, sender_name, sender_id, text)
+        self._trigger_callbacks("on_message", message)
+
+        if not self._handle_command(message):
+            self._check_emergency_keywords(message)
+
+    def _emit_reassembled_message(self, combined_text: str, meta: dict, chunk_count: int) -> None:
+        """Called by _ChunkBuffer when a buffered sequence is complete."""
+        logger.info("Reassembled %d MQTT chunks (%d chars)", chunk_count, len(combined_text))
+        self._emit_mqtt_message(combined_text, meta)
+
     def _handle_text_from_json(self, data: dict, sender_id: str, msg_id: str = ""):
         """Handle text message from JSON."""
         payload = data.get("payload", {})
@@ -813,39 +854,26 @@ class MQTTMeshtasticClient(CallbackMixin):
         if not text:
             return
 
-        sender_name = ""
-        node = self.network.get_node(sender_id)
-        if node:
-            sender_name = node.display_name
-
-        # Extract signal info with validation (consistent with _handle_json_message)
+        # Extract signal info with validation
         snr = safe_float(data.get("snr", data.get("rxSnr")), *VALID_SNR_RANGE)
         rssi = safe_int(data.get("rssi", data.get("rxRssi")), *VALID_RSSI_RANGE)
         hop_limit = safe_int(data.get("hopLimit"), 0, 15) or 3
         hop_start = safe_int(data.get("hopStart"), 0, 15) or 3
         hop_count = max(0, hop_start - hop_limit)
+        channel = data.get("channel", 0)
 
-        message = Message(
-            id=msg_id or str(uuid.uuid4()),
-            sender_id=sender_id,
-            sender_name=sender_name,
-            recipient_id=str(data.get("to", "")),
-            channel=data.get("channel", 0),
-            text=text,
-            message_type=MessageType.TEXT,
-            timestamp=datetime.now(timezone.utc),
-            hop_count=hop_count,
-            snr=float(snr) if snr is not None else 0.0,
-            rssi=int(rssi) if rssi is not None else 0,
-            is_incoming=True,
-        )
+        meta = {
+            "sender_id": sender_id, "msg_id": msg_id, "channel": channel,
+            "snr": snr, "rssi": rssi, "hop_count": hop_count,
+            "recipient_id": str(data.get("to", "")),
+        }
 
-        self.network.add_message(message)
-        _message_logger.info("ch%d %s (%s): %s", message.channel, sender_name, sender_id, text)
-        self._trigger_callbacks("on_message", message)
+        # Try chunk reassembly — buffers long messages that may be chunks
+        if self._chunk_buffer.add(sender_id, channel, text, meta):
+            logger.debug("MQTT buffered chunk from %s ch%d (%d bytes)", sender_id, channel, len(text))
+            return
 
-        # Check for emergency keywords
-        self._check_emergency_keywords(message)
+        self._emit_mqtt_message(text, meta)
 
     def _handle_traceroute_from_json(self, data: dict, sender_id: str):
         """Handle traceroute response message."""
@@ -1205,38 +1233,24 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def _handle_decoded_text(self, text: str, sender_id: str, msg_id: str, decoded: Dict, topic_info: Dict):
         """Handle decoded text message."""
-        sender_name = ""
-        node = self.network.get_node(sender_id)
-        if node:
-            sender_name = node.display_name
-
         snr = decoded.get("rx_snr")
         rssi = decoded.get("rx_rssi")
         hop_limit = decoded.get("hop_limit", 3)
         hop_count = max(0, 3 - hop_limit)
         channel = decoded.get("channel", 0)
 
-        message = Message(
-            id=msg_id or str(uuid.uuid4()),
-            sender_id=sender_id,
-            sender_name=sender_name,
-            recipient_id=str(decoded.get("to", "")),
-            channel=channel,
-            text=text,
-            message_type=MessageType.TEXT,
-            timestamp=datetime.now(timezone.utc),
-            hop_count=hop_count,
-            snr=float(snr) if snr is not None else 0.0,
-            rssi=int(rssi) if rssi is not None else 0,
-            is_incoming=True,
-        )
+        meta = {
+            "sender_id": sender_id, "msg_id": msg_id, "channel": channel,
+            "snr": snr, "rssi": rssi, "hop_count": hop_count,
+            "recipient_id": str(decoded.get("to", "")),
+        }
 
-        self.network.add_message(message)
-        self._trigger_callbacks("on_message", message)
+        # Try chunk reassembly
+        if self._chunk_buffer.add(sender_id, channel, text, meta):
+            logger.debug("MQTT buffered decoded chunk from %s ch%d (%d bytes)", sender_id, channel, len(text))
+            return
 
-        # Check for bot commands before emergency keywords
-        if not self._handle_command(message):
-            self._check_emergency_keywords(message)
+        self._emit_mqtt_message(text, meta)
 
     # Public Meshtastic MQTT brokers — auto_respond MUST be off for these
     _PUBLIC_BROKERS = {"mqtt.meshtastic.org"}
