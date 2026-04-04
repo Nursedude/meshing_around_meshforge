@@ -793,10 +793,10 @@ class ConfigLoader:
 
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            with open(path, "w") as f:
+            # Atomic open with restricted permissions (TOCTOU-safe)
+            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
                 parser.write(f)
-            # Secure permissions for config with credentials
-            os.chmod(path, 0o600)
             return True
         except OSError as e:
             print(f"Error saving config: {e}")

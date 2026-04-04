@@ -38,6 +38,7 @@ SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 # Try to import modular components - fallback to inline if not available
 try:
+    from meshing_around_clients.core.config import get_user_home
     from meshing_around_clients.setup.cli_utils import (
         Colors,
         print_header,
@@ -92,6 +93,13 @@ except ImportError:
 # =============================================================================
 
 if not MODULES_AVAILABLE:
+
+    def get_user_home() -> Path:
+        """Return real user's home, even under sudo (MF001)."""
+        sudo_user = os.environ.get("SUDO_USER")
+        if sudo_user:
+            return Path(f"/home/{sudo_user}")
+        return get_user_home()
 
     class Colors:
         """ANSI color codes for terminal output"""
@@ -198,8 +206,8 @@ if not MODULES_AVAILABLE:
     def find_meshing_around() -> Optional[Path]:
         """Find the meshing-around installation directory"""
         common_paths = [
-            Path.home() / "meshing-around",
-            Path.home() / "mesh-bot",
+            get_user_home() / "meshing-around",
+            get_user_home() / "mesh-bot",
             Path("/opt/meshing-around"),
             Path("/opt/mesh-bot"),
             Path.cwd().parent / "meshing-around",
@@ -489,7 +497,7 @@ def setup_virtual_environment(venv_path: Path = None) -> Tuple[bool, Optional[Pa
     print_info("A virtual environment is recommended for Python packages")
 
     if venv_path is None:
-        default_venv = Path.home() / "meshing-around-venv"
+        default_venv = get_user_home() / "meshing-around-venv"
         venv_input = get_input("Virtual environment path", str(default_venv))
         venv_path = Path(venv_input)
 
@@ -860,7 +868,7 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
     if not meshing_path.exists():
         print_error(f"Directory not found: {meshing_path}")
         if get_yes_no("Clone meshing-around from GitHub?", True):
-            clone_path = get_input("Clone to directory", str(Path.home() / "meshing-around"))
+            clone_path = get_input("Clone to directory", str(get_user_home() / "meshing-around"))
             ret, _, stderr = run_command(
                 ["git", "clone", "https://github.com/SpudGunMan/meshing-around.git", clone_path], capture=True
             )
@@ -1018,7 +1026,7 @@ This wizard will:
     # Step 1: Determine installation location
     print_step(1, 5, "Choosing installation location...")
 
-    default_install_path = Path.home() / "meshing-around"
+    default_install_path = get_user_home() / "meshing-around"
     install_path = Path(get_input("Installation directory", str(default_install_path)))
 
     # Check if already exists
@@ -1336,8 +1344,8 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
             try:
                 process = subprocess.Popen(
                     ["bash", str(launch_script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     start_new_session=True,
                     cwd=str(meshing_path),
                 )
@@ -1350,10 +1358,7 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
                     print_info("Bot is running in the background")
                     return True
                 else:
-                    stdout, stderr = process.communicate()
-                    print_error("Bot failed to start:")
-                    if stderr:
-                        print(stderr.decode())
+                    print_error("Bot failed to start (exited within 3 seconds)")
                     return False
 
             except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
@@ -1382,8 +1387,8 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
                 # Use cwd parameter instead of os.chdir
                 process = subprocess.Popen(
                     [python_cmd, str(bot_script)],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     start_new_session=True,
                     cwd=str(meshing_path),
                 )
@@ -1394,10 +1399,7 @@ def run_launch_script(meshing_path: Path, venv_path: Optional[Path] = None) -> b
                     print_success(f"Bot started successfully! PID: {process.pid}")
                     return True
                 else:
-                    stdout, stderr = process.communicate()
-                    print_error("Bot failed to start:")
-                    if stderr:
-                        print(stderr.decode())
+                    print_error("Bot failed to start (exited within 3 seconds)")
                     return False
 
             except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
@@ -1445,8 +1447,8 @@ def verify_bot_running(meshing_path: Path) -> bool:
             # Start in background
             process = subprocess.Popen(
                 ["python3", str(bot_script)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 start_new_session=True,
                 cwd=str(meshing_path),
             )
@@ -1459,12 +1461,7 @@ def verify_bot_running(meshing_path: Path) -> bool:
                 print_info("Bot is running in the background")
                 return True
             else:
-                stdout, stderr = process.communicate()
-                print_error("Bot failed to start:")
-                if stderr:
-                    print(stderr.decode())
-                if stdout:
-                    print(stdout.decode())
+                print_error("Bot failed to start (exited within 3 seconds)")
                 return False
 
         except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
@@ -1648,7 +1645,7 @@ def show_system_info():
         print_warning("\nMeshing-around: NOT FOUND")
 
     # Check for virtual environment
-    venv_path = Path.home() / "meshing-around-venv"
+    venv_path = get_user_home() / "meshing-around-venv"
     if venv_path.exists():
         print_success(f"\nVirtual environment: {venv_path}")
     elif is_bookworm_or_newer():
@@ -1793,7 +1790,7 @@ def main_menu():
     meshing_path = find_meshing_around()
 
     # Track virtual environment path
-    venv_path = Path.home() / "meshing-around-venv"
+    venv_path = get_user_home() / "meshing-around-venv"
     if not venv_path.exists():
         venv_path = None
 
@@ -1911,7 +1908,7 @@ def system_maintenance_menu():
     print_header("System Maintenance")
 
     meshing_path = find_meshing_around()
-    venv_path = Path.home() / "meshing-around-venv"
+    venv_path = get_user_home() / "meshing-around-venv"
     if not venv_path.exists():
         venv_path = None
 

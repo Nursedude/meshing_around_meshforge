@@ -114,8 +114,8 @@ class PlainTextTUI:
                 print(f"  WARNING: {issue}")
             if issues:
                 print()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Config validation during startup failed: %s", e)
 
         # Connect
         if not self.demo_mode:
@@ -1839,8 +1839,8 @@ class ClientConfigScreen(_BaseConfigEditor):
                 found = self.app.config.get_client_template_path()
                 if found:
                     return found
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to find client template: %s", e)
         return None
 
     def _find_regional_templates(self) -> "list[tuple[str, Path]]":
@@ -1848,8 +1848,8 @@ class ClientConfigScreen(_BaseConfigEditor):
         if hasattr(self.app, "config") and hasattr(self.app.config, "find_client_profiles"):
             try:
                 return self.app.config.find_client_profiles()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed to find client profiles: %s", e)
         return []
 
     def _post_edit_validate(self, section: str, key: str, value: str) -> Optional[str]:
@@ -2466,8 +2466,8 @@ class MeshingAroundTUI:
             node_count = len(self.api.network.get_nodes_snapshot())
             if node_count > 0:
                 title.append(f"  {node_count} nodes", style="dim")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to get node count for title: %s", e)
 
         # Show message rate if available (MQTT provides this)
         msg_rate = health.get("messages_per_minute")
@@ -2485,8 +2485,8 @@ class MeshingAroundTUI:
             unread_alerts = len(self.api.network.unread_alerts)
             if unread_alerts > 0:
                 title.append(f"  [!] {unread_alerts} alert{'s' if unread_alerts != 1 else ''}", style="red bold")
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to get unread alerts for title: %s", e)
 
         # Show queue metrics when relevant (>50% full or drops occurred)
         q_size = health.get("queue_size")

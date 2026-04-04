@@ -675,7 +675,8 @@ class Config:
 
         try:
             upstream_settings = self.read_upstream_settings()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to read upstream settings for channel fallback: %s", e)
             return
         if not upstream_settings:
             return
@@ -874,10 +875,10 @@ class Config:
             self._parser.set("logging", "backup_count", str(self.logging.backup_count))
 
             if self.config_path:
-                with open(self.config_path, "w") as f:
+                # Atomic open with restricted permissions (TOCTOU-safe)
+                fd = os.open(str(self.config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
                     self._parser.write(f)
-                # Restrict permissions — config may contain credentials
-                os.chmod(self.config_path, 0o600)
 
             return True
         except (configparser.Error, OSError) as e:
@@ -966,13 +967,14 @@ class Config:
             if primary.exists():
                 logger.debug("Upstream config found at primary path: %s", primary)
                 return primary
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Upstream config check failed for %s: %s", primary, e)
 
         # Dynamic path search
         try:
             paths = self._get_upstream_config_paths()
-        except Exception:
+        except Exception as e:
+            logger.debug("Failed to get upstream config paths: %s", e)
             paths = [primary]
         for path in paths:
             try:
@@ -992,8 +994,8 @@ class Config:
         try:
             if primary.exists():
                 return primary
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Template check failed for %s: %s", primary, e)
 
         for path in self._get_upstream_config_paths():
             template_path = path.with_name("config.template")
