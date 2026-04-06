@@ -1477,8 +1477,8 @@ class _BaseConfigEditor(Screen):
                 self._last_mtime = self._config_path.stat().st_mtime
             except _cp.Error as e:
                 self._error = f"Parse error: {e}"
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("Config stat failed: %s", e)
             if not self._is_template:
                 self._merge_template_defaults()
         else:
@@ -1509,8 +1509,8 @@ class _BaseConfigEditor(Screen):
                 mtime = self._config_path.stat().st_mtime
                 if mtime != self._last_mtime:
                     self._load()
-            except OSError:
-                pass
+            except OSError as e:
+                logger.debug("Config reload check failed: %s", e)
         if self._error:
             return Panel(
                 Text(self._error, style="yellow"),
@@ -2382,8 +2382,8 @@ class MeshingAroundTUI:
                     flux = latest.get("flux")
                     if flux is not None:
                         result["sfi"] = int(float(flux))
-            except (URLError, ValueError, KeyError, IndexError, OSError):
-                pass
+            except (URLError, ValueError, KeyError, IndexError, OSError) as e:
+                logger.debug("Solar flux fetch failed: %s", e)
 
             # Planetary K-index
             try:
@@ -2398,8 +2398,8 @@ class MeshingAroundTUI:
                     k_val = latest[1] if len(latest) > 1 else None
                     if k_val is not None:
                         result["k_index"] = int(float(k_val))
-            except (URLError, ValueError, KeyError, IndexError, OSError):
-                pass
+            except (URLError, ValueError, KeyError, IndexError, OSError) as e:
+                logger.debug("K-index fetch failed: %s", e)
 
             if result:
                 result["fetched_at"] = time.monotonic()
@@ -2968,8 +2968,8 @@ class MeshingAroundTUI:
                 # launcher menu doesn't consume leftover keystrokes.
                 try:
                     termios.tcflush(sys.stdin, termios.TCIFLUSH)
-                except (OSError, ValueError):
-                    pass
+                except (OSError, ValueError) as e:
+                    logger.debug("Terminal flush failed: %s", e)
             self._running = False
             # Remove TUI log handler from root logger
             if self._log_handler in logging.getLogger().handlers:

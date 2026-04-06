@@ -13,6 +13,7 @@ Extracted from configure_bot.py for reusability.
 """
 
 import configparser
+import logging
 import os
 import subprocess
 import tempfile
@@ -22,6 +23,8 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from meshing_around_clients.core.config import get_user_home
+
+logger = logging.getLogger(__name__)
 
 from .pi_utils import (
     get_pip_command,
@@ -218,8 +221,8 @@ def find_meshing_around() -> Optional[Path]:
         if result.returncode == 0 and result.stdout.strip():
             bot_path = Path(result.stdout.strip().split("\n")[0]).parent
             return bot_path
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
-        pass
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError) as e:
+        logger.debug("Bot directory search failed: %s", e)
 
     return None
 
