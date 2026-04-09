@@ -1163,6 +1163,15 @@ class Config:
         if not self.mqtt.topic_root:
             issues.append("MQTT enabled but no topic_root configured")
 
+        # Wildcard subscription on non-local broker
+        if self.mqtt.channels.strip() == "*":
+            is_local = self.mqtt.broker in ("localhost", "127.0.0.1", "::1")
+            if not is_local:
+                issues.append(
+                    "MQTT channels = * (wildcard subscription) is intended for local brokers only. "
+                    "On public brokers, specify channel names explicitly to limit noise."
+                )
+
         # TLS consistency check
         is_default_creds = self.mqtt.username == MQTT_PUBLIC_USERNAME and self.mqtt.password == MQTT_PUBLIC_PASSWORD
         if not is_default_creds and not self.mqtt.use_tls and self.mqtt.port != 8883:

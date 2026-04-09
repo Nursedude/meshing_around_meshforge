@@ -785,5 +785,51 @@ class TestMQTTStatsLockConsistency(unittest.TestCase):
             self.assertEqual(client._reconnect_count, 1)
 
 
+@patch("meshing_around_clients.core.mqtt_client.mqtt")
+class TestMQTTWildcardSubscription(unittest.TestCase):
+    """Test wildcard channel subscription for local brokers."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.config.storage.enabled = False
+
+    def test_subscribe_wildcard_channels(self, mock_mqtt):
+        """channels = * should subscribe to {topic_root}/# only."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        self.config.mqtt.topic_root = "msh/US"
+        self.config.mqtt.channels = "*"
+        self.config.mqtt.channel = "LongFast"
+        self.config.mqtt.qos = 1
+
+        client = MQTTMeshtasticClient(self.config)
+        # Simulate connected state so subscribe works
+        mock_paho = mock_mqtt.Client.return_value
+        mock_paho.subscribe.return_value = (0, 1)
+        client._client = mock_paho
+
+        client._subscribe_topics()
+
+        # Should subscribe to exactly one wildcard topic
+        subscribe_calls = mock_paho.subscribe.call_args_list
+        self.assertEqual(len(subscribe_calls), 1)
+        self.assertEqual(subscribe_calls[0][0][0], "msh/US/#")
+
+    def test_resolve_channel_name_wildcard(self, mock_mqtt):
+        """Wildcard channels should fall back to primary channel name."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        self.config.mqtt.channels = "*"
+        self.config.mqtt.channel = "meshforge"
+
+        client = MQTTMeshtasticClient(self.config)
+
+        # Should return the primary channel, not "*"
+        result = client._resolve_channel_name(0)
+        self.assertEqual(result, "meshforge")
+        result = client._resolve_channel_name(4)
+        self.assertEqual(result, "meshforge")
+
+
 if __name__ == "__main__":
     unittest.main()

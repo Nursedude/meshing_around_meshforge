@@ -467,6 +467,7 @@ username = meshdev
 password = large4cats
 topic_root = msh/US
 channel = LongFast
+# Comma-separated channel names to subscribe. Use * for all channels (local brokers)
 channels = LongFast
 node_id =
 qos = 1

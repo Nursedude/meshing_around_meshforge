@@ -619,7 +619,7 @@ class MQTTMeshtasticClient(CallbackMixin):
         """
         channels_str = getattr(self.mqtt_config, "channels", "") or self.mqtt_config.channel
         channel_list = [c.strip() for c in channels_str.split(",") if c.strip()]
-        if not channel_list:
+        if not channel_list or "*" in channel_list:
             return self.mqtt_config.channel or "LongFast"
         if 0 <= channel_index < len(channel_list):
             return channel_list[channel_index]
@@ -636,14 +636,20 @@ class MQTTMeshtasticClient(CallbackMixin):
         if not channel_list:
             channel_list = [self.mqtt_config.channel or "LongFast"]
 
-        # Build topic list from configured channels
-        topics = []
-        for ch in channel_list:
-            ch = self._validate_mqtt_topic_component(ch, "channel")
-            topics.append(f"{root}/{ch}/#")
-            topics.append(f"{root}/{ch}/json/#")
-            topics.append(f"{root}/{ch}/e/#")
-            topics.append(f"{root}/{ch}/stat/#")
+        # Wildcard mode: subscribe to all channels under topic_root
+        # Intended for local/private brokers where channel names are unknown
+        if "*" in channel_list:
+            topics = [f"{root}/#"]
+            logger.info("Wildcard channel subscription: %s/#", root)
+        else:
+            # Build topic list from configured channels
+            topics = []
+            for ch in channel_list:
+                ch = self._validate_mqtt_topic_component(ch, "channel")
+                topics.append(f"{root}/{ch}/#")
+                topics.append(f"{root}/{ch}/json/#")
+                topics.append(f"{root}/{ch}/e/#")
+                topics.append(f"{root}/{ch}/stat/#")
 
         # Deduplicate and subscribe
         seen = set()
