@@ -94,6 +94,10 @@ class PlainTextTUI:
         self.demo_mode = demo_mode
         if demo_mode:
             self.api = MockMeshtasticAPI(self.config)
+        elif self.config.mqtt.enabled and self.config.interface.type == "mqtt":
+            from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+            self.api = MQTTMeshtasticClient(self.config)
         else:
             self.api = MeshtasticAPI(self.config)
 
@@ -2239,6 +2243,10 @@ class MeshingAroundTUI:
             self.api = api
         elif demo_mode:
             self.api = MockMeshtasticAPI(self.config)
+        elif self.config.mqtt.enabled and self.config.interface.type == "mqtt":
+            from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+            self.api = MQTTMeshtasticClient(self.config)
         else:
             self.api = MeshtasticAPI(self.config)
 
