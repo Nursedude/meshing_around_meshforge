@@ -2912,7 +2912,7 @@ class MeshingAroundTUI:
         if not sys.stdin.isatty():
             self.console.print(
                 "[red]Error: No terminal detected (running under systemd?).[/red]\n"
-                "[yellow]Use --web mode for headless/service deployments.[/yellow]"
+                "[yellow]TUI requires an interactive terminal. Use --demo for testing.[/yellow]"
             )
             self._running = False
             self.disconnect()

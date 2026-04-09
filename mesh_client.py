@@ -2278,7 +2278,7 @@ Examples:
 
     if is_interactive:
         # Always show the launcher menu for interactive terminals.
-        # CLI flags (--tui, --web, --demo) pre-set config defaults but
+        # CLI flags (--tui, --demo) pre-set config defaults but
         # the menu still appears so users can change their mind.
         log("Loading launcher menu...", "INFO")
         try:

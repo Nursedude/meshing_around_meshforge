@@ -15,7 +15,7 @@ This document tracks open issues and technical debt. Resolved findings from the 
 
 **File:** `tui/app.py:1116-1124`
 
-The TUI `sys.exit(1)`s when Rich is not installed. CLAUDE.md requires: *"Rich Library Fallback — UI must work without Rich installed. Provide plain-text fallback for all UI elements."* The exit message suggests `--web` as an alternative, but does not meet the documented requirement.
+The TUI `sys.exit(1)`s when Rich is not installed. CLAUDE.md requires: *"Rich Library Fallback — UI must work without Rich installed. Provide plain-text fallback for all UI elements."* ~~The exit message suggested `--web` as an alternative.~~ **Fixed** — `--web` references removed; no-terminal message now suggests `--demo`.
 
 #### Broad `except Exception` in source files
 

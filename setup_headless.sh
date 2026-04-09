@@ -142,10 +142,6 @@ install_python_deps() {
     pip install $PIP_OPTS rich -q
     log_ok "Installed: rich (TUI)"
 
-    # Web deps
-    pip install $PIP_OPTS fastapi uvicorn jinja2 python-multipart -q
-    log_ok "Installed: FastAPI (Web server)"
-
     # MQTT deps
     pip install $PIP_OPTS paho-mqtt -q
     log_ok "Installed: paho-mqtt (MQTT support)"
@@ -171,9 +167,6 @@ generate_config() {
     export _CFG_MQTT_BROKER="${MQTT_BROKER:-mqtt.meshtastic.org}"
     export _CFG_MQTT_TOPIC="${MQTT_TOPIC:-msh/US}"
     export _CFG_MESHTASTIC_ENABLED="$( [ "$INSTALL_MESHTASTIC" = true ] && echo "true" || echo "false" )"
-    export _CFG_INTERFACE_MODE="$INTERFACE_MODE"
-    export _CFG_WEB_SERVER="$( [ "$INTERFACE_MODE" = "web" ] || [ "$INTERFACE_MODE" = "both" ] && echo "true" || echo "false" )"
-    export _CFG_WEB_PORT="${WEB_PORT:-8080}"
     export _CFG_CONFIG_FILE="$CONFIG_FILE"
 
     # Run Python with quoted heredoc to prevent shell interpolation
@@ -214,18 +207,11 @@ config['mqtt'] = {
 
 # Features
 config['features'] = {
-    'mode': os.environ.get('_CFG_INTERFACE_MODE', 'tui'),
+    'mode': 'tui',
     'tui_enabled': 'true',
     'tui_refresh_rate': '1.0',
     'tui_mouse_support': 'false',
     'tui_color_scheme': 'default',
-    'web_server': os.environ.get('_CFG_WEB_SERVER', 'false'),
-    'web_host': '127.0.0.1',
-    'web_port': os.environ.get('_CFG_WEB_PORT', '8080'),
-    'web_api_enabled': 'true',
-    'web_auth_enabled': 'false',
-    'web_username': 'admin',
-    'web_password': '',
     'messages_enabled': 'true',
     'nodes_enabled': 'true',
     'alerts_enabled': 'true',
@@ -471,7 +457,7 @@ print_summary() {
     echo "Quick start:"
     echo "  python3 mesh_client.py --demo    # Demo mode (no hardware)"
     echo "  python3 mesh_client.py --tui     # TUI interface"
-    echo "  python3 mesh_client.py --web     # Web interface"
+    echo "  python3 mesh_client.py --setup   # Interactive setup wizard"
     echo ""
 
     if [[ "$INSTALL_SERVICE" =~ ^[Yy]$ ]]; then
@@ -508,8 +494,6 @@ main() {
     INSTALL_MESHTASTIC=true
     MQTT_BROKER="mqtt.meshtastic.org"
     MQTT_TOPIC="msh/US"
-    INTERFACE_MODE="tui"
-    WEB_PORT=8080
 
     setup_venv
     install_python_deps
