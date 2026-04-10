@@ -7,7 +7,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 [![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-790-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-792-brightgreen.svg)](tests/)
 [![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
 
 > **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
@@ -41,9 +41,68 @@ meshing_around_meshforge works with any [Meshtastic-compatible device](https://m
 |----------|-----------------|-------|
 | **Desktop/Laptop** | Any | Full TUI interface |
 | **Raspberry Pi 3/4/5** | Serial, MQTT | Full functionality |
-| **Raspberry Pi Zero 2W** | MQTT | Use MQTT mode (limited USB bandwidth) |
+| **Raspberry Pi Zero 2W** | MQTT | See [Pi Zero 2W Guide](#raspberry-pi-zero-2w) below |
 | **Any Linux Server** | MQTT, TCP | Headless via systemd service |
 | **Docker** | MQTT, TCP | No USB passthrough needed for MQTT |
+
+### Raspberry Pi Zero 2W
+
+The Pi2W's single micro USB port is power-only, making direct radio connections impractical. Three deployment options are supported, all using MQTT:
+
+**Option 1: MQTT Monitor (no radio)**
+Connect directly to the public Meshtastic MQTT broker. Receive-only — monitor mesh traffic, track nodes, log alerts. Zero hardware beyond the Pi itself.
+
+```ini
+[interface]
+type = mqtt
+
+[mqtt]
+enabled = true
+broker = mqtt.meshtastic.org
+username = meshdev
+password = large4cats
+
+[commands]
+auto_respond = false    # MANDATORY on public brokers
+```
+
+**Option 2: Mosquitto Bridge (recommended for headless)**
+Run a local Mosquitto broker that bridges to the public broker. Local caching, survives internet blips, and other LAN devices can subscribe. A ready-to-use bridge config is included:
+
+```bash
+sudo apt install mosquitto mosquitto-clients
+sudo cp templates/mosquitto-bridge-public.conf /etc/mosquitto/conf.d/
+sudo systemctl restart mosquitto
+```
+
+The bridge is **receive-only** (`topic msh/US/# in 1`) — the Pi will never publish to the public broker. Then point mesh_client at localhost:
+
+```ini
+[interface]
+type = mqtt
+
+[mqtt]
+enabled = true
+broker = localhost
+```
+
+**Option 3: WiFi Radio (full bidirectional)**
+Pair the Pi2W with a standalone Meshtastic device (Heltec, T-Beam, RAK) that has WiFi and native MQTT uplink enabled. The radio runs on battery/solar, the Pi on PoE — no physical connection between them:
+
+```
+[Battery/Solar]           [PoE]
+  Meshtastic Radio  --->  Pi2W
+  (WiFi MQTT uplink)      Mosquitto:1883
+                          mesh_client (TUI/headless)
+                          meshforge-maps (optional)
+```
+
+The radio publishes received packets to the Pi's Mosquitto broker over WiFi. The mesh client can also send commands back via MQTT downlink — full bidirectional mesh access without a wire.
+
+**Power considerations:**
+- Pi2W on PoE (stable, always-on)
+- Radio on battery + solar panel (field-deployable, independent)
+- Micro USB is power-only — no USB OTG hub needed
 
 ## Feature Status
 
@@ -61,10 +120,10 @@ graph LR
         PROF[Regional Profiles]
         TCP[TCP Mode]
         CHUNK[Chunk Reassembly]
+        MQTT[MQTT Mode]
     end
 
     subgraph "Partial"
-        MQTT[MQTT Mode]
         NOTIFY[Notifications]
     end
 
@@ -80,7 +139,7 @@ graph LR
     style MODELS fill:#27ae60,color:#fff
     style ALERTS fill:#27ae60,color:#fff
     style LAUNCH fill:#27ae60,color:#fff
-    style MQTT fill:#f39c12,color:#fff
+    style MQTT fill:#27ae60,color:#fff
     style NOTIFY fill:#f39c12,color:#fff
     style CMDS fill:#27ae60,color:#fff
     style PROF fill:#27ae60,color:#fff
@@ -99,7 +158,7 @@ graph LR
 | **Data Models** | Working | Node, Message, Alert, MeshNetwork |
 | **Alert Detection** | Working | Emergency keywords, proximity |
 | **Launcher Menu** | Working | Interactive mode selection, config editor, updater |
-| **MQTT Mode** | Partial | Connects but limited testing |
+| **MQTT Mode** | Working | Public broker, local Mosquitto, Mosquitto bridge; receive + send (with node_id) |
 | **Notifications** | Partial | Email framework exists, untested |
 | **Bot Commands** | Working | 51 commands: 15 data (via bot engine), 11 local, 25 bot relay |
 | **Config Editors** | Working | Screen 0: mesh_client.ini (client). Screen 8: config.ini (bot). Both support `e` for nano. |
@@ -338,7 +397,7 @@ flowchart TD
 | Mode | Radio Required | Status | Use Case |
 |------|----------------|--------|----------|
 | **Demo** | No | **Working** | Test the UI with simulated nodes and messages |
-| **MQTT** | No | Partial | Join live mesh channels via broker — no radio needed |
+| **MQTT** | No | **Working** | Join live mesh channels via broker — no radio needed |
 | **Serial** | Yes (USB) | Untested | Direct USB connection to a Meshtastic device |
 | **TCP** | No (network) | **Working** | Connect to meshtasticd protobuf API (port 4403, not web port 9443) |
 | **BLE** | Yes (nearby) | Untested | Bluetooth Low Energy to a nearby device |
@@ -420,7 +479,7 @@ python3 mesh_client.py --profile hawaii      # Apply Hawaii profile
 | `default_us` | msh/US | standard (911, sos, mayday) |
 | `europe` | msh/EU_868 | 112 (EU emergency number) |
 | `australia_nz` | msh/ANZ | 000, 111, bushfire, cyclone |
-| `local_broker` | msh/US | auto_respond enabled (private broker only) |
+| `local_broker` | msh/US | MQTT mode, auto_respond enabled (private broker only) |
 
 Profiles set defaults — add your own channels in `mesh_client.ini` after applying.
 
@@ -680,7 +739,10 @@ meshing_around_meshforge/
 │   ├── default_us.ini      # Continental US defaults
 │   ├── europe.ini          # EU 868 MHz band
 │   ├── australia_nz.ini    # ANZ (bushfire/cyclone keywords)
-│   └── local_broker.ini    # Local Mosquitto (bot responses enabled)
+│   └── local_broker.ini    # Local Mosquitto (MQTT mode, bot responses enabled)
+├── templates/              # Deployment templates
+│   ├── mesh_bot.service    # Systemd service for meshing-around bot
+│   └── mosquitto-bridge-public.conf  # Mosquitto bridge to public broker (receive-only)
 └── meshing_around_clients/
     ├── core/               # Runtime modules
     │   ├── config.py       # Config management (profiles, data sources)
@@ -703,8 +765,8 @@ meshing_around_meshforge/
 
 ## Known Issues
 
-- **Serial/TCP/BLE modes**: Not yet tested with real hardware — see [HARDWARE_TESTING.md](HARDWARE_TESTING.md) to contribute test results
-- **MQTT reconnection**: Auto-reconnect with exponential backoff (up to 300s), but limited real-world testing against live brokers
+- **Serial/BLE modes**: Not yet tested with real hardware — see [HARDWARE_TESTING.md](HARDWARE_TESTING.md) to contribute test results
+- **TCP contention**: Multiple TCP clients on one meshtasticd instance (port 4403) can degrade the web UI on port 9443. The client logs a warning when connecting to a remote meshtasticd. Use MQTT instead of a second TCP connection.
 - **Notifications**: Email/SMS framework exists but untested with live credentials
 - **Multi-interface**: Single connection at a time (upstream meshing-around supports up to 9)
 
@@ -727,7 +789,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **790 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and more.
+The project has **792 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and more.
 
 ```bash
 # Run all tests
