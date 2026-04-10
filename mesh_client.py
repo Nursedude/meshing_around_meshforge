@@ -1250,7 +1250,10 @@ def interactive_setup():
             tcp_target = menu("TCP Target", tcp_items, default="local")
         if tcp_target == "remote":
             host = inputbox(
-                "Remote device IP or hostname:port\n(default port 4403)",
+                "Remote device IP or hostname:port\n(default port 4403)\n\n"
+                "WARNING: If the remote meshtasticd already has a TCP client\n"
+                "(meshforge-map, mesh_bot), a second connection may degrade\n"
+                "the web UI on :9443. Consider MQTT instead.",
                 default="192.168.1.1",
             )
             if host:

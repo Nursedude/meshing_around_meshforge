@@ -666,6 +666,37 @@ class MeshtasticAPI(CallbackMixin):
         self._auto_save_thread.start()
 
     @staticmethod
+    def _check_tcp_contention(host: str, port: int) -> None:
+        """Warn if meshtasticd at *host:port* already has a TCP client.
+
+        meshtasticd's protobuf API handles multiple TCP clients poorly —
+        a second client can starve the web UI (:9443) and cause packet
+        loss.  This does a quick connect-then-close probe; if the probe
+        succeeds we log a warning (someone else is already connected and
+        the API accepted *another* socket).  A refused/timed-out probe
+        is fine — means no contention risk.
+        """
+        import socket
+
+        try:
+            with socket.create_connection((host, port), timeout=3) as sock:
+                # Connection succeeded — meshtasticd is listening.
+                # We can't easily tell how many OTHER clients exist from
+                # outside, but for non-localhost targets the mere act of
+                # opening a second TCP session is the problem.
+                if host not in ("127.0.0.1", "localhost", "::1"):
+                    logger.warning(
+                        "TCP contention risk: connecting to remote meshtasticd at %s:%d. "
+                        "If another client (meshforge-map, mesh_bot) already holds a TCP "
+                        "connection, the web UI on :9443 may become unresponsive. "
+                        "Consider using MQTT instead.",
+                        host,
+                        port,
+                    )
+        except (OSError, socket.timeout):
+            pass  # Can't reach host yet — _try_create will handle the real error
+
+    @staticmethod
     def _try_create(cls, *args, **kwargs):
         """Instantiate a meshtastic interface, dropping unsupported kwargs."""
         try:
@@ -706,6 +737,9 @@ class MeshtasticAPI(CallbackMixin):
                 raise ValueError(f"Invalid TCP hostname: {hostname!r}")
             self.connection_info.device_path = hostname
             host, tcp_port = hostname.rsplit(":", 1) if ":" in hostname else (hostname, "4403")
+            # Warn about meshtasticd TCP contention — multiple clients degrade
+            # the protobuf API and can starve the web UI on :9443.
+            self._check_tcp_contention(host, int(tcp_port))
             return self._try_create(
                 mod.TCPInterface,
                 host,
