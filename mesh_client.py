@@ -2022,6 +2022,8 @@ def run_application(config: ConfigParser):
             app_config.interface.http_url = config.get("interface", "http_url", fallback="")
             # Also set hostname as fallback
             app_config.interface.hostname = config.get("interface", "hostname", fallback="")
+        elif conn_type == "mqtt":
+            app_config.mqtt.enabled = True
 
         # Determine if demo mode
         if demo_mode or conn_type == "demo":
@@ -2049,6 +2051,10 @@ def run_application(config: ConfigParser):
             log("Running in headless mode (API only)", "INFO")
             if demo_mode:
                 api = MockMeshtasticAPI(app_config)
+            elif app_config.mqtt.enabled and app_config.interface.type == "mqtt":
+                from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+                api = MQTTMeshtasticClient(app_config)
             else:
                 api = MeshtasticAPI(app_config)
 
