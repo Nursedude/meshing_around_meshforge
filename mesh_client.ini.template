@@ -62,12 +62,16 @@ password = large4cats
 
 # Topic configuration
 topic_root = msh/US
+# OUTBOUND default channel name — used by TUI [s] send action
 channel = LongFast
-# Subscribe to multiple channels (comma-separated)
-# Add your own channels here (e.g., LongFast,meshforge,MyLab)
+# SUBSCRIBE list — receive messages from these channels
+# Use '*' wildcard to receive all channels under topic_root (recommended for local brokers)
+# Or comma-separated list: LongFast,meshforge,MyLab
 channels = LongFast
 
-# Your node ID for MQTT (leave empty to receive only)
+# Your node ID for MQTT — MUST be Meshtastic hex format '!' + 8 hex chars (e.g. !a2e95ba4)
+# Leave empty for receive-only. Display names like "Borg server" are NOT valid.
+# Find your device's ID in the radio web UI, meshtastic CLI (--info), or TUI node list.
 node_id =
 
 # Connection settings

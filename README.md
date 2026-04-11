@@ -454,15 +454,26 @@ use_tls = false                # Enable TLS encryption
 username = meshdev             # Broker credentials
 password = large4cats          # Public broker default
 topic_root = msh/US            # Region: US, EU_868, EU_433, AU_915, CN, JP, etc.
-channel = LongFast             # Channel name(s) — comma-separated for multi-channel (e.g. LongFast,MediumSlow)
+channel = meshforge            # OUTBOUND default channel name (TUI [s] send target)
+channels = *                   # SUBSCRIBE list — '*' wildcard for all under topic_root, or comma-list
 encryption_key =               # Base64 256-bit PSK for private channels
-node_id = !meshforg            # Virtual node ID for MQTT-only operation
+node_id = !a2e95ba4            # Your node ID — MUST be hex format '!' + 8 hex chars
 qos = 1                        # MQTT QoS level (0, 1, 2)
 reconnect_delay = 5            # Seconds between reconnect attempts
 max_reconnect_attempts = 10    # Give up after N failures
 uplink_enabled = true          # Receive messages from mesh
 downlink_enabled = true        # Send messages to mesh
 ```
+
+**Key field clarifications:**
+
+- **`channel` vs `channels`** — `channel` (singular) is the **outbound default** for TUI send actions. `channels` (plural) is the **subscribe list** — use `*` wildcard to receive all channels under `topic_root`. These are independent: you can subscribe to everything but only send to one channel by default.
+
+- **`node_id` must be Meshtastic hex format** — `!` followed by 8 lowercase hex chars (e.g. `!a2e95ba4`). Display names like `"Borg server"` will trigger `Cannot send: no node_id configured`. The hex ID comes from the device — find it in the radio's web UI, meshtastic CLI (`meshtastic --info`), or TUI node list.
+
+- **Channel name vs channel index** — Meshtastic channels have both a **name** (like `meshforge`) and a per-device **index** (like `ch2`). The name + PSK are the shared identity across the mesh; the index is local to each radio. Example: the same `meshforge` channel might be ch2 on one device and ch3 on another. When configuring the bot's `defaultchannel`, use the **local device's index** for whichever channel you want output on.
+
+- **Public broker safety** — On `mqtt.meshtastic.org`, **never** set `auto_respond = true` in `[commands]`. Your bot responses would be published to everyone in the region. Use a local/private broker for auto-response.
 
 ### Regional Profiles
 
