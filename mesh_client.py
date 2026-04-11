@@ -1761,7 +1761,6 @@ def configure_wifi_radio(config: ConfigParser) -> None:
     device_ip = inputbox(
         "WiFi Meshtastic device IP address\n"
         "(must be reachable from this machine, TCP port 4403)",
-        title="WiFi Radio — Device IP",
         default="",
     )
     if not device_ip:
@@ -1853,7 +1852,6 @@ def configure_wifi_radio(config: ConfigParser) -> None:
         broker_addr = inputbox(
             f"MQTT broker address for the radio\n"
             f"(auto-detected: this Pi is {local_ip})",
-            title="WiFi Radio — Broker",
             default=f"{local_ip}:1883",
         )
         if not broker_addr:
@@ -1862,7 +1860,6 @@ def configure_wifi_radio(config: ConfigParser) -> None:
 
         topic_root = inputbox(
             "MQTT topic root",
-            title="WiFi Radio — Topic",
             default=config.get("mqtt", "topic_root", fallback="msh/US"),
         )
         if not topic_root:
