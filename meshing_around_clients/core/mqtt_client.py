@@ -171,6 +171,13 @@ class MQTTMeshtasticClient(CallbackMixin):
         self._rejection_window_start: float = time.monotonic()
         self._rejection_window_count: int = 0
 
+        # Own-send dedupe: track packet IDs we just published so we can
+        # suppress the uplink echo from the connected WiFi radio.  Map of
+        # packet_id -> timestamp; entries older than _OWN_SEND_TTL are
+        # pruned on each check.
+        self._own_sent_packet_ids: Dict[int, float] = {}
+        self._own_sent_lock = threading.Lock()
+
         # Load persisted state if enabled
         self._load_persisted_state()
 
@@ -1153,6 +1160,13 @@ class MQTTMeshtasticClient(CallbackMixin):
         portnum = result.portnum
         msg_type = decoded.get("type", "")
 
+        # Suppress our own publishes that the connected radio echoed back
+        # via MQTT uplink.  Without this, every send from the TUI shows
+        # twice — once as "Me" outgoing and once as "from <radio>" incoming.
+        if result.packet_id and self._is_own_sent(result.packet_id):
+            logger.debug("Suppressed own-send echo for packet_id=%s", result.packet_id)
+            return
+
         # Generate message ID for deduplication
         msg_id = str(result.packet_id) if result.packet_id else ""
         if msg_id and self.network.is_duplicate_message(msg_id):
@@ -1425,6 +1439,38 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._dispatch_alert_actions(alert)
                 break
 
+    # TTL for own-sent packet_id dedupe (seconds).  After this window,
+    # any echo arriving is treated as a fresh message rather than suppressed.
+    _OWN_SEND_TTL = 60.0
+
+    def _remember_own_sent(self, packet_id: int) -> None:
+        """Record a packet_id we just published, so we can dedupe the echo."""
+        if not packet_id:
+            return
+        now = time.monotonic()
+        with self._own_sent_lock:
+            self._own_sent_packet_ids[packet_id] = now
+            # Opportunistic prune: drop entries older than TTL
+            if len(self._own_sent_packet_ids) > 32:
+                cutoff = now - self._OWN_SEND_TTL
+                stale = [pid for pid, ts in self._own_sent_packet_ids.items() if ts < cutoff]
+                for pid in stale:
+                    self._own_sent_packet_ids.pop(pid, None)
+
+    def _is_own_sent(self, packet_id: int) -> bool:
+        """Return True if *packet_id* was published by this client recently."""
+        if not packet_id:
+            return False
+        with self._own_sent_lock:
+            ts = self._own_sent_packet_ids.get(packet_id)
+            if ts is None:
+                return False
+            if time.monotonic() - ts > self._OWN_SEND_TTL:
+                # Expired — clean up and treat as not-own
+                self._own_sent_packet_ids.pop(packet_id, None)
+                return False
+            return True
+
     def _parse_destination(self, destination: Any) -> int:
         """Parse a destination (^all / !hex / int / str) into a uint32 node number.
 
@@ -1486,6 +1532,10 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         # Generate a random packet ID (uint32, non-zero)
         packet_id = random.randint(1, 0xFFFFFFFF)
+
+        # Record this packet_id so we can suppress the uplink echo when the
+        # connected WiFi radio retransmits our own message back via MQTT.
+        self._remember_own_sent(packet_id)
 
         # Build Data payload (portnum + text)
         data = mesh_pb2.Data()

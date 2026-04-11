@@ -854,6 +854,79 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
             self.assertEqual(client._parse_destination("!12345678"), 0x12345678)
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_own_sent_packet_ids_suppresses_echo(self, mock_mqtt):
+        """A received packet matching a recently-sent packet_id should be skipped."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+        from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+
+        client = MQTTMeshtasticClient(self.config)
+
+        # Simulate a recent own-send
+        client._remember_own_sent(12345)
+        self.assertTrue(client._is_own_sent(12345))
+        self.assertFalse(client._is_own_sent(99999))  # different packet_id
+
+        # Simulate receiving an echo of our own send
+        before_count = len(client.network.messages)
+        result = DecryptedPacket(
+            success=True,
+            portnum=1,
+            portnum_name="TEXT_MESSAGE_APP",
+            packet_id=12345,
+            sender=0xA2E95BA4,
+            decoded={"text": "hello", "type": "text", "portnum": 1},
+        )
+        client._process_decoded_packet(result, "!a2e95ba4", {"channel": "meshforge"})
+        # Message should NOT be added because it's our own echo
+        self.assertEqual(len(client.network.messages), before_count)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_own_sent_ttl_expires(self, mock_mqtt):
+        """Expired own-sent packet_ids should no longer be suppressed."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+        import time as _t
+
+        client = MQTTMeshtasticClient(self.config)
+        client._remember_own_sent(12345)
+
+        # Force the entry to look expired
+        with client._own_sent_lock:
+            client._own_sent_packet_ids[12345] = _t.monotonic() - (client._OWN_SEND_TTL + 1)
+
+        # _is_own_sent should now return False and clean up the stale entry
+        self.assertFalse(client._is_own_sent(12345))
+        with client._own_sent_lock:
+            self.assertNotIn(12345, client._own_sent_packet_ids)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_send_message_records_own_packet_id(self, mock_mqtt):
+        """send_message() should record the packet_id it used for dedupe."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        client = MQTTMeshtasticClient(self.config)
+        client._connected = True
+        client._client = MagicMock()
+
+        result = client.send_message("test dedupe")
+        self.assertTrue(result)
+
+        # Extract the packet_id from the published envelope
+        publish_calls = client._client.publish.call_args_list
+        self.assertEqual(len(publish_calls), 1)
+        envelope_bytes = publish_calls[0][0][1]
+        envelope = mqtt_pb2.ServiceEnvelope()
+        envelope.ParseFromString(envelope_bytes)
+        packet_id = envelope.packet.id
+
+        # That packet_id should be in the own-sent set
+        self.assertTrue(client._is_own_sent(packet_id))
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_parse_topic_v2_format(self, mock_mqtt):
         """_parse_topic should extract channel name from v2 7-segment topics."""
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
