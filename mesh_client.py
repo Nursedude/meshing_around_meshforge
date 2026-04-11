@@ -1878,8 +1878,8 @@ def configure_wifi_radio(config: ConfigParser) -> None:
             f"Broker: {broker_addr}\n"
             f"Topic root: {topic_root}\n"
             f"Encryption: {'on' if encrypt_on else 'off'}\n"
-            f"Uplink: enabled (radio → broker)\n"
-            f"Downlink: enabled (broker → radio)\n\n"
+            f"Uplink: enabled (radio -> broker)\n"
+            f"Downlink: enabled (broker -> radio)\n\n"
             f"Write this MQTT config to the device?"
         )
         confirm_items = [
