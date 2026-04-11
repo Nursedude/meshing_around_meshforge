@@ -812,7 +812,10 @@ class MQTTMeshtasticClient(CallbackMixin):
             elif msg_type == "traceroute":
                 self._handle_traceroute_from_json(data, sender_id)
 
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            # Binary payload on a /json/ topic — usually a misrouted encrypted
+            # message or a gateway that publishes protobuf under /json/.  Not
+            # actionable; log at debug only.
             logger.debug("Malformed JSON message on %s: %s", topic, e)
         except (KeyError, TypeError, ValueError) as e:
             logger.warning("JSON message parse error (%s): %s", type(e).__name__, e)
