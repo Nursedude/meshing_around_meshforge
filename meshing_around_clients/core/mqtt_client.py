@@ -1492,6 +1492,23 @@ class MQTTMeshtasticClient(CallbackMixin):
             logger.warning("Cannot send: no node_id configured for MQTT")
             return False
 
+        # Warn if node_id doesn't look like a virtual ID (e.g., !c0deba5e).
+        # Real hardware IDs are derived from chip serial numbers and rarely
+        # start with 'c0de' or other distinctive prefixes.  If the configured
+        # node_id matches a real radio's ID, the firmware filters it as
+        # loopback and never retransmits.
+        nid_lower = self.mqtt_config.node_id.lower().lstrip("!")
+        if nid_lower and not (nid_lower.startswith("c0de") or nid_lower.startswith("feed") or nid_lower.startswith("dead")):
+            if not getattr(self, "_node_id_warned", False):
+                logger.warning(
+                    "node_id %r looks like a real hardware ID, not a virtual one. "
+                    "If it matches the connected radio, downlink messages will be "
+                    "filtered as loopback. Use a !c0de... prefix or re-run the "
+                    "WiFi Radio wizard to auto-generate a safe virtual ID.",
+                    self.mqtt_config.node_id,
+                )
+                self._node_id_warned = True
+
         msg_bytes = len(text.encode("utf-8"))
         if msg_bytes > MAX_MESSAGE_BYTES:
             logger.warning("Message too long (%d/%d bytes), rejecting", msg_bytes, MAX_MESSAGE_BYTES)

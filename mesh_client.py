@@ -470,6 +470,7 @@ channel = LongFast
 # Comma-separated channel names to subscribe. Use * for all channels (local brokers)
 channels = LongFast
 node_id =
+encryption_key =
 qos = 1
 reconnect_delay = 5
 max_reconnect_attempts = 10

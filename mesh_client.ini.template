@@ -80,6 +80,11 @@ channels = LongFast
 # manually, use a value with the !c0de prefix or another reserved range.
 node_id =
 
+# Channel encryption key (base64 PSK).  Required to send encrypted downlinks
+# on a non-default channel.  The WiFi Radio wizard reads this from the
+# connected device.  For private channels, paste the channel's base64 PSK here.
+encryption_key =
+
 # Connection settings
 qos = 1
 reconnect_delay = 5
