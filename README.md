@@ -7,7 +7,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 [![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-792-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-806-brightgreen.svg)](tests/)
 [![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
 
 > **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
@@ -47,10 +47,11 @@ meshing_around_meshforge works with any [Meshtastic-compatible device](https://m
 
 ### Raspberry Pi Zero 2W
 
-The Pi2W's single micro USB port is power-only, making direct radio connections impractical. Three deployment options are supported, all using MQTT:
+The Pi2W's single micro USB port is power-only, making direct radio connections impractical. **Three deployment options** are supported, all using MQTT. All three are end-to-end validated on real hardware.
 
-**Option 1: MQTT Monitor (no radio)**
-Connect directly to the public Meshtastic MQTT broker. Receive-only — monitor mesh traffic, track nodes, log alerts. Zero hardware beyond the Pi itself.
+#### Option 1: MQTT Monitor (no radio) — receive-only
+
+Connect directly to the public Meshtastic MQTT broker. Monitor mesh traffic, track nodes, log alerts. Zero hardware beyond the Pi itself.
 
 ```ini
 [interface]
@@ -66,11 +67,13 @@ password = large4cats
 auto_respond = false    # MANDATORY on public brokers
 ```
 
-**Option 2: Mosquitto Bridge (recommended for headless)**
-Run a local Mosquitto broker that bridges to the public broker. Local caching, survives internet blips, and other LAN devices can subscribe. A ready-to-use bridge config is included:
+#### Option 2: Mosquitto Bridge (local broker caching)
+
+Run a local Mosquitto broker that bridges to the public broker. Local caching, survives internet blips, and other LAN devices can subscribe. Ready-to-use templates are included:
 
 ```bash
 sudo apt install mosquitto mosquitto-clients
+sudo cp templates/mosquitto-listener.conf /etc/mosquitto/conf.d/
 sudo cp templates/mosquitto-bridge-public.conf /etc/mosquitto/conf.d/
 sudo systemctl restart mosquitto
 ```
@@ -86,23 +89,31 @@ enabled = true
 broker = localhost
 ```
 
-**Option 3: WiFi Radio (full bidirectional)**
-Pair the Pi2W with a standalone Meshtastic device (Heltec, T-Beam, RAK) that has WiFi and native MQTT uplink enabled. The radio runs on battery/solar, the Pi on PoE — no physical connection between them:
+#### Option 3: WiFi Radio — full bidirectional, end-to-end validated
+
+Pair the Pi2W with a standalone WiFi-capable Meshtastic device (Station G2, Heltec V3, T-Beam, RAK). The radio runs on battery/solar, the Pi on PoE — no physical connection between them:
 
 ```
-[Battery/Solar]           [PoE]
-  Meshtastic Radio  --->  Pi2W
-  (WiFi MQTT uplink)      Mosquitto:1883
-                          mesh_client (TUI/headless)
-                          meshforge-maps (optional)
+[Battery/Solar]                 [PoE]
+  Meshtastic Radio  --WiFi-->  Pi2W
+  (native MQTT uplink)          Mosquitto:1883
+        ^                         │
+        │                         ├── mesh_client (TUI, MQTT)
+        │                         └── meshing-around bot (TCP :4403 -> radio)
+        │
+        └── MQTT downlink (mesh_client sends commands)
 ```
 
-The radio publishes received packets to the Pi's Mosquitto broker over WiFi. The mesh client can also send commands back via MQTT downlink — full bidirectional mesh access without a wire.
+**Bidirectional proof:** commands typed in the Pi's TUI are published as encrypted `ServiceEnvelope` protobufs to `msh/{root}/2/e/{channel}/{node_id}`. The radio subscribes to that topic, decrypts with the channel PSK, and retransmits over LoRa. Bot responses go the other way via the TCP-connected meshing-around bot.
+
+**The launcher menu's "Configure WiFi Radio Link" wizard** auto-detects the Pi's routable IP, connects via `meshtastic.tcp_interface.TCPInterface` to the device's protobuf API, writes the correct native MQTT config (broker, channel, encryption), reads the channel PSK from the device, and generates a safe virtual `node_id` (`!c0de...` prefix) for `mesh_client.ini` so mesh_client's publishes aren't filtered as loopback by the firmware.
 
 **Power considerations:**
 - Pi2W on PoE (stable, always-on)
 - Radio on battery + solar panel (field-deployable, independent)
 - Micro USB is power-only — no USB OTG hub needed
+
+**Single-TCP-client caveat:** Meshtastic firmware's TCP protobuf API only accepts one active client at a time. If you also run `rnsd` or another service that opens a Meshtastic interface, it may fight the display client for the slot. See [Known Issues](#known-issues) for the rnsd auto-loading plugin gotcha.
 
 ## Feature Status
 
@@ -780,6 +791,8 @@ meshing_around_meshforge/
 - **TCP contention**: Multiple TCP clients on one meshtasticd instance (port 4403) can degrade the web UI on port 9443. The client logs a warning when connecting to a remote meshtasticd. Use MQTT instead of a second TCP connection.
 - **Notifications**: Email/SMS framework exists but untested with live credentials
 - **Multi-interface**: Single connection at a time (upstream meshing-around supports up to 9)
+- **rnsd Meshtastic plugin auto-load**: If you run `rnsd` (Reticulum) alongside `meshtasticd` on the same host, and `/etc/reticulum/interfaces/Meshtastic_Interface.py` exists, rnsd will auto-load it even without a `[[Meshtastic Interface]]` block in `config`. The plugin opens a TCP client to `127.0.0.1:4403` and (in some setups) enters a reconnect loop that kicks any display client off the single TCP slot. Fix: `sudo mv /etc/reticulum/interfaces/Meshtastic_Interface.py{,.disabled}` and restart rnsd.
+- **Upstream meshing-around `antiSpam = True`**: hardcoded in `modules/settings.py:19` (not a config option). When your bot's `defaultchannel` matches a channel you want broadcast responses on, anti-spam forces DMs instead. Patch locally: `sed -i 's/^antiSpam = True/antiSpam = False/' ~/meshing-around/modules/settings.py`. Re-apply after `git pull` on meshing-around.
 
 ## Dependencies
 
@@ -800,7 +813,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **792 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and more.
+The project has **806 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and the encrypted MQTT downlink path (envelope build, channel hash, v1/v2 topic parsing, echo dedupe).
 
 ```bash
 # Run all tests
