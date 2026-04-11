@@ -2138,20 +2138,28 @@ def launcher_menu(config: ConfigParser) -> bool:
 
         # For TUI modes: prompt for connection type
         if choice == "tui":
-            from meshing_around_clients.setup.whiptail import radiolist
-
             current_type = config.get("interface", "type", fallback="auto")
-            conn_items = [
-                ("auto", "Auto-detect", current_type == "auto"),
-                ("mqtt", "MQTT (No radio needed)", current_type == "mqtt"),
-                ("serial", "Serial (USB radio)", current_type == "serial"),
-                ("tcp", "TCP (Remote device)", current_type == "tcp"),
-                ("http", "HTTP (Remote device API)", current_type == "http"),
-                ("demo", "Demo mode (simulated)", False),
-            ]
-            selected = radiolist("Connection Type", conn_items)
-            if selected is None:
-                continue  # back to main menu
+            mqtt_enabled = config.getboolean("mqtt", "enabled", fallback=False)
+
+            # Skip connection prompt if MQTT is already configured
+            # (e.g. from WiFi Radio setup, MQTT Monitor, or Local Broker)
+            if current_type == "mqtt" and mqtt_enabled:
+                log(f"Using configured MQTT connection ({config.get('mqtt', 'broker', fallback='localhost')})", "INFO")
+                selected = "mqtt"
+            else:
+                from meshing_around_clients.setup.whiptail import radiolist
+
+                conn_items = [
+                    ("auto", "Auto-detect", current_type == "auto"),
+                    ("mqtt", "MQTT", current_type == "mqtt"),
+                    ("serial", "Serial (USB radio)", current_type == "serial"),
+                    ("tcp", "TCP (Remote device)", current_type == "tcp"),
+                    ("http", "HTTP (Remote device API)", current_type == "http"),
+                    ("demo", "Demo mode (simulated)", False),
+                ]
+                selected = radiolist("Connection Type", conn_items)
+                if selected is None:
+                    continue  # back to main menu
 
             config.set("interface", "type", selected)
             _clean_interface_for_type(config, selected)
