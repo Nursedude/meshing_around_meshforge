@@ -469,7 +469,7 @@ downlink_enabled = true        # Send messages to mesh
 
 - **`channel` vs `channels`** — `channel` (singular) is the **outbound default** for TUI send actions. `channels` (plural) is the **subscribe list** — use `*` wildcard to receive all channels under `topic_root`. These are independent: you can subscribe to everything but only send to one channel by default.
 
-- **`node_id` must be Meshtastic hex format** — `!` followed by 8 lowercase hex chars (e.g. `!a2e95ba4`). Display names like `"Borg server"` will trigger `Cannot send: no node_id configured`. The hex ID comes from the device — find it in the radio's web UI, meshtastic CLI (`meshtastic --info`), or TUI node list.
+- **`node_id` is mesh_client's OWN virtual identity** — `!` followed by 8 lowercase hex chars (e.g. `!c0deba5e`). It must **NOT** match any real radio's hardware node ID. If you set `node_id` to a real radio's ID, the firmware filters mesh_client's publishes as loopback echoes of its own uplink and never retransmits them. The WiFi Radio wizard auto-generates a safe virtual ID derived from the device hardware ID. Display names like `"Borg server"` will trigger `Cannot send: no node_id configured`.
 
 - **Channel name vs channel index** — Meshtastic channels have both a **name** (like `meshforge`) and a per-device **index** (like `ch2`). The name + PSK are the shared identity across the mesh; the index is local to each radio. Example: the same `meshforge` channel might be ch2 on one device and ch3 on another. When configuring the bot's `defaultchannel`, use the **local device's index** for whichever channel you want output on.
 

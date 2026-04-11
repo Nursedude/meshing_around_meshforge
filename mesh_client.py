@@ -1945,13 +1945,60 @@ def configure_wifi_radio(config: ConfigParser) -> None:
         node.writeConfig("mqtt")
         log("MQTT config written to device", "OK")
 
-        # --- Step 6: Verify ---
+        # --- Step 6: Update local mesh_client.ini so the TUI can talk to it ---
+        # Generate a stable virtual node_id derived from the device's hardware ID.
+        # XOR with 0xc0de_0000 puts it in a range unlikely to collide with real
+        # hardware node numbers, while keeping it deterministic per-device.
+        device_node_num = sender_node if "sender_node" in dir() else 0
+        if not device_node_num:
+            try:
+                device_node_num = getattr(node, "nodeNum", 0) or 0
+            except (AttributeError, TypeError):
+                device_node_num = 0
+        # Fallback: use the lower 16 bits of the broker port + a random component
+        if not device_node_num:
+            import random as _rnd
+            virtual_id_int = 0xC0DE0000 | _rnd.randint(1, 0xFFFF)
+        else:
+            virtual_id_int = (device_node_num & 0x0000FFFF) | 0xC0DE0000
+        virtual_node_id = f"!{virtual_id_int:08x}"
+
+        # Read the channel PSK from the device for this channel name (if it exists)
+        # so mesh_client can encrypt outbound messages with the right key.
+        device_psk_b64 = ""
+        for ch in node.channels:
+            if ch.role != 0 and ch.settings.name == config.get(
+                "mqtt", "channel", fallback=""
+            ):
+                import base64 as _b64
+                device_psk_b64 = _b64.b64encode(ch.settings.psk).decode()
+                break
+
+        log(f"Updating mesh_client.ini for MQTT mode...", "INFO")
+        config.set("interface", "type", "mqtt")
+        config.set("mqtt", "enabled", "true")
+        config.set("mqtt", "broker", "localhost")
+        config.set("mqtt", "port", "1883")
+        config.set("mqtt", "topic_root", topic_root)
+        config.set("mqtt", "channels", "*")
+        config.set("mqtt", "node_id", virtual_node_id)
+        if device_psk_b64:
+            config.set("mqtt", "encryption_key", device_psk_b64)
+        save_config(config)
+        log(f"mesh_client.ini updated: node_id={virtual_node_id}", "OK")
+
+        # --- Step 7: Verify ---
         log("Waiting for traffic on local Mosquitto (up to 30s)...", "INFO")
         msgbox(
-            "Config written. The device will reconnect to MQTT.\n\n"
-            "Verify with:\n"
+            f"Config written successfully.\n\n"
+            f"Device MQTT: {broker_addr}\n"
+            f"mesh_client virtual node_id: {virtual_node_id}\n\n"
+            f"The virtual node_id is mesh_client's own identity for MQTT\n"
+            f"publishes — it must NOT match any real radio's hardware ID,\n"
+            f"otherwise the radio filters its own publishes as loopback.\n\n"
+            f"Verify with:\n"
             f"  mosquitto_sub -t '{topic_root}/#' -v -C 1\n\n"
-            "If traffic appears, the link is working.",
+            f"If traffic appears, the link is working.",
             title="WiFi Radio - Config Written",
         )
 

@@ -69,9 +69,15 @@ channel = LongFast
 # Or comma-separated list: LongFast,meshforge,MyLab
 channels = LongFast
 
-# Your node ID for MQTT — MUST be Meshtastic hex format '!' + 8 hex chars (e.g. !a2e95ba4)
-# Leave empty for receive-only. Display names like "Borg server" are NOT valid.
-# Find your device's ID in the radio web UI, meshtastic CLI (--info), or TUI node list.
+# Your VIRTUAL node ID for MQTT publishes (mesh_client's own identity).
+# Format: '!' + 8 hex chars (e.g. !c0deba5e).  Leave empty for receive-only.
+#
+# IMPORTANT: This must NOT match any real radio's hardware node ID.  If it
+# matches a real radio, the firmware filters mesh_client's publishes as
+# loopback echoes and never retransmits them over LoRa.
+#
+# The WiFi Radio wizard auto-generates a safe virtual ID for you.  To set
+# manually, use a value with the !c0de prefix or another reserved range.
 node_id =
 
 # Connection settings
