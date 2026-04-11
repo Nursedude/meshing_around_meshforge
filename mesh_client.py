@@ -1839,15 +1839,47 @@ def configure_wifi_radio(config: ConfigParser) -> None:
                 pass  # Reachable
         except (OSError, socket.timeout):
             log(f"Mosquitto is not reachable on {local_ip}:1883", "WARN")
-            msgbox(
-                f"Mosquitto is not listening on {local_ip}:1883\n\n"
-                "The WiFi radio needs to reach this broker.\n"
-                "Create /etc/mosquitto/conf.d/listener.conf:\n\n"
-                "  listener 1883 0.0.0.0\n"
-                "  allow_anonymous true\n\n"
-                "Then: sudo systemctl restart mosquitto",
-                title="Mosquitto Not Routable",
-            )
+            # Try to install the listener config automatically
+            listener_conf = Path("/etc/mosquitto/conf.d/listener.conf")
+            listener_template = SCRIPT_DIR / "templates" / "mosquitto-listener.conf"
+            installed = False
+            if listener_template.exists() and not listener_conf.exists():
+                from meshing_around_clients.setup.whiptail import yesno
+                if yesno(
+                    f"Mosquitto is only on localhost.\n"
+                    f"Install listener config for 0.0.0.0:1883?\n"
+                    f"(requires sudo)"
+                ):
+                    try:
+                        subprocess.run(
+                            ["sudo", "cp", str(listener_template), str(listener_conf)],
+                            timeout=10,
+                            check=True,
+                        )
+                        subprocess.run(
+                            ["sudo", "systemctl", "restart", "mosquitto"],
+                            timeout=30,
+                            check=True,
+                        )
+                        time.sleep(1)
+                        try:
+                            with socket.create_connection((local_ip, 1883), timeout=2):
+                                log("Mosquitto now listening on all interfaces", "OK")
+                                installed = True
+                        except (OSError, socket.timeout):
+                            log("Mosquitto restarted but still not reachable", "WARN")
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+                        log(f"Failed to install listener: {e}", "ERROR")
+            if not installed:
+                msgbox(
+                    f"Mosquitto is not listening on {local_ip}:1883\n\n"
+                    "The WiFi radio needs to reach this broker.\n"
+                    "Create /etc/mosquitto/conf.d/listener.conf:\n\n"
+                    "  listener 1883 0.0.0.0\n"
+                    "  allow_anonymous true\n\n"
+                    "Then: sudo systemctl restart mosquitto",
+                    title="Mosquitto Not Routable",
+                )
 
         broker_addr = inputbox(
             f"MQTT broker address for the radio\n"
