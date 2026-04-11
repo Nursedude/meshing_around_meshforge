@@ -854,6 +854,60 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
             self.assertEqual(client._parse_destination("!12345678"), 0x12345678)
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_parse_topic_v2_format(self, mock_mqtt):
+        """_parse_topic should extract channel name from v2 7-segment topics."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+
+        # v2: msh/{country}/{subregion}/2/e/{channel}/{node}
+        info = client._parse_topic("msh/US/HI/2/e/meshforge/!a2e95ba4")
+        self.assertEqual(info["region"], "US")
+        self.assertEqual(info["subregion"], "HI")
+        self.assertEqual(info["version"], "2")
+        self.assertEqual(info["msg_type"], "e")
+        self.assertEqual(info["channel"], "meshforge")
+        self.assertEqual(info["node_id"], "!a2e95ba4")
+
+        # v2 with json
+        info = client._parse_topic("msh/US/TX/2/json/LongFast/!fa6ba854")
+        self.assertEqual(info["channel"], "LongFast")
+        self.assertEqual(info["msg_type"], "json")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_parse_topic_v1_format(self, mock_mqtt):
+        """_parse_topic should still handle legacy v1 5-segment topics."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+
+        # v1: msh/{region}/{channel}/{type}/{node}
+        info = client._parse_topic("msh/US/LongFast/json/!12345678")
+        self.assertEqual(info["channel"], "LongFast")
+        self.assertEqual(info["msg_type"], "json")
+        self.assertEqual(info["node_id"], "!12345678")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_channel_name_to_index_known_channel(self, mock_mqtt):
+        """_channel_name_to_index should return 0 for the configured outbound channel."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        # config has channel='meshforge', channels='*'
+        self.assertEqual(client._channel_name_to_index("meshforge"), 0)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_channel_name_to_index_explicit_list(self, mock_mqtt):
+        """_channel_name_to_index should return list index when channels is explicit."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        self.config.mqtt.channels = "LongFast,meshforge,VolcanoAI"
+        client = MQTTMeshtasticClient(self.config)
+        self.assertEqual(client._channel_name_to_index("LongFast"), 0)
+        self.assertEqual(client._channel_name_to_index("meshforge"), 1)
+        self.assertEqual(client._channel_name_to_index("VolcanoAI"), 2)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_envelope_includes_channel_hash(self, mock_mqtt):
         """MeshPacket.channel should contain the XOR hash of name+PSK, not 0.
 

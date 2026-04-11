@@ -608,6 +608,35 @@ class MQTTMeshtasticClient(CallbackMixin):
             raise ValueError(f"MQTT {name} must not contain wildcard characters (# or +)")
         return value
 
+    def _channel_name_to_index(self, channel_name: str) -> int:
+        """Map a channel name back to its index in the configured channels list.
+
+        Used to display incoming messages with a stable per-channel index for
+        the TUI.  When channels='*' (wildcard) or the name isn't in the list,
+        falls back to checking if the name matches the singular `channel`
+        field (the outbound default), in which case returns 0 as a sensible
+        default for "the channel mesh_client cares about".
+        """
+        if not channel_name:
+            return 0
+
+        channels_str = getattr(self.mqtt_config, "channels", "") or ""
+        channel_list = [c.strip() for c in channels_str.split(",") if c.strip() and c.strip() != "*"]
+
+        # Try direct match in the configured list
+        for i, name in enumerate(channel_list):
+            if name == channel_name:
+                return i
+
+        # Wildcard or not in list — check the outbound default
+        if channel_name == (self.mqtt_config.channel or ""):
+            return 0
+
+        # Unknown channel — assign a stable hash-based index in 1-7 range
+        # so different unknown channels appear distinct in the TUI without
+        # colliding with the configured ones at index 0.
+        return (hash(channel_name) % 7) + 1
+
     def _resolve_channel_name(self, channel_index: int) -> str:
         """Map a channel index to a channel name from the configured channels list.
 
@@ -718,23 +747,51 @@ class MQTTMeshtasticClient(CallbackMixin):
             logger.warning("Error parsing MQTT message (%s): %s", type(e).__name__, e)
 
     def _parse_topic(self, topic: str) -> Dict[str, Any]:
-        """Parse MQTT topic to extract metadata."""
-        # Topic format: msh/REGION/CHANNEL/TYPE/NODE_ID
-        # Examples:
-        #   msh/US/LongFast/json/!12345678
-        #   msh/US/2/e/!abcdef12
-        #   msh/EU_868/2/json/!fedcba98
-        parts = topic.split("/")
-        info = {"region": "", "channel": "", "msg_type": "", "node_id": "", "raw_topic": topic}
+        """Parse MQTT topic to extract metadata.
 
-        if len(parts) >= 2:
-            info["region"] = parts[1] if parts[1] in self.REGIONS else ""
-        if len(parts) >= 3:
+        Handles both Meshtastic v1 and v2 topic formats:
+
+        v2 (current, used by firmware 2.x):
+            msh/{region}/{subregion}/{version}/{e|json|stat}/{channel}/{node}
+            e.g. msh/US/HI/2/e/meshforge/!a2e95ba4
+            e.g. msh/US/TX/2/e/LongFast/!fa6ba854
+
+        v1 (legacy):
+            msh/{region}/{channel}/{e|json|stat}/{node}
+            e.g. msh/US/LongFast/json/!12345678
+        """
+        parts = topic.split("/")
+        info = {
+            "region": "", "subregion": "", "channel": "",
+            "msg_type": "", "node_id": "", "version": "", "raw_topic": topic,
+        }
+
+        # Detect v2 format: 7 parts with parts[3] in {"2"} (protocol version)
+        # and parts[4] in known message types.
+        if len(parts) >= 7 and parts[3] in ("2",) and parts[4] in ("e", "json", "stat"):
+            # v2: msh/{region}/{subregion}/{version}/{type}/{channel}/{node}
+            info["region"] = parts[1]
+            info["subregion"] = parts[2]
+            info["version"] = parts[3]
+            info["msg_type"] = parts[4]
+            info["channel"] = parts[5]
+            info["node_id"] = parts[6]
+        elif len(parts) >= 5 and parts[3] in ("e", "json", "stat"):
+            # v1: msh/{region}/{channel}/{type}/{node}
+            info["region"] = parts[1] if parts[1] in self.REGIONS else parts[1]
             info["channel"] = parts[2]
-        if len(parts) >= 4:
-            info["msg_type"] = parts[3]  # json, e, stat, etc.
-        if len(parts) >= 5:
+            info["msg_type"] = parts[3]
             info["node_id"] = parts[4]
+        else:
+            # Best-effort: just extract what we can from positional parts
+            if len(parts) >= 2:
+                info["region"] = parts[1]
+            if len(parts) >= 3:
+                info["channel"] = parts[2]
+            if len(parts) >= 4:
+                info["msg_type"] = parts[3]
+            if len(parts) >= 5:
+                info["node_id"] = parts[4]
 
         return info
 
@@ -1246,10 +1303,15 @@ class MQTTMeshtasticClient(CallbackMixin):
         rssi = decoded.get("rx_rssi")
         hop_limit = decoded.get("hop_limit", 3)
         hop_count = max(0, 3 - hop_limit)
-        channel = decoded.get("channel", 0)
+
+        # The 'channel' field in MeshPacket is the XOR hash (0-255), not a
+        # display index.  Use the channel NAME from the topic when available
+        # and look up the corresponding index from the configured channels list.
+        channel = self._channel_name_to_index(topic_info.get("channel", ""))
 
         meta = {
             "sender_id": sender_id, "msg_id": msg_id, "channel": channel,
+            "channel_name": topic_info.get("channel", ""),
             "snr": snr, "rssi": rssi, "hop_count": hop_count,
             "recipient_id": str(decoded.get("to", "")),
         }
