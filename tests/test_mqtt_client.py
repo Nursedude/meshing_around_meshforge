@@ -716,6 +716,143 @@ class TestMQTTSendMessageValidation(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestMQTTEncryptedDownlink(unittest.TestCase):
+    """Test that send_message builds a valid ServiceEnvelope for LoRa downlink."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.config.mqtt.enabled = True
+        self.config.mqtt.node_id = "!a2e95ba4"
+        self.config.mqtt.broker = "localhost"
+        self.config.mqtt.channel = "meshforge"
+        self.config.mqtt.channels = "*"  # wildcard so _resolve_channel_name falls back to `channel`
+        self.config.mqtt.topic_root = "msh/US"
+        # 256-bit (32-byte) base64-encoded PSK
+        self.config.mqtt.encryption_key = (
+            "SlVxOEZEZWhqencwR0NCOWlWdGJkSTVZdWY5aUIwblY="
+        )
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_build_encrypted_envelope_produces_valid_service_envelope(self, mock_mqtt):
+        """_build_encrypted_envelope should produce bytes parseable as ServiceEnvelope."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        client = MQTTMeshtasticClient(self.config)
+        envelope_bytes = client._build_encrypted_envelope(
+            text="Hello, mesh!",
+            channel_name="meshforge",
+            destination="^all",
+        )
+        self.assertIsNotNone(envelope_bytes)
+        self.assertIsInstance(envelope_bytes, bytes)
+
+        envelope = mqtt_pb2.ServiceEnvelope()
+        envelope.ParseFromString(envelope_bytes)
+
+        self.assertEqual(envelope.channel_id, "meshforge")
+        self.assertEqual(envelope.gateway_id, "!a2e95ba4")
+        self.assertTrue(envelope.HasField("packet"))
+        self.assertEqual(getattr(envelope.packet, "from"), 0xA2E95BA4)
+        self.assertEqual(envelope.packet.to, 0xFFFFFFFF)  # broadcast
+        self.assertGreater(len(envelope.packet.encrypted), 0)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_encrypted_envelope_roundtrips_through_processor(self, mock_mqtt):
+        """Built envelope should decrypt back to the original text via MeshPacketProcessor."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+        from meshing_around_clients.core.mesh_crypto import MeshPacketProcessor
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        client = MQTTMeshtasticClient(self.config)
+        text = "roundtrip test message"
+        envelope_bytes = client._build_encrypted_envelope(
+            text=text, channel_name="meshforge", destination="^all"
+        )
+        self.assertIsNotNone(envelope_bytes)
+
+        processor = MeshPacketProcessor(
+            encryption_key=self.config.mqtt.encryption_key
+        )
+        result = processor.process_encrypted_packet(envelope_bytes)
+
+        self.assertTrue(result.success, f"Decode failed: {result.error}")
+        self.assertEqual(result.portnum, 1)  # TEXT_MESSAGE_APP
+        self.assertEqual(result.portnum_name, "TEXT_MESSAGE_APP")
+        self.assertEqual(result.sender, 0xA2E95BA4)
+        self.assertEqual(result.destination, 0xFFFFFFFF)
+        self.assertIsNotNone(result.decoded)
+        self.assertEqual(result.decoded["text"], text)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_build_envelope_rejects_bad_node_id(self, mock_mqtt):
+        """_build_encrypted_envelope should return None if node_id is not !hex format."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        self.config.mqtt.node_id = "Borg server"  # display name, not !hex
+        client = MQTTMeshtasticClient(self.config)
+        envelope_bytes = client._build_encrypted_envelope(
+            text="hi", channel_name="meshforge", destination="^all"
+        )
+        self.assertIsNone(envelope_bytes)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_send_message_publishes_to_encrypted_topic(self, mock_mqtt):
+        """send_message should publish to /e/ (encrypted) topic, not /json/."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        client = MQTTMeshtasticClient(self.config)
+        client._connected = True
+        client._client = MagicMock()
+
+        result = client.send_message("hello")
+        self.assertTrue(result)
+
+        # Find the publish call
+        publish_calls = client._client.publish.call_args_list
+        self.assertEqual(len(publish_calls), 1)
+        topic = publish_calls[0][0][0]
+        payload = publish_calls[0][0][1]
+
+        self.assertIn("/e/", topic)
+        self.assertNotIn("/json/", topic)
+        self.assertEqual(topic, "msh/US/meshforge/e/!a2e95ba4")
+        self.assertIsInstance(payload, bytes)
+
+    def test_parse_destination_broadcast(self):
+        """_parse_destination should return 0xFFFFFFFF for broadcast markers."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        with patch("meshing_around_clients.core.mqtt_client.mqtt"):
+            client = MQTTMeshtasticClient(self.config)
+            self.assertEqual(client._parse_destination("^all"), 0xFFFFFFFF)
+            self.assertEqual(client._parse_destination(None), 0xFFFFFFFF)
+            self.assertEqual(client._parse_destination(0), 0xFFFFFFFF)
+            self.assertEqual(client._parse_destination("0"), 0xFFFFFFFF)
+
+    def test_parse_destination_hex_id(self):
+        """_parse_destination should parse !hex node IDs."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        with patch("meshing_around_clients.core.mqtt_client.mqtt"):
+            client = MQTTMeshtasticClient(self.config)
+            self.assertEqual(client._parse_destination("!a2e95ba4"), 0xA2E95BA4)
+            self.assertEqual(client._parse_destination("!12345678"), 0x12345678)
+
+
 @unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
 @patch("meshing_around_clients.core.mqtt_client.mqtt")
 class TestMQTTStatsLockConsistency(unittest.TestCase):

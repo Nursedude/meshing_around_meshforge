@@ -1363,8 +1363,115 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._dispatch_alert_actions(alert)
                 break
 
+    def _parse_destination(self, destination: Any) -> int:
+        """Parse a destination (^all / !hex / int / str) into a uint32 node number.
+
+        Returns 0xFFFFFFFF for broadcast.
+        """
+        if destination in ("^all", None, 0, "0"):
+            return 0xFFFFFFFF
+        if isinstance(destination, int):
+            return destination & 0xFFFFFFFF
+        if isinstance(destination, str):
+            if destination.startswith("!"):
+                return int(destination[1:], 16) & 0xFFFFFFFF
+            return int(destination) & 0xFFFFFFFF
+        return 0xFFFFFFFF
+
+    def _build_encrypted_envelope(
+        self,
+        text: str,
+        channel_name: str,
+        destination: Any = "^all",
+    ) -> Optional[bytes]:
+        """Build a ServiceEnvelope protobuf containing an encrypted text packet.
+
+        This is the format that Meshtastic radios with MQTT downlink enabled
+        subscribe to.  When published to `msh/{root}/{channel}/e/{node_id}`,
+        the radio decrypts the inner Data payload using the channel PSK and
+        re-transmits the message over LoRa.
+
+        Returns serialized envelope bytes, or None if the envelope cannot be
+        built (missing deps, invalid node_id, encryption failure).
+        """
+        if not PROTOBUF_AVAILABLE or not CRYPTO_AVAILABLE:
+            return None
+
+        try:
+            from meshtastic.protobuf import mesh_pb2, mqtt_pb2, portnums_pb2
+        except ImportError:
+            logger.debug("meshtastic protobuf modules not available")
+            return None
+
+        # Parse sender node ID from config (must be !hex format)
+        sender_str = self.mqtt_config.node_id or ""
+        if not sender_str.startswith("!"):
+            logger.warning(
+                "Cannot build encrypted envelope: node_id must be Meshtastic hex format (!12345678), got %r",
+                sender_str,
+            )
+            return None
+        try:
+            sender_node = int(sender_str[1:], 16)
+        except ValueError:
+            logger.warning("Cannot build encrypted envelope: invalid node_id %r", sender_str)
+            return None
+
+        if not self._packet_processor:
+            logger.warning("Cannot build encrypted envelope: MeshPacketProcessor not initialized")
+            return None
+
+        # Generate a random packet ID (uint32, non-zero)
+        packet_id = random.randint(1, 0xFFFFFFFF)
+
+        # Build Data payload (portnum + text)
+        data = mesh_pb2.Data()
+        data.portnum = portnums_pb2.TEXT_MESSAGE_APP
+        data.payload = text.encode("utf-8")
+        data_bytes = data.SerializeToString()
+
+        # Encrypt Data with AES-CTR using channel PSK (from mqtt_config.encryption_key)
+        encrypted = self._packet_processor.crypto.encrypt(data_bytes, packet_id, sender_node)
+        if not encrypted:
+            logger.warning("Encryption failed — check encryption_key in config")
+            return None
+
+        # Parse destination into uint32
+        try:
+            dest_node = self._parse_destination(destination)
+        except (ValueError, AttributeError) as e:
+            logger.warning("Invalid destination %r: %s", destination, e)
+            return None
+
+        # Build MeshPacket
+        packet = mesh_pb2.MeshPacket()
+        setattr(packet, "from", sender_node)
+        packet.to = dest_node
+        packet.id = packet_id
+        packet.channel = 0  # Channel index is device-local; ServiceEnvelope.channel_id routes on MQTT
+        packet.hop_limit = 3
+        packet.want_ack = False
+        packet.encrypted = encrypted
+
+        # Wrap in ServiceEnvelope
+        envelope = mqtt_pb2.ServiceEnvelope()
+        envelope.packet.CopyFrom(packet)
+        envelope.channel_id = channel_name
+        envelope.gateway_id = sender_str
+
+        return envelope.SerializeToString()
+
     def send_message(self, text: str, destination: str = "^all", channel: int = 0) -> bool:
-        """Send a message via MQTT with byte-length validation."""
+        """Send a message via MQTT.
+
+        Publishes to the encrypted downlink topic format that Meshtastic
+        radios subscribe to — `msh/{root}/{channel}/e/{node_id}`.  Radios
+        with MQTT downlink enabled decrypt and re-transmit over LoRa.
+
+        Falls back to the legacy JSON format if protobuf or crypto deps
+        are unavailable (visible to other MQTT clients but won't reach
+        radios).
+        """
         if not self.is_connected or not self._client:
             return False
 
@@ -1386,19 +1493,35 @@ class MQTTMeshtasticClient(CallbackMixin):
                 return False
 
         try:
-            # Build JSON message
-            message = {
-                "from": self.mqtt_config.node_id,
-                "to": destination,
-                "channel": channel,
-                "type": "text",
-                "payload": {"text": text},
-            }
-
-            # Publish to appropriate topic using the channel parameter
             channel_name = self._resolve_channel_name(channel)
-            topic = f"{self.mqtt_config.topic_root}/{channel_name}/json/{self.mqtt_config.node_id}"
-            self._client.publish(topic, json.dumps(message))
+
+            # Prefer encrypted downlink (reaches radios via MQTT subscription)
+            envelope_bytes = self._build_encrypted_envelope(text, channel_name, destination)
+
+            if envelope_bytes:
+                topic = f"{self.mqtt_config.topic_root}/{channel_name}/e/{self.mqtt_config.node_id}"
+                self._client.publish(topic, envelope_bytes)
+                logger.info(
+                    "Sent encrypted downlink: %s (%d bytes payload)",
+                    topic,
+                    len(envelope_bytes),
+                )
+            else:
+                # Legacy JSON fallback — visible to other MQTT clients but
+                # won't be transmitted over LoRa by radios.
+                message = {
+                    "from": self.mqtt_config.node_id,
+                    "to": destination,
+                    "channel": channel,
+                    "type": "text",
+                    "payload": {"text": text},
+                }
+                topic = f"{self.mqtt_config.topic_root}/{channel_name}/json/{self.mqtt_config.node_id}"
+                self._client.publish(topic, json.dumps(message))
+                logger.warning(
+                    "Sent JSON fallback to %s — encrypted envelope build failed, message will NOT reach LoRa radios",
+                    topic,
+                )
 
             # Log outgoing message
             out_msg = Message(
