@@ -1952,7 +1952,7 @@ def configure_wifi_radio(config: ConfigParser) -> None:
             "Verify with:\n"
             f"  mosquitto_sub -t '{topic_root}/#' -v -C 1\n\n"
             "If traffic appears, the link is working.",
-            title="WiFi Radio — Config Written",
+            title="WiFi Radio - Config Written",
         )
 
     except (OSError, ConnectionError, ValueError, RuntimeError) as e:
