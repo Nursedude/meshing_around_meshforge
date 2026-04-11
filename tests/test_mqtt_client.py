@@ -829,7 +829,8 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
 
         self.assertIn("/e/", topic)
         self.assertNotIn("/json/", topic)
-        self.assertEqual(topic, "msh/US/meshforge/e/!a2e95ba4")
+        # Meshtastic v2 topic format: {root}/2/e/{channel}/{node_id}
+        self.assertEqual(topic, "msh/US/2/e/meshforge/!a2e95ba4")
         self.assertIsInstance(payload, bytes)
 
     def test_parse_destination_broadcast(self):

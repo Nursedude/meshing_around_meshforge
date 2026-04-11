@@ -1499,7 +1499,12 @@ class MQTTMeshtasticClient(CallbackMixin):
             envelope_bytes = self._build_encrypted_envelope(text, channel_name, destination)
 
             if envelope_bytes:
-                topic = f"{self.mqtt_config.topic_root}/{channel_name}/e/{self.mqtt_config.node_id}"
+                # Meshtastic MQTT protocol v2 topic format:
+                # {root}/2/e/{channel_name}/{node_id}
+                # The "2" is the protocol version, "e" means encrypted.
+                # Radios with downlink_enabled=True on the channel subscribe
+                # to {root}/2/e/{channel_name}/# and re-transmit over LoRa.
+                topic = f"{self.mqtt_config.topic_root}/2/e/{channel_name}/{self.mqtt_config.node_id}"
                 self._client.publish(topic, envelope_bytes)
                 logger.info(
                     "Sent encrypted downlink: %s (%d bytes payload)",
@@ -1516,7 +1521,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                     "type": "text",
                     "payload": {"text": text},
                 }
-                topic = f"{self.mqtt_config.topic_root}/{channel_name}/json/{self.mqtt_config.node_id}"
+                topic = f"{self.mqtt_config.topic_root}/2/json/{channel_name}/{self.mqtt_config.node_id}"
                 self._client.publish(topic, json.dumps(message))
                 logger.warning(
                     "Sent JSON fallback to %s — encrypted envelope build failed, message will NOT reach LoRa radios",
