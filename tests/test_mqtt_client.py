@@ -853,6 +853,34 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
             self.assertEqual(client._parse_destination("!a2e95ba4"), 0xA2E95BA4)
             self.assertEqual(client._parse_destination("!12345678"), 0x12345678)
 
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_envelope_includes_channel_hash(self, mock_mqtt):
+        """MeshPacket.channel should contain the XOR hash of name+PSK, not 0.
+
+        Meshtastic firmware uses this hash to identify which channel a
+        packet belongs to.  Without it, receivers can't decrypt.
+        """
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2
+            from meshtastic.util import generate_channel_hash
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        client = MQTTMeshtasticClient(self.config)
+        envelope_bytes = client._build_encrypted_envelope(
+            text="test", channel_name="meshforge", destination="^all"
+        )
+        self.assertIsNotNone(envelope_bytes)
+
+        envelope = mqtt_pb2.ServiceEnvelope()
+        envelope.ParseFromString(envelope_bytes)
+
+        expected_hash = generate_channel_hash("meshforge", self.config.mqtt.encryption_key)
+        self.assertEqual(envelope.packet.channel, expected_hash)
+        self.assertNotEqual(envelope.packet.channel, 0)  # not the bug we fixed
+
 
 @unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
 @patch("meshing_around_clients.core.mqtt_client.mqtt")

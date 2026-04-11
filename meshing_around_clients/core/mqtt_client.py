@@ -1399,6 +1399,7 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         try:
             from meshtastic.protobuf import mesh_pb2, mqtt_pb2, portnums_pb2
+            from meshtastic.util import generate_channel_hash
         except ImportError:
             logger.debug("meshtastic protobuf modules not available")
             return None
@@ -1443,14 +1444,26 @@ class MQTTMeshtasticClient(CallbackMixin):
             logger.warning("Invalid destination %r: %s", destination, e)
             return None
 
+        # Compute the Meshtastic channel hash (XOR-fold of name + PSK).
+        # The firmware uses this to identify which channel a packet belongs
+        # to when it arrives.  Without it, receivers can't match the packet
+        # to the right channel for decryption.
+        try:
+            ch_hash = generate_channel_hash(channel_name, self.mqtt_config.encryption_key)
+        except (ValueError, TypeError, AttributeError) as e:
+            logger.warning("Could not compute channel hash for %r: %s", channel_name, e)
+            ch_hash = 0
+
         # Build MeshPacket
         packet = mesh_pb2.MeshPacket()
         setattr(packet, "from", sender_node)
         packet.to = dest_node
         packet.id = packet_id
-        packet.channel = 0  # Channel index is device-local; ServiceEnvelope.channel_id routes on MQTT
+        packet.channel = ch_hash  # XOR hash of channel name + PSK
         packet.hop_limit = 3
+        packet.hop_start = 3
         packet.want_ack = False
+        packet.priority = mesh_pb2.MeshPacket.Priority.RELIABLE
         packet.encrypted = encrypted
 
         # Wrap in ServiceEnvelope
