@@ -36,16 +36,25 @@ except BaseException as e:
         raise
 
 # Try to import meshtastic protobuf definitions
+mqtt_pb2 = None
 try:
     from meshtastic.protobuf import mesh_pb2, telemetry_pb2
 
     PROTOBUF_AVAILABLE = True
+    try:
+        from meshtastic.protobuf import mqtt_pb2  # ServiceEnvelope lives here
+    except ImportError:
+        mqtt_pb2 = None
 except ImportError:
     try:
         # Alternative import path for older versions
         from meshtastic import mesh_pb2, telemetry_pb2
 
         PROTOBUF_AVAILABLE = True
+        try:
+            from meshtastic import mqtt_pb2
+        except ImportError:
+            mqtt_pb2 = None
     except ImportError:
         PROTOBUF_AVAILABLE = False
 
@@ -624,24 +633,31 @@ class MeshPacketProcessor:
 
         result.payload = decrypted
 
-        # Decode protobuf
+        # Decode protobuf.  After decryption the bytes are a Data payload
+        # (from inside MeshPacket.encrypted), NOT a full MeshPacket.  Try
+        # Data decode first — the MeshPacket path is kept as a fallback for
+        # legacy packets where the inner bytes might be a full MeshPacket.
         if self.decoder.is_available():
-            decoded = self.decoder.decode_mesh_packet(decrypted)
-            if decoded and "error" not in decoded:
+            decoded = self._try_decode_data(decrypted)
+            if decoded and decoded.get("portnum"):
                 result.decoded = decoded
                 result.portnum = decoded.get("portnum", 0)
                 result.portnum_name = decoded.get("portnum_name", "")
                 result.success = True
             else:
-                # Try decoding as Data directly
-                decoded = self._try_decode_data(decrypted)
-                if decoded:
-                    result.decoded = decoded
-                    result.portnum = decoded.get("portnum", 0)
-                    result.portnum_name = decoded.get("portnum_name", "")
+                # Fallback: try as a full MeshPacket (legacy path)
+                mp_decoded = self.decoder.decode_mesh_packet(decrypted)
+                if mp_decoded and "error" not in mp_decoded and mp_decoded.get("portnum"):
+                    result.decoded = mp_decoded
+                    result.portnum = mp_decoded.get("portnum", 0)
+                    result.portnum_name = mp_decoded.get("portnum_name", "")
                     result.success = True
                 else:
-                    result.error = decoded.get("error", "Decode failed") if decoded else "Unknown decode error"
+                    # Neither path produced a meaningful decode
+                    err = "Decode failed"
+                    if mp_decoded and "error" in mp_decoded:
+                        err = mp_decoded["error"]
+                    result.error = err
         else:
             result.error = "Protobuf library not available"
 
@@ -649,11 +665,11 @@ class MeshPacketProcessor:
 
     def _parse_service_envelope(self, data: bytes) -> Optional[Dict[str, Any]]:
         """Parse MQTT ServiceEnvelope if protobuf is available."""
-        if not PROTOBUF_AVAILABLE:
+        if not PROTOBUF_AVAILABLE or mqtt_pb2 is None:
             return None
 
         try:
-            envelope = mesh_pb2.ServiceEnvelope()
+            envelope = mqtt_pb2.ServiceEnvelope()
             envelope.ParseFromString(data)
 
             if envelope.HasField("packet"):
