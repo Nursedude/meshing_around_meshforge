@@ -1729,6 +1729,218 @@ def standalone_install(config: ConfigParser) -> None:
     log("Standalone install complete — ready to run", "OK")
 
 
+def _detect_routable_ip(target_ip: str) -> str:
+    """Detect this machine's IP on the network route toward *target_ip*.
+
+    Opens a UDP socket toward the target (no data sent) to let the OS
+    pick the right source address.  Returns the IP string, or falls back
+    to ``127.0.0.1`` if detection fails.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect((target_ip, 1))
+            return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
+
+def configure_wifi_radio(config: ConfigParser) -> None:
+    """Configure a WiFi Meshtastic device's native MQTT to uplink to this Pi.
+
+    Connects to the device via TCP (port 4403), reads its current MQTT
+    config, lets the user set the broker address (auto-detected), topic
+    root, and encryption, then writes the config to the device.
+    """
+    from meshing_around_clients.setup.whiptail import inputbox, menu as wt_menu, msgbox
+
+    log("Configure WiFi Radio MQTT Link", "INFO")
+    log("This connects to a WiFi Meshtastic device and configures its", "INFO")
+    log("native MQTT to uplink mesh traffic to this Pi's Mosquitto broker.", "INFO")
+
+    # --- Step 1: Device IP ---
+    device_ip = inputbox(
+        "WiFi Meshtastic device IP address\n"
+        "(must be reachable from this machine, TCP port 4403)",
+        title="WiFi Radio — Device IP",
+        default="",
+    )
+    if not device_ip:
+        log("Cancelled — no device IP entered", "WARN")
+        return
+
+    host, tcp_port = (
+        device_ip.rsplit(":", 1) if ":" in device_ip else (device_ip, "4403")
+    )
+
+    # --- Step 2: Connectivity check ---
+    log(f"Checking TCP connectivity to {host}:{tcp_port}...", "INFO")
+    try:
+        with socket.create_connection((host, int(tcp_port)), timeout=5):
+            log(f"TCP connection to {host}:{tcp_port} OK", "OK")
+    except (OSError, socket.timeout) as e:
+        log(f"Cannot reach {host}:{tcp_port}: {e}", "ERROR")
+        msgbox(
+            f"Cannot connect to {host}:{tcp_port}\n\n"
+            "Check that:\n"
+            "  - The device is powered on and connected to WiFi\n"
+            "  - TCP port 4403 is open (Meshtastic default)\n"
+            "  - Network routing allows this machine to reach the device",
+            title="Connection Failed",
+        )
+        return
+
+    # --- Step 3: Connect via meshtastic TCP ---
+    log(f"Connecting to Meshtastic device at {host}:{tcp_port}...", "INFO")
+    try:
+        from meshtastic.tcp_interface import TCPInterface
+    except ImportError:
+        log("meshtastic library not installed — run: pip install meshtastic", "ERROR")
+        msgbox(
+            "The meshtastic Python library is required.\n"
+            "Install with: pip install meshtastic",
+            title="Missing Dependency",
+        )
+        return
+
+    iface = None
+    try:
+        iface = TCPInterface(hostname=host, portNumber=int(tcp_port), noNodes=False)
+        node = iface.localNode
+
+        # Read device info
+        dev_name = "unknown"
+        firmware = "unknown"
+        if hasattr(node, "nodeInfo") and node.nodeInfo:
+            user = node.nodeInfo.get("user", {})
+            dev_name = user.get("longName", user.get("shortName", "unknown"))
+            firmware = node.nodeInfo.get("firmwareVersion", "unknown")
+        elif hasattr(iface, "myInfo") and iface.myInfo:
+            firmware = getattr(iface.myInfo, "firmware_version", "unknown")
+
+        log(f"Connected: {dev_name} (firmware {firmware})", "OK")
+
+        # Read current MQTT config
+        mqtt_cfg = node.moduleConfig.mqtt
+        current_broker = mqtt_cfg.address or "(default: mqtt.meshtastic.org)"
+        current_enabled = mqtt_cfg.enabled
+        current_root = mqtt_cfg.root or "msh"
+        current_encryption = mqtt_cfg.encryption_enabled
+
+        log(f"Current MQTT: enabled={current_enabled}, broker={current_broker}, "
+            f"root={current_root}, encrypted={current_encryption}", "INFO")
+
+        # --- Step 4: Configure new MQTT settings ---
+        local_ip = _detect_routable_ip(host)
+        if local_ip == "127.0.0.1":
+            log("Could not auto-detect routable IP — using localhost", "WARN")
+
+        # Check if Mosquitto is listening on a routable interface
+        try:
+            with socket.create_connection((local_ip, 1883), timeout=2):
+                pass  # Reachable
+        except (OSError, socket.timeout):
+            log(f"Mosquitto is not reachable on {local_ip}:1883", "WARN")
+            msgbox(
+                f"Mosquitto is not listening on {local_ip}:1883\n\n"
+                "The WiFi radio needs to reach this broker.\n"
+                "Create /etc/mosquitto/conf.d/listener.conf:\n\n"
+                "  listener 1883 0.0.0.0\n"
+                "  allow_anonymous true\n\n"
+                "Then: sudo systemctl restart mosquitto",
+                title="Mosquitto Not Routable",
+            )
+
+        broker_addr = inputbox(
+            f"MQTT broker address for the radio\n"
+            f"(auto-detected: this Pi is {local_ip})",
+            title="WiFi Radio — Broker",
+            default=f"{local_ip}:1883",
+        )
+        if not broker_addr:
+            log("Cancelled", "WARN")
+            return
+
+        topic_root = inputbox(
+            "MQTT topic root",
+            title="WiFi Radio — Topic",
+            default=config.get("mqtt", "topic_root", fallback="msh/US"),
+        )
+        if not topic_root:
+            topic_root = "msh/US"
+
+        encrypt_items = [
+            ("on", "Encrypt packets on MQTT (recommended)"),
+            ("off", "No encryption on MQTT"),
+        ]
+        encrypt_choice = wt_menu("MQTT Encryption", encrypt_items, default="on")
+        encrypt_on = encrypt_choice != "off"
+
+        # --- Step 5: Confirm and write ---
+        summary = (
+            f"Device: {dev_name}\n"
+            f"Broker: {broker_addr}\n"
+            f"Topic root: {topic_root}\n"
+            f"Encryption: {'on' if encrypt_on else 'off'}\n"
+            f"Uplink: enabled (radio → broker)\n"
+            f"Downlink: enabled (broker → radio)\n\n"
+            f"Write this MQTT config to the device?"
+        )
+        confirm_items = [
+            ("yes", "Write config to device"),
+            ("no", "Cancel"),
+        ]
+        confirm = wt_menu(summary, confirm_items, default="yes")
+        if confirm != "yes":
+            log("Cancelled by user", "INFO")
+            return
+
+        # Parse broker address
+        if ":" in broker_addr:
+            parts = broker_addr.rsplit(":", 1)
+            try:
+                int(parts[1])
+                # Valid port — address format "host:port" is what the device expects
+            except ValueError:
+                pass  # Not a port, use as-is
+
+        # Write MQTT config
+        log("Writing MQTT config to device...", "INFO")
+        mqtt_cfg.enabled = True
+        mqtt_cfg.address = broker_addr
+        mqtt_cfg.username = ""
+        mqtt_cfg.password = ""
+        mqtt_cfg.root = topic_root
+        mqtt_cfg.encryption_enabled = encrypt_on
+        mqtt_cfg.json_enabled = False
+
+        node.writeConfig("mqtt")
+        log("MQTT config written to device", "OK")
+
+        # --- Step 6: Verify ---
+        log("Waiting for traffic on local Mosquitto (up to 30s)...", "INFO")
+        msgbox(
+            "Config written. The device will reconnect to MQTT.\n\n"
+            "Verify with:\n"
+            f"  mosquitto_sub -t '{topic_root}/#' -v -C 1\n\n"
+            "If traffic appears, the link is working.",
+            title="WiFi Radio — Config Written",
+        )
+
+    except (OSError, ConnectionError, ValueError, RuntimeError) as e:
+        log(f"WiFi radio configuration failed: {e}", "ERROR")
+        msgbox(f"Configuration failed:\n{e}", title="Error")
+    except Exception as e:
+        log(f"Unexpected error: {e}", "ERROR")
+        import traceback
+        traceback.print_exc()
+    finally:
+        if iface is not None:
+            try:
+                iface.close()
+            except (OSError, RuntimeError):
+                pass
+
+
 def launcher_menu(config: ConfigParser) -> bool:
     """Interactive launcher menu - shown when no mode flag is passed.
 
@@ -1741,6 +1953,7 @@ def launcher_menu(config: ConfigParser) -> bool:
         ("tui", "TUI Client (Terminal UI)"),
         ("mqtt", "MQTT Monitor"),
         ("mqtt-local", "MQTT Local Broker (no auth)"),
+        ("wifi-radio", "Configure WiFi Radio Link"),
         ("demo", "Demo Mode"),
         ("profile", "Switch Regional Profile"),
         ("ini", "Edit mesh_client.ini"),
@@ -1821,6 +2034,9 @@ def launcher_menu(config: ConfigParser) -> bool:
             channel = inputbox("Channel", default="meshforge")
             if channel:
                 config.set("mqtt", "channel", channel)
+        elif choice == "wifi-radio":
+            configure_wifi_radio(config)
+            continue
         elif choice == "demo":
             config.set("advanced", "demo_mode", "true")
             config.set("features", "mode", "tui")
