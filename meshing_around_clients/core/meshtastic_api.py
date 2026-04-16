@@ -354,6 +354,12 @@ def _call_upstream_cmd(command: str, lat: float = 0.0, lon: float = 0.0) -> str:
         return ""
 
 
+_MAX_FETCH_BYTES = 1_048_576  # 1 MiB cap — guards against OOM on Pi Zero when
+#                                a misconfigured or malicious data-source URL
+#                                returns a large response.  Mesh payloads max
+#                                out at 228 bytes; summaries rarely exceed 10 KB.
+
+
 def _fetch_url(url: str, timeout: int = 10) -> str:
     """Fetch URL content with stdlib only. Returns response text or empty string."""
     from urllib.error import URLError
@@ -364,7 +370,12 @@ def _fetch_url(url: str, timeout: int = 10) -> str:
             url, headers={"User-Agent": "MeshForge/0.5", "Accept": "application/json,application/xml,text/plain"}
         )
         with urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="replace")
+            # Cap at _MAX_FETCH_BYTES + 1 so we can detect overflow and log it.
+            raw = resp.read(_MAX_FETCH_BYTES + 1)
+            if len(raw) > _MAX_FETCH_BYTES:
+                logger.warning("Fetch %s truncated at %d bytes", url[:60], _MAX_FETCH_BYTES)
+                raw = raw[:_MAX_FETCH_BYTES]
+            return raw.decode("utf-8", errors="replace")
     except (URLError, OSError, ValueError) as e:
         logger.warning("Fetch failed (%s): %s", url[:60], e)
         return ""
@@ -541,7 +552,11 @@ def _fetch_data_source(source) -> str:
             headers={"User-Agent": "MeshForge/0.5", "Accept": "application/geo+json,application/json,application/xml"},
         )
         with urlopen(req, timeout=10) as resp:
-            data = resp.read().decode("utf-8", errors="replace")
+            raw = resp.read(_MAX_FETCH_BYTES + 1)
+            if len(raw) > _MAX_FETCH_BYTES:
+                logger.warning("Data source %s truncated at %d bytes", source.name, _MAX_FETCH_BYTES)
+                raw = raw[:_MAX_FETCH_BYTES]
+            data = raw.decode("utf-8", errors="replace")
 
         # Parse based on source type
         if source.command == "weather":
@@ -1296,6 +1311,13 @@ class MeshtasticAPI(CallbackMixin):
             text_lower = text.lower()
             for keyword in self.config.alerts.emergency_keywords:
                 if keyword.lower() in text_lower:
+                    # Suppress repeats from the same sender within the
+                    # configured cooldown window.  Without this check, a
+                    # sender hammering "MAYDAY MAYDAY MAYDAY" on-channel
+                    # would fire one Alert per message — same suppression
+                    # the battery/congestion paths already use below.
+                    if self._is_alert_cooled_down(sender_id, "emergency"):
+                        break
                     alert = Alert(
                         id=str(uuid.uuid4()),
                         alert_type=AlertType.EMERGENCY,
@@ -1344,6 +1366,17 @@ class MeshtasticAPI(CallbackMixin):
             else:
                 response = self._get_command_response(text_stripped)
                 if response:
+                    # Mesh payloads max out at MAX_MESSAGE_BYTES.  Multi-line
+                    # commands (lheard, leaderboard, help) routinely produce
+                    # longer text that send_message would otherwise reject
+                    # with only a WARNING log — leaving the sender staring at
+                    # silence.  Truncate with an ellipsis so the user sees
+                    # *something* and knows the output was clipped.
+                    encoded = response.encode("utf-8")
+                    if len(encoded) > MAX_MESSAGE_BYTES:
+                        # Reserve 3 bytes for the ellipsis; decode with
+                        # errors="ignore" so we don't split a multibyte char.
+                        response = encoded[: MAX_MESSAGE_BYTES - 3].decode("utf-8", errors="ignore") + "..."
                     self.send_message(response, message.sender_id, message.channel)
 
         return True

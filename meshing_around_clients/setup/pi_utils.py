@@ -11,6 +11,7 @@ Provides:
 Extracted from configure_bot.py for reusability across MeshForge.
 """
 
+import glob
 import os
 import re
 import subprocess
@@ -170,20 +171,17 @@ def get_serial_ports() -> List[SerialPortInfo]:
     ports = []
     seen = set()
 
-    # Common USB serial ports
+    # Common USB serial ports.  Use glob.glob() — NOT `subprocess.run(["ls",
+    # "/dev/ttyUSB*"])`, which was broken: argv entries are not shell-expanded,
+    # so ls received the literal string "/dev/ttyUSB*" and every lookup exited
+    # with "No such file or directory", making USB device detection always
+    # return zero results even when the port existed.
     usb_patterns = ["/dev/ttyUSB*", "/dev/ttyACM*"]
     for pattern in usb_patterns:
-        try:
-            result = subprocess.run(["ls", pattern], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0 and result.stdout.strip():
-                for port in result.stdout.strip().split("\n"):
-                    if port and port not in seen:
-                        seen.add(port)
-                        ports.append(
-                            SerialPortInfo(port=port, is_usb=True, is_pi_native=False, description="USB Serial")
-                        )
-        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
-            pass
+        for port in sorted(glob.glob(pattern)):
+            if port not in seen:
+                seen.add(port)
+                ports.append(SerialPortInfo(port=port, is_usb=True, is_pi_native=False, description="USB Serial"))
 
     # Pi-specific serial ports
     pi_ports = [
