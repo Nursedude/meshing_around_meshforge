@@ -1,0 +1,30 @@
+# Pinned dependency versions for reproducible deployments.
+# Generated from requirements.txt on Python 3.13 / Raspberry Pi OS.
+# Regenerate: pip install -r requirements.txt && pip freeze --all | grep -F '==' > requirements.lock
+# CI compares against this file to detect supply-chain drift.
+#
+# Direct dependencies are marked with # (direct)
+bleak==2.1.1
+certifi==2026.1.4
+cffi==2.0.0
+charset-normalizer==3.4.4
+cryptography==43.0.3                  # (direct)
+dbus-fast==3.1.2
+idna==3.11
+markdown-it-py==4.0.0
+mdurl==0.1.2
+meshtastic==2.7.8                     # (direct)
+packaging==24.2
+paho-mqtt==2.1.0                      # (direct)
+protobuf==6.33.2
+pycparser==3.0
+Pygments==2.19.2
+pyOpenSSL==25.0.0                     # (direct)
+Pypubsub==4.0.7                       # (direct)
+pyserial==3.5
+PyYAML==6.0.3
+requests==2.32.5
+rich==14.2.0                          # (direct)
+tabulate==0.9.0
+typing_extensions==4.15.0
+urllib3==2.6.3
