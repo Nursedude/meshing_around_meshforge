@@ -37,7 +37,7 @@ import sys
 import time
 from configparser import ConfigParser, Error as ConfigParserError
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # =============================================================================
@@ -1028,7 +1028,7 @@ def import_upstream_config(source_path: str):
 
     try:
         # Try to use the config_schema module for proper conversion
-        from meshing_around_clients.setup.config_schema import ConfigLoader, UnifiedConfig
+        from meshing_around_clients.setup.config_schema import ConfigLoader
 
         SCHEMA_AVAILABLE = True
     except ImportError:

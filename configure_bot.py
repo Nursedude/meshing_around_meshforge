@@ -29,7 +29,7 @@ import time
 import re
 import configparser
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Any, List, Optional, Tuple
 from getpass import getpass
 
 # Version info
