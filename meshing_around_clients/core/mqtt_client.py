@@ -359,7 +359,15 @@ class MQTTMeshtasticClient(CallbackMixin):
                     port = int(parts[1])
                     broker = parts[0]
                 except ValueError:
-                    pass  # Not a port number, keep as-is
+                    # Not a port number (e.g. IPv6 literal or typo like
+                    # "host:abc") — keep the value as a hostname and fall
+                    # back to the configured port, but surface the typo
+                    # so users don't silently connect to the wrong port.
+                    logger.warning(
+                        "Broker %r contains ':' but the suffix is not a port number; using port %d",
+                        self.mqtt_config.broker,
+                        port,
+                    )
 
             # Connect
             self._client.connect(broker, port, keepalive=60)
