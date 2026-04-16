@@ -11,9 +11,12 @@ This module provides:
 import base64
 import binascii
 import hashlib
+import logging
 import struct
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Try to import cryptography library
 # Use BaseException to catch pyo3_runtime.PanicException from broken Rust backends
@@ -696,9 +699,12 @@ class MeshPacketProcessor:
             # AttributeError: Missing protobuf fields
             # KeyError: Missing expected keys
             pass
-        except Exception:
-            # google.protobuf.message.DecodeError and similar
-            pass
+        except Exception as e:
+            # google.protobuf.message.DecodeError and similar — protobuf is
+            # an optional dep so the exception type cannot be named at
+            # module scope.  Log at DEBUG so operators investigating a
+            # silent drop have a breadcrumb without spamming normal logs.
+            logger.debug("Encrypted packet decode failed: %s", type(e).__name__)
 
         return None
 
@@ -716,8 +722,11 @@ class MeshPacketProcessor:
             # TypeError: Unexpected field types
             # AttributeError: Missing protobuf fields
             return None
-        except Exception:
-            # google.protobuf.message.DecodeError and similar
+        except Exception as e:
+            # google.protobuf.message.DecodeError and similar — protobuf is
+            # an optional dep so the exception type cannot be named at
+            # module scope.
+            logger.debug("Data decode failed: %s", type(e).__name__)
             return None
 
 
