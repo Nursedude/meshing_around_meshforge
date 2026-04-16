@@ -39,6 +39,8 @@ from meshing_around_clients.setup.config_schema import (
     TUIConfig,
     UnifiedConfig,
     WeatherAlertConfig,
+    _coerce_float,
+    _coerce_int,
     _str_to_bool,
     _str_to_int_list,
     _str_to_list,
@@ -449,6 +451,73 @@ class TestConfigLoaderNonexistent(unittest.TestCase):
         self.assertEqual(cfg.config_path, Path("/nonexistent/config.ini"))
         # Should have defaults
         self.assertEqual(len(cfg.interfaces), 1)
+
+
+class TestCoerceHelpers(unittest.TestCase):
+    """_coerce_int / _coerce_float should swallow bad INI values, not crash."""
+
+    def test_coerce_int_parses_valid_string(self):
+        self.assertEqual(_coerce_int("42", 0), 42)
+
+    def test_coerce_int_returns_default_on_garbage(self):
+        self.assertEqual(_coerce_int("abc", 1883), 1883)
+
+    def test_coerce_int_returns_default_on_empty(self):
+        self.assertEqual(_coerce_int("", 300), 300)
+
+    def test_coerce_int_returns_default_on_none(self):
+        self.assertEqual(_coerce_int(None, 60), 60)
+
+    def test_coerce_int_returns_default_on_float_shape(self):
+        self.assertEqual(_coerce_int("3.14", 5), 5)
+
+    def test_coerce_float_parses_valid_string(self):
+        self.assertEqual(_coerce_float("3.14", 0.0), 3.14)
+
+    def test_coerce_float_returns_default_on_garbage(self):
+        self.assertEqual(_coerce_float("not_a_float", 1.0), 1.0)
+
+    def test_coerce_float_returns_default_on_none(self):
+        self.assertEqual(_coerce_float(None, 2.5), 2.5)
+
+
+class TestMalformedIniDoesNotCrash(unittest.TestCase):
+    """Every dataclass loader that takes INI data should tolerate non-numeric
+    values without raising, falling back to the documented defaults."""
+
+    def test_emergency_alert_malformed_channels_fall_back(self):
+        cfg = EmergencyAlertConfig.from_dict(
+            {
+                "alert_channel": "not_a_number",
+                "alert_interface": "",
+                "cooldown_period": "abc",
+            }
+        )
+        self.assertEqual(cfg.alert_channel, 2)
+        self.assertEqual(cfg.alert_interface, 1)
+        self.assertEqual(cfg.cooldown_period, 300)
+
+    def test_sentry_malformed_lat_lon_radius_fall_back(self):
+        cfg = SentryConfig.from_meshforge(
+            {
+                "target_latitude": "nope",
+                "target_longitude": "",
+                "radius_meters": "xyz",
+                "alert_channel": "",
+                "check_interval": "soon",
+                "node_cooldown": "later",
+            }
+        )
+        self.assertEqual(cfg.target_latitude, 0.0)
+        self.assertEqual(cfg.target_longitude, 0.0)
+        self.assertEqual(cfg.radius_meters, 100)
+        self.assertEqual(cfg.channel, 0)
+        self.assertEqual(cfg.check_interval, 60)
+        self.assertEqual(cfg.node_cooldown, 600)
+
+    def test_interface_malformed_baudrate_falls_back(self):
+        cfg = InterfaceConfig.from_dict({"type": "serial", "baudrate": "fast"})
+        self.assertEqual(cfg.baudrate, 115200)
 
 
 if __name__ == "__main__":
