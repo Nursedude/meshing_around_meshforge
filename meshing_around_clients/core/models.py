@@ -1148,6 +1148,16 @@ class MeshNetwork:
             return cls()
         try:
             with open(path, "r") as f:
-                return cls.from_json(f.read())
-        except (OSError, json.JSONDecodeError):
+                raw = f.read()
+            data = json.loads(raw)
+            return cls.from_dict(data)
+        except (OSError, json.JSONDecodeError) as e:
+            # Corrupted state files used to silently produce an empty
+            # MeshNetwork — callers couldn't tell whether the file simply
+            # didn't exist or whether a crash had scrambled their node
+            # database.  Log at WARNING so operators investigating "all
+            # my nodes are gone" see the cause.  `from_json` is bypassed
+            # here so we see the JSONDecodeError in this frame rather
+            # than having it swallowed by from_json's internal handler.
+            logger.warning("State file %s unreadable (%s); starting fresh", path, type(e).__name__)
             return cls()
