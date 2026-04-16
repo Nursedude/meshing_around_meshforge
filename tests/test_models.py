@@ -511,6 +511,28 @@ class TestMeshNetworkPersistence(unittest.TestCase):
         network = MeshNetwork.load_from_file("/nonexistent/path/state.json")
         self.assertEqual(len(network.nodes), 0)
 
+    def test_load_corrupted_file_returns_empty_and_logs_warning(self):
+        """Corrupted state JSON used to return an empty network silently,
+        indistinguishable from the no-file case.  Now it should log a
+        WARNING naming the path so operators investigating lost state
+        have a breadcrumb.
+        """
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bad_path = Path(tmpdir) / "bad-state.json"
+            bad_path.write_text("{this is not valid json")
+
+            with self.assertLogs("meshing_around_clients.core.models", level="WARNING") as cm:
+                network = MeshNetwork.load_from_file(str(bad_path))
+
+            self.assertEqual(len(network.nodes), 0)
+            # The warning must name the path and the exception class.
+            combined = "\n".join(cm.output)
+            self.assertIn(str(bad_path), combined)
+            self.assertIn("JSONDecodeError", combined)
+
     def test_from_dict_handles_bad_data(self):
         """Test that from_dict handles malformed data gracefully."""
         data = {

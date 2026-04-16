@@ -218,6 +218,36 @@ class TestSerialPortDetection:
         result = get_serial_ports()
         assert isinstance(result, list)
 
+    def test_usb_ports_discovered_via_glob_not_ls_subprocess(self, tmp_path, monkeypatch):
+        """Regression: previously ran `ls /dev/ttyUSB*` via subprocess which
+        never shell-expanded, so USB ports always returned zero even when
+        a device was plugged in.  Now uses glob.glob() which does expand.
+        Pin the fix by patching glob.glob to return a fake port and
+        verifying it shows up without touching subprocess.
+        """
+        from meshing_around_clients.setup import pi_utils
+
+        def fake_glob(pattern):
+            if pattern == "/dev/ttyUSB*":
+                return ["/dev/ttyUSB0", "/dev/ttyUSB1"]
+            if pattern == "/dev/ttyACM*":
+                return ["/dev/ttyACM0"]
+            return []
+
+        monkeypatch.setattr(pi_utils.glob, "glob", fake_glob)
+        # Also block subprocess so a regression to `ls` would fail loudly.
+        monkeypatch.setattr(
+            pi_utils.subprocess,
+            "run",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("subprocess forbidden")),
+        )
+
+        ports = pi_utils.get_serial_ports()
+        usb_ports = [p.port for p in ports if p.is_usb]
+        assert "/dev/ttyUSB0" in usb_ports
+        assert "/dev/ttyUSB1" in usb_ports
+        assert "/dev/ttyACM0" in usb_ports
+
 
 class TestUserGroups:
     """Test user group checking."""

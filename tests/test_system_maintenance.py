@@ -274,6 +274,22 @@ class TestCheckForUpdates(unittest.TestCase):
         self.assertFalse(has_updates)
         self.assertIn("Failed", msg)
 
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_non_numeric_rev_list_output_does_not_crash(self, mock_run):
+        """Regression: a corrupted git state or wrapper that pollutes stdout
+        with non-numeric text used to crash check_for_updates with an
+        uncaught ValueError from `int(stdout.strip())`.  Now return False
+        with a "Could not parse" message so callers handle the ambiguity.
+        """
+        mock_run.side_effect = [
+            (0, "", ""),  # git fetch succeeds
+            (0, "warning: locale issue\n", ""),  # garbage output from rev-list
+        ]
+        has_updates, msg, count = check_for_updates(Path("/tmp"))
+        self.assertFalse(has_updates)
+        self.assertEqual(count, 0)
+        self.assertIn("parse", msg.lower())
+
 
 class TestGitPull(unittest.TestCase):
     """Test git_pull()."""

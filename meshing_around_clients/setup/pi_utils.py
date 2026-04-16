@@ -181,9 +181,7 @@ def get_serial_ports() -> List[SerialPortInfo]:
         for port in sorted(glob.glob(pattern)):
             if port not in seen:
                 seen.add(port)
-                ports.append(
-                    SerialPortInfo(port=port, is_usb=True, is_pi_native=False, description="USB Serial")
-                )
+                ports.append(SerialPortInfo(port=port, is_usb=True, is_pi_native=False, description="USB Serial"))
 
     # Pi-specific serial ports
     pi_ports = [

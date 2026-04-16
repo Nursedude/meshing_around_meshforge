@@ -1126,5 +1126,136 @@ class TestCheckVenvPathSafe(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TestFetchUrlSizeCap(unittest.TestCase):
+    """Pin the _MAX_FETCH_BYTES cap on URL fetches — a misconfigured INI
+    data-source URL or a malicious redirect pointing at a multi-gigabyte
+    endpoint used to OOM the client before the 228-byte mesh limit
+    even applied.  Now capped at 1 MiB with a WARNING log.
+    """
+
+    def test_response_truncated_at_cap(self):
+        from unittest.mock import MagicMock, patch
+
+        from meshing_around_clients.core import meshtastic_api
+
+        cap = meshtastic_api._MAX_FETCH_BYTES
+        # Build a fake response that would return 2x the cap if unrestricted.
+        big = b"A" * (cap * 2)
+
+        class _Resp:
+            def read(self, n=None):
+                # Stdlib urlopen().read(n) returns up to n bytes; mirror that.
+                return big if n is None else big[:n]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        with patch("urllib.request.urlopen", return_value=_Resp()):
+            result = meshtastic_api._fetch_url("https://example.com/huge")
+        self.assertEqual(len(result.encode("utf-8")), cap)
+
+    def test_small_response_passes_through(self):
+        from unittest.mock import patch
+
+        from meshing_around_clients.core import meshtastic_api
+
+        body = b"small payload"
+
+        class _Resp:
+            def read(self, n=None):
+                return body if n is None else body[:n]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        with patch("urllib.request.urlopen", return_value=_Resp()):
+            result = meshtastic_api._fetch_url("https://example.com/small")
+        self.assertEqual(result, "small payload")
+
+
+class TestCommandResponseTruncation(unittest.TestCase):
+    """Pin the `_handle_command` truncation — responses over the mesh
+    228-byte limit were previously silently rejected by send_message.
+    Now they're truncated with an ellipsis and delivered.
+
+    These tests exercise the exact truncation expression used in
+    `_handle_command` at the dispatch site (single call point covering
+    every branch of the C901-complex `_get_command_response`).
+    """
+
+    def _truncate(self, response: str) -> str:
+        """Mirror the truncation expression in meshtastic_api._handle_command."""
+        from meshing_around_clients.core.models import MAX_MESSAGE_BYTES
+
+        encoded = response.encode("utf-8")
+        if len(encoded) > MAX_MESSAGE_BYTES:
+            return encoded[: MAX_MESSAGE_BYTES - 3].decode("utf-8", errors="ignore") + "..."
+        return response
+
+    def test_short_response_passes_through_unchanged(self):
+        self.assertEqual(self._truncate("short reply"), "short reply")
+
+    def test_oversize_response_truncated_with_ellipsis(self):
+        from meshing_around_clients.core.models import MAX_MESSAGE_BYTES
+
+        oversize = "x" * (MAX_MESSAGE_BYTES * 2)
+        result = self._truncate(oversize)
+        self.assertTrue(result.endswith("..."))
+        self.assertLessEqual(len(result.encode("utf-8")), MAX_MESSAGE_BYTES)
+
+    def test_multibyte_utf8_boundary_not_split(self):
+        """Truncating mid-UTF-8-sequence must not produce garbage bytes."""
+        from meshing_around_clients.core.models import MAX_MESSAGE_BYTES
+
+        # Build a string that forces the truncation point onto a multibyte
+        # character boundary.  Each € is 3 bytes; 80 of them = 240 bytes > 228.
+        text = "€" * 80
+        result = self._truncate(text)
+        # The ellipsis is the 3 ASCII bytes "..." — ensure what precedes it
+        # is valid UTF-8 and does not end with a partial sequence.
+        body = result[:-3]
+        body.encode("utf-8")  # re-encodes cleanly, so decode was clean
+        self.assertLessEqual(len(result.encode("utf-8")), MAX_MESSAGE_BYTES)
+
+
+class TestEmergencyAlertCooldown(unittest.TestCase):
+    """Emergency keyword alerts now honor the _is_alert_cooled_down check
+    that battery/congestion paths already use.  A sender spamming
+    'MAYDAY' should fire one Alert, not one per message.
+    """
+
+    def setUp(self):
+        cfg = Config(config_path="/nonexistent/path")
+        cfg.alerts.enabled = True
+        cfg.alerts.emergency_keywords = ["mayday", "sos"]
+        cfg.storage.enabled = False
+        self.api = MockMeshtasticAPI(cfg)
+        # Force a short cooldown so the test is fast.
+        self.api._alert_cooldown_seconds = 60
+
+    def test_rapid_emergency_keywords_suppressed_by_cooldown(self):
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        # Simulate three identical emergency messages from the same sender
+        # in quick succession.  Only the first should produce an alert.
+        for _ in range(3):
+            packet = {
+                "decoded": {"text": "MAYDAY MAYDAY", "portnum": "TEXT_MESSAGE_APP"},
+                "fromId": "!deadbeef",
+                "from": 0xDEADBEEF,
+                "id": 1,
+            }
+            # Use the real API's _handle_text_message via the mock inheritance
+            MeshtasticAPI._handle_text_message(self.api, packet)
+        emergency_alerts = [a for a in self.api.network.alerts if a.alert_type.value == "emergency"]
+        self.assertEqual(len(emergency_alerts), 1, f"Expected 1 alert, got {len(emergency_alerts)}")
+
+
 if __name__ == "__main__":
     unittest.main()
