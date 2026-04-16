@@ -49,6 +49,7 @@ try:
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.prompt import Confirm, Prompt
     from rich.table import Table
+    from rich.markup import escape as rich_escape
     from rich.text import Text
     from rich.tree import Tree
 
@@ -2337,6 +2338,10 @@ class MeshingAroundTUI:
         title = getattr(alert, "title", "Alert")
         message = getattr(alert, "message", "")
         severity = getattr(alert, "severity", 1)
+        # SEC-16: Sanitize user-controlled text to prevent Rich markup injection
+        if RICH_AVAILABLE:
+            title = rich_escape(str(title))
+            message = rich_escape(str(message)) if message else ""
         flash = f"sev={severity}: {title}"
         if message:
             flash += f" -- {message[:60]}"

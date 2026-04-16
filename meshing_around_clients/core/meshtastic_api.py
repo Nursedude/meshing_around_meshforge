@@ -218,26 +218,26 @@ _LOCAL_COMMANDS = {
 }
 
 
-def _call_upstream_cmd(command: str, lat: float = 0.0, lon: float = 0.0) -> str:
-    """Call an upstream meshing-around command using the bot's Python venv.
+def _check_venv_path_safe(path: Path) -> bool:
+    """Verify the upstream venv python is not world-writable (SEC-23)."""
+    import os
+    import stat
 
-    This gives identical output to the bot since it uses the same code + deps.
-    Falls back gracefully if the bot venv or modules aren't available.
-    """
-    import subprocess
+    try:
+        st = os.stat(path)
+        if st.st_mode & stat.S_IWOTH:
+            logger.warning("Upstream venv python is world-writable, refusing to execute: %s", path)
+            return False
+        return True
+    except OSError:
+        return False
 
-    if command not in _UPSTREAM_CMD_MAP:
-        return ""
-    if not _UPSTREAM_VENV_PYTHON.exists():
-        return ""
 
-    module, func, needs_latlon = _UPSTREAM_CMD_MAP[command]
-
-    # Build a self-contained Python script that stubs the logger,
-    # sets location, imports the module, and calls the function.
-    args = f"{lat}, {lon}" if needs_latlon else ""
-    script = f"""
-import sys, types, logging
+# Static script template for upstream command execution.  All variable data
+# is passed via environment variables — never interpolated into the script
+# string — to eliminate code-injection risk (SEC-23).
+_UPSTREAM_SCRIPT = """\
+import os, sys, types, logging
 sys.path.insert(0, '/opt/meshing-around')
 sys.path.insert(0, '/opt/meshing-around/modules')
 stub = types.ModuleType('modules.log')
@@ -245,8 +245,8 @@ stub.logger = logging.getLogger('stub')
 stub.getPrettyTime = lambda: ''
 sys.modules['modules.log'] = stub
 import modules.settings as s
-s.latitudeValue = {lat}
-s.longitudeValue = {lon}
+s.latitudeValue = float(os.environ.get('MESHFORGE_LAT', '0'))
+s.longitudeValue = float(os.environ.get('MESHFORGE_LON', '0'))
 s.zuluTime = False
 s.use_metric = False
 s.urlTimeoutSeconds = 10
@@ -256,15 +256,54 @@ s.ignoreUSGSwords = []
 s.ERROR_FETCHING_DATA = 'Error fetching data'
 s.NO_DATA_NOGPS = 'No GPS data'
 s.NO_ALERTS = 'No alerts'
-from {module} import {func}
-result = {func}({args})
+mod = os.environ['MESHFORGE_MODULE']
+fn = os.environ['MESHFORGE_FUNC']
+use_latlon = os.environ.get('MESHFORGE_LATLON', '0') == '1'
+exec_mod = __import__(mod, fromlist=[fn])
+func = getattr(exec_mod, fn)
+result = func(s.latitudeValue, s.longitudeValue) if use_latlon else func()
 if result:
     print(result)
 """
+
+
+def _call_upstream_cmd(command: str, lat: float = 0.0, lon: float = 0.0) -> str:
+    """Call an upstream meshing-around command using the bot's Python venv.
+
+    This gives identical output to the bot since it uses the same code + deps.
+    Falls back gracefully if the bot venv or modules aren't available.
+
+    All variable data is passed via environment variables to avoid code
+    injection risk from f-string interpolation in subprocess scripts.
+    """
+    import os
+    import subprocess
+
+    if command not in _UPSTREAM_CMD_MAP:
+        return ""
+    if not _UPSTREAM_VENV_PYTHON.exists():
+        return ""
+    if not _check_venv_path_safe(_UPSTREAM_VENV_PYTHON):
+        return ""
+
+    module, func, needs_latlon = _UPSTREAM_CMD_MAP[command]
+
+    # Type-check lat/lon to prevent non-numeric values
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        logger.warning("Upstream cmd %s: invalid lat/lon types", command)
+        return ""
+
+    env = os.environ.copy()
+    env["MESHFORGE_MODULE"] = module
+    env["MESHFORGE_FUNC"] = func
+    env["MESHFORGE_LAT"] = str(float(lat))
+    env["MESHFORGE_LON"] = str(float(lon))
+    env["MESHFORGE_LATLON"] = "1" if needs_latlon else "0"
+
     try:
         proc = subprocess.run(
-            [str(_UPSTREAM_VENV_PYTHON), "-c", script],
-            capture_output=True, text=True, timeout=15,
+            [str(_UPSTREAM_VENV_PYTHON), "-c", _UPSTREAM_SCRIPT],
+            capture_output=True, text=True, timeout=15, env=env,
         )
         output = proc.stdout.strip()
         if output:
@@ -775,8 +814,12 @@ class MeshtasticAPI(CallbackMixin):
             self._worker_thread.join(timeout=5)
             if self._worker_thread.is_alive():
                 self._leaked_thread_count += 1
-                logger.warning(
-                    "Previous worker thread did not stop within 5s " "(leaked threads: %d)",
+                # SEC-21: Log at ERROR with thread identity for debugging
+                logger.error(
+                    "Worker thread %s (ident=%s) did not stop within 5s "
+                    "(leaked threads: %d)",
+                    self._worker_thread.name,
+                    self._worker_thread.ident,
                     self._leaked_thread_count,
                 )
                 if self._leaked_thread_count > 2:

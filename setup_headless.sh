@@ -47,7 +47,13 @@ print_banner() {
 
 check_root() {
     if [[ $EUID -eq 0 ]]; then
-        log_warn "Running as root. Some features may need adjustment."
+        log_warn "Running as root is not recommended."
+        log_warn "Config files and venv will be owned by root, not your user."
+        read -p "Continue as root? [y/N]: " ROOT_CONTINUE
+        if [[ ! "$ROOT_CONTINUE" =~ ^[Yy]$ ]]; then
+            log_info "Exiting. Re-run as a regular user."
+            exit 1
+        fi
     fi
 }
 

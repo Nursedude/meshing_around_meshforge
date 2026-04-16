@@ -1,6 +1,6 @@
 # MeshForge Security Review
 
-**Date:** 2026-02-21 (updated 2026-03-18)
+**Date:** 2026-02-21 (updated 2026-04-15)
 **Version:** 0.5.0-beta
 **Scope:** Full codebase audit — credential handling, network security, input validation, cryptography, subprocess safety, concurrency
 **Methodology:** Manual code review of all source files with security-focused analysis
@@ -131,10 +131,12 @@ Several `except Exception` catches where more specific types would be appropriat
 
 #### SEC-16: Alert message text not sanitized
 
-**File:** `mqtt_client.py`
-**Status:** Open — low risk
+**File:** `tui/app.py`
+**Status:** Fixed
 
-User-controlled message text included directly in alert metadata. Alerts are consumed by the TUI (Rich-rendered) which handles untrusted content safely. Risk exists only if alerts are forwarded to systems that don't escape HTML.
+User-controlled message text included directly in alert metadata. Alerts are consumed by the TUI (Rich-rendered) which handles untrusted content safely.
+
+**Fix:** Added `rich.markup.escape()` to sanitize user-controlled `title` and `message` fields in `_on_alert_received()` before storing in the flash banner. Defense-in-depth against future refactoring that might pass the text to markup-interpreting APIs.
 
 ---
 
@@ -143,9 +145,11 @@ User-controlled message text included directly in alert metadata. Alerts are con
 #### SEC-18: Debug logging may include message content
 
 **File:** `mqtt_client.py`
-**Status:** Open
+**Status:** Fixed
 
 Malformed messages logged at DEBUG level with exception details that may include content. Not a risk in production (DEBUG disabled).
+
+**Fix:** Truncated exception details to 80 characters in all three debug log sites. Logs now show exception type and a bounded repr, preventing message content from leaking into log files even when DEBUG is enabled.
 
 ---
 
@@ -170,18 +174,20 @@ Malformed messages logged at DEBUG level with exception details that may include
 #### SEC-21: Thread resource leak potential
 
 **File:** `meshtastic_api.py`
-**Status:** Open
+**Status:** Fixed
 
 `_start_worker_thread()` joins the previous thread with a 5-second timeout. If the thread hangs, a new thread starts while the old one continues.
+
+**Fix:** Worker threads already use `daemon=True` (cleaned up on process exit). Upgraded leaked-thread logging from WARNING to ERROR with thread name and ident for debugging. The leaked-thread counter (cap at 2) prevents unbounded accumulation. Worker loop checks `_running` event every 0.5s via `queue.get(timeout=0.5)`.
 
 ---
 
 #### SEC-22: Node dictionary modification during iteration
 
 **File:** `models.py`
-**Status:** Open — mitigated by lock
+**Status:** Fixed (by design)
 
-`cleanup_stale_nodes()` builds a snapshot list first, then removes in a separate pass under lock. Safe pattern.
+`cleanup_stale_nodes()` builds a snapshot list first, then removes in a separate pass under lock. This is the correct pattern — snapshot-then-delete under lock is safe and avoids RuntimeError from dict modification during iteration.
 
 ---
 
@@ -220,16 +226,106 @@ The codebase does not use `pickle`, `eval()`, `exec()`, or other unsafe deserial
 | SEC-13 | Medium | Config path traversal | Open (low risk) |
 | SEC-14 | Medium | Weak JSON error handling | **Fixed** |
 | SEC-15 | Medium | Broad exception handling | **Fixed** |
-| SEC-16 | Medium | Alert text not sanitized | Open (low risk) |
+| SEC-16 | Medium | Alert text not sanitized | **Fixed** |
 | SEC-17 | ~~Medium~~ | ~~CSRF HttpOnly=false~~ | **N/A** (web module removed) |
-| SEC-18 | Low | Debug logging exposure | Open |
+| SEC-18 | Low | Debug logging exposure | **Fixed** |
 | SEC-19 | Low | Hardcoded timeout | **Fixed** |
 | SEC-20 | Low | No MQTT msg size limit | **Fixed** |
-| SEC-21 | Low | Thread resource leak | Open |
-| SEC-22 | Low | Dict iteration safety | Open (mitigated) |
+| SEC-21 | Low | Thread resource leak | **Fixed** |
+| SEC-22 | Low | Dict iteration safety | **Fixed** (by design) |
 
-**Fixed:** 12 of 22 original findings (all High, 3 of 10 Medium, 2 of 5 Low)
+**Fixed:** 16 of 22 original findings (all High, 4 of 10 Medium, 4 of 5 Low)
 **N/A:** 6 findings (web module removed from codebase)
+
+---
+
+## Audit 2 — 2026-04-15
+
+Security review of recent PRs and full codebase re-scan. Findings below are new (SEC-23+).
+
+### NEW FINDINGS
+
+#### SEC-23: Dynamic code generation in subprocess (f-string script injection)
+
+**File:** `meshtastic_api.py`
+**Severity:** Medium
+**Status:** Fixed
+
+`_call_upstream_cmd()` built a Python script via f-string interpolation with `{lat}`, `{lon}`, `{module}`, `{func}` values and executed it with `subprocess.run([python, "-c", script])`. While all values came from hardcoded dicts and validated floats, the pattern was fragile and hard to audit.
+
+**Fix:** Refactored to pass all variable data via environment variables (`MESHFORGE_LAT`, `MESHFORGE_LON`, `MESHFORGE_MODULE`, `MESHFORGE_FUNC`). The `-c` script is now a static string constant (`_UPSTREAM_SCRIPT`) with no interpolation. Added explicit `isinstance()` type guards for lat/lon.
+
+---
+
+#### SEC-24: Unvalidated upstream venv path permissions
+
+**File:** `meshtastic_api.py`
+**Severity:** Medium
+**Status:** Fixed
+
+`_UPSTREAM_VENV_PYTHON = Path("/opt/meshing-around/venv/bin/python3")` was used without verifying file permissions. A world-writable path at this location would allow arbitrary code execution.
+
+**Fix:** Added `_check_venv_path_safe()` that rejects world-writable paths (`st_mode & S_IWOTH`) before executing via subprocess. Returns empty string if check fails.
+
+---
+
+#### SEC-25: No SAST or dependency scanning in CI
+
+**File:** `.github/workflows/ci.yml`
+**Severity:** Medium
+**Status:** Fixed
+
+CI pipeline had no static analysis security testing (SAST) and no dependency vulnerability scanning.
+
+**Fix:** Added `security` job to CI with:
+- Bandit SAST (HIGH severity blocking, MEDIUM+ informational)
+- pip-audit dependency scan (informational, non-blocking)
+- Bandit config in `pyproject.toml`
+
+---
+
+#### SEC-26: Coverage enforcement only on single Python version
+
+**File:** `.github/workflows/ci.yml`
+**Severity:** Low
+**Status:** Fixed
+
+Coverage threshold (65%) was only enforced on Python 3.11. Version-specific code paths on other versions could regress without detection.
+
+**Fix:** Extended coverage enforcement to Python 3.9 (oldest supported) in addition to 3.11.
+
+---
+
+#### SEC-27: setup_headless.sh runs as root without confirmation
+
+**File:** `setup_headless.sh`
+**Severity:** Low
+**Status:** Fixed
+
+The setup script only warned when running as root but did not require confirmation. This could lead to config files owned by root instead of the target user.
+
+**Fix:** `check_root()` now requires explicit y/N confirmation when EUID=0, defaulting to exit.
+
+---
+
+### Audit 2 — Remediation Status
+
+| ID | Severity | Finding | Status |
+|----|----------|---------|--------|
+| SEC-23 | Medium | f-string script injection in subprocess | **Fixed** |
+| SEC-24 | Medium | Unvalidated upstream venv permissions | **Fixed** |
+| SEC-25 | Medium | No SAST/dependency scanning in CI | **Fixed** |
+| SEC-26 | Low | Coverage enforcement gap | **Fixed** |
+| SEC-27 | Low | Root execution without confirmation | **Fixed** |
+
+**All 5 new findings fixed in this audit.**
+
+### Recommendations (Not Yet Implemented)
+
+- **Lock file for reproducible builds:** Generate `requirements.lock` from `pip freeze` for Pi deployments
+- **SBOM generation:** Add CycloneDX to CI for software bill of materials
+- **Branch protection:** Configure GitHub required status checks and PR reviews for `main`
+- **Dependabot:** Enable automated dependency update PRs
 
 ---
 

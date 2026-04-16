@@ -1035,5 +1035,76 @@ class TestConfigHelperMethods(unittest.TestCase):
 import os
 
 
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestAlertFlashSecurity(unittest.TestCase):
+    """SEC-16: Test alert flash banner sanitizes untrusted input."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        self.config = Config(config_path="/nonexistent/path")
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_rich_markup_in_alert_is_escaped(self):
+        """Rich markup tags in alert text should be escaped, not interpreted."""
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        alert = Alert(
+            id="test-1",
+            alert_type=AlertType.EMERGENCY,
+            title="[bold red]EVIL[/bold red]",
+            message="[link=http://evil.com]Click[/link]",
+            severity=5,
+        )
+        self.tui._on_alert_received(alert)
+        flash = self.tui._alert_flash_text
+        # rich.markup.escape() prepends backslash before brackets: \[bold red]
+        # Verify the raw markup tags are escaped (backslash-prefixed)
+        self.assertIn("\\[bold red]", flash)
+        self.assertIn("\\[link=", flash)
+        # The text content should still be present
+        self.assertIn("EVIL", flash)
+        self.assertIn("Click", flash)
+
+    def test_alert_message_truncation(self):
+        """Alert messages longer than 60 chars should be truncated."""
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        long_message = "A" * 100
+        alert = Alert(
+            id="test-2",
+            alert_type=AlertType.WEATHER,
+            title="Test",
+            message=long_message,
+            severity=3,
+        )
+        self.tui._on_alert_received(alert)
+        flash = self.tui._alert_flash_text
+        # The message portion (after " -- ") should be at most 60 chars
+        if " -- " in flash:
+            msg_part = flash.split(" -- ", 1)[1]
+            self.assertLessEqual(len(msg_part), 60)
+
+    def test_alert_with_control_chars(self):
+        """Control characters in alert text should not crash rendering."""
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        alert = Alert(
+            id="test-3",
+            alert_type=AlertType.EMERGENCY,
+            title="Normal\x00Title",
+            message="Text\x1bwith\x07controls",
+            severity=1,
+        )
+        # Should not raise
+        self.tui._on_alert_received(alert)
+        flash = self.tui._alert_flash_text
+        self.assertIsInstance(flash, str)
+
+
 if __name__ == "__main__":
     unittest.main()

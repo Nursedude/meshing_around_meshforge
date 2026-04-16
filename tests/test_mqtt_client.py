@@ -1124,5 +1124,99 @@ class TestMQTTWildcardSubscription(unittest.TestCase):
         self.assertEqual(result, "meshforge")
 
 
+class TestMQTTTopicValidation(unittest.TestCase):
+    """SEC-03: Test MQTT topic component validation rejects injection attempts."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_null_byte_in_topic_rejected(self, mock_mqtt):
+        """Topic components with null bytes must be rejected."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with self.assertRaises(ValueError) as ctx:
+            client._validate_mqtt_topic_component("msh/US\x00evil", "topic_root")
+        self.assertIn("null", str(ctx.exception).lower())
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_wildcard_hash_in_topic_rejected(self, mock_mqtt):
+        """Topic components with # wildcard must be rejected."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with self.assertRaises(ValueError):
+            client._validate_mqtt_topic_component("channel#inject", "channel")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_wildcard_plus_in_topic_rejected(self, mock_mqtt):
+        """Topic components with + wildcard must be rejected."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with self.assertRaises(ValueError):
+            client._validate_mqtt_topic_component("channel+inject", "channel")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_control_char_in_topic_rejected(self, mock_mqtt):
+        """Topic components with control characters must be rejected."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        with self.assertRaises(ValueError):
+            client._validate_mqtt_topic_component("msh\x01US", "topic_root")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_valid_topic_accepted(self, mock_mqtt):
+        """Normal topic components should pass validation."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        result = client._validate_mqtt_topic_component("msh/US/hawaii", "topic_root")
+        self.assertEqual(result, "msh/US/hawaii")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_empty_topic_accepted(self, mock_mqtt):
+        """Empty topic component should pass through."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        result = client._validate_mqtt_topic_component("", "topic_root")
+        self.assertEqual(result, "")
+
+
+class TestMQTTCredentialTLSWarning(unittest.TestCase):
+    """SEC-07: Test that non-default credentials without TLS trigger a warning."""
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_custom_credentials_without_tls_logs_warning(self, mock_mqtt):
+        """Non-default credentials on non-TLS connection should log a warning."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        self.config.mqtt.username = "private_user"
+        self.config.mqtt.password = "secret_password"
+        self.config.mqtt.use_tls = False
+        self.config.mqtt.port = 1883
+
+        # Mock the MQTT client so connect() doesn't hit the network
+        mock_client_instance = MagicMock()
+        mock_mqtt.Client.return_value = mock_client_instance
+        mock_mqtt.MQTTv311 = 4
+        # Make connect_async raise to exit early after auth setup
+        mock_client_instance.connect.side_effect = OSError("mocked")
+
+        with self.assertLogs("meshing_around_clients.core.mqtt_client", level="WARNING") as log:
+            client = MQTTMeshtasticClient(self.config)
+            client.connect()  # Will fail on network but auth warning fires first
+        self.assertTrue(
+            any("cleartext" in msg.lower() for msg in log.output),
+            f"Expected cleartext warning in logs, got: {log.output}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

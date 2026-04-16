@@ -735,7 +735,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._handle_protobuf_message(topic, payload, topic_info)
 
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.debug("Malformed MQTT message on %s: %s", topic, e)
+            # SEC-18: Truncate exception to avoid leaking message content in logs
+            logger.debug("Malformed MQTT message on %s: %s: %.80s", topic, type(e).__name__, str(e))
             with self._stats_lock:
                 self._stats["messages_rejected"] += 1
             # SEC-14: Escalate to WARNING if rejection rate is high (thread-safe)
@@ -815,7 +816,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                     node.last_heard = datetime.now(timezone.utc)
                     node.is_online = True
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.debug("Malformed stat message: %s", e)
+            # SEC-18: Truncate exception to avoid leaking message content in logs
+            logger.debug("Malformed stat message: %s: %.80s", type(e).__name__, str(e))
 
     def _handle_json_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
         """Handle JSON formatted Meshtastic message."""
@@ -880,7 +882,8 @@ class MQTTMeshtasticClient(CallbackMixin):
             # Binary payload on a /json/ topic — usually a misrouted encrypted
             # message or a gateway that publishes protobuf under /json/.  Not
             # actionable; log at debug only.
-            logger.debug("Malformed JSON message on %s: %s", topic, e)
+            # SEC-18: Truncate exception to avoid leaking message content in logs
+            logger.debug("Malformed JSON message on %s: %s: %.80s", topic, type(e).__name__, str(e))
         except (KeyError, TypeError, ValueError) as e:
             logger.warning("JSON message parse error (%s): %s", type(e).__name__, e)
 

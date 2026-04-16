@@ -983,5 +983,139 @@ class TestChunkBuffer(unittest.TestCase):
         self.assertEqual(len(self.flushed), 0)
 
 
+class TestCallUpstreamCmd(unittest.TestCase):
+    """Tests for _call_upstream_cmd() — SEC-23 subprocess hardening."""
+
+    def setUp(self):
+        from meshing_around_clients.core.meshtastic_api import _call_upstream_cmd
+
+        self._call = _call_upstream_cmd
+
+    def test_unknown_command_returns_empty(self):
+        """Unknown commands should return empty string without calling subprocess."""
+        result = self._call("nonexistent_command")
+        self.assertEqual(result, "")
+
+    @patch("meshing_around_clients.core.meshtastic_api._UPSTREAM_VENV_PYTHON")
+    def test_missing_venv_returns_empty(self, mock_path):
+        """Missing venv python should return empty string."""
+        mock_path.exists.return_value = False
+        result = self._call("moon", 21.3, -157.8)
+        self.assertEqual(result, "")
+
+    @patch("meshing_around_clients.core.meshtastic_api._check_venv_path_safe")
+    @patch("meshing_around_clients.core.meshtastic_api._UPSTREAM_VENV_PYTHON")
+    def test_world_writable_venv_rejected(self, mock_path, mock_check):
+        """World-writable venv path should be rejected (SEC-23)."""
+        mock_path.exists.return_value = True
+        mock_check.return_value = False
+        result = self._call("moon", 21.3, -157.8)
+        self.assertEqual(result, "")
+
+    @patch("meshing_around_clients.core.meshtastic_api._check_venv_path_safe")
+    @patch("meshing_around_clients.core.meshtastic_api._UPSTREAM_VENV_PYTHON")
+    @patch("subprocess.run")
+    def test_valid_command_returns_output(self, mock_run, mock_path, mock_check):
+        """Valid command with safe venv should return subprocess stdout."""
+        mock_path.exists.return_value = True
+        mock_path.__str__ = lambda self: "/opt/meshing-around/venv/bin/python3"
+        mock_check.return_value = True
+        mock_run.return_value = unittest.mock.Mock(stdout="Moon: Waxing Gibbous\n", stderr="")
+        result = self._call("moon", 21.3, -157.8)
+        self.assertEqual(result, "Moon: Waxing Gibbous")
+
+    @patch("meshing_around_clients.core.meshtastic_api._check_venv_path_safe")
+    @patch("meshing_around_clients.core.meshtastic_api._UPSTREAM_VENV_PYTHON")
+    @patch("subprocess.run")
+    def test_timeout_returns_timeout_message(self, mock_run, mock_path, mock_check):
+        """Subprocess timeout should return '{command}: timeout'."""
+        import subprocess
+
+        mock_path.exists.return_value = True
+        mock_path.__str__ = lambda self: "/opt/meshing-around/venv/bin/python3"
+        mock_check.return_value = True
+        mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=15)
+        result = self._call("wx", 21.3, -157.8)
+        self.assertEqual(result, "wx: timeout")
+
+    @patch("meshing_around_clients.core.meshtastic_api._check_venv_path_safe")
+    @patch("meshing_around_clients.core.meshtastic_api._UPSTREAM_VENV_PYTHON")
+    @patch("subprocess.run")
+    def test_script_is_static_no_interpolation(self, mock_run, mock_path, mock_check):
+        """The -c script argument must be static — no user data embedded (SEC-23)."""
+        mock_path.exists.return_value = True
+        mock_path.__str__ = lambda self: "/opt/meshing-around/venv/bin/python3"
+        mock_check.return_value = True
+        mock_run.return_value = unittest.mock.Mock(stdout="", stderr="")
+        self._call("moon", 21.3, -157.8)
+        # Verify the script passed to -c does NOT contain the lat/lon values
+        args, kwargs = mock_run.call_args
+        script = args[0][2]  # [python, "-c", script]
+        self.assertNotIn("21.3", script)
+        self.assertNotIn("-157.8", script)
+        # Verify data is passed via environment variables instead
+        env = kwargs.get("env", {})
+        self.assertEqual(env.get("MESHFORGE_LAT"), "21.3")
+        self.assertEqual(env.get("MESHFORGE_LON"), "-157.8")
+        self.assertEqual(env.get("MESHFORGE_MODULE"), "space")
+        self.assertEqual(env.get("MESHFORGE_FUNC"), "get_moon")
+
+    def test_invalid_lat_lon_type_rejected(self):
+        """Non-numeric lat/lon should be rejected."""
+        # This shouldn't even reach subprocess — type check catches it
+        result = self._call("moon", "not_a_number", -157.8)
+        self.assertEqual(result, "")
+
+    @patch("meshing_around_clients.core.meshtastic_api._check_venv_path_safe")
+    @patch("meshing_around_clients.core.meshtastic_api._UPSTREAM_VENV_PYTHON")
+    @patch("subprocess.run")
+    def test_oserror_returns_empty(self, mock_run, mock_path, mock_check):
+        """OSError from subprocess should return empty string."""
+        mock_path.exists.return_value = True
+        mock_path.__str__ = lambda self: "/opt/meshing-around/venv/bin/python3"
+        mock_check.return_value = True
+        mock_run.side_effect = OSError("No such file")
+        result = self._call("moon", 21.3, -157.8)
+        self.assertEqual(result, "")
+
+
+class TestCheckVenvPathSafe(unittest.TestCase):
+    """Tests for _check_venv_path_safe() — SEC-23 path validation."""
+
+    def setUp(self):
+        from meshing_around_clients.core.meshtastic_api import _check_venv_path_safe
+
+        self._check = _check_venv_path_safe
+
+    @patch("os.stat")
+    def test_world_writable_rejected(self, mock_stat):
+        """World-writable path should return False."""
+        import stat
+
+        from pathlib import Path
+
+        mock_stat.return_value = unittest.mock.Mock(st_mode=0o100777)
+        result = self._check(Path("/some/path"))
+        self.assertFalse(result)
+
+    @patch("os.stat")
+    def test_normal_permissions_accepted(self, mock_stat):
+        """Normal (0o755) path should return True."""
+        from pathlib import Path
+
+        mock_stat.return_value = unittest.mock.Mock(st_mode=0o100755)
+        result = self._check(Path("/some/path"))
+        self.assertTrue(result)
+
+    @patch("os.stat")
+    def test_missing_path_returns_false(self, mock_stat):
+        """Non-existent path should return False."""
+        from pathlib import Path
+
+        mock_stat.side_effect = OSError("No such file")
+        result = self._check(Path("/nonexistent"))
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()
