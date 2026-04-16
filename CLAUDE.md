@@ -27,7 +27,7 @@ meshing_around_meshforge is a companion toolkit for [meshing-around](https://git
 
 **Current Version:** 0.6.0
 **License:** GPL-3.0
-**Python:** 3.8+
+**Python:** 3.9+ (CI matrix: 3.9, 3.10, 3.11, 3.12, 3.13)
 
 ## Quick Reference
 
@@ -324,7 +324,7 @@ reviewing new code.  All caught and fixed during the sweep audits (PRs
 
 ## Version History
 
-- **0.6.0** (2026-04-xx) — Stability + security hardening sweep
+- **0.6.0** (2026-04-16) — Stability + security hardening sweep
   - Critical: fixed `configure_bot.py:102` infinite recursion in
     `get_user_home()` fallback (PR #154)
   - High: fixed `pi_utils.get_serial_ports` returning zero USB ports

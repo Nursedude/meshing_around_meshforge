@@ -6,7 +6,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 
 [![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://python.org)
+[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-843-brightgreen.svg)](tests/)
 [![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
 
