@@ -723,7 +723,7 @@ def startup_system_check() -> bool:
 
     # Check if this is a supported OS
     if os_codename.lower() in SUPPORTED_OS:
-        print_success(f"OS version supported")
+        print_success("OS version supported")
     else:
         print_warning(f"OS version '{os_codename}' may not be fully tested")
 
@@ -948,13 +948,8 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
         print_warning("Some packages failed to install from requirements.txt")
         print_info("Trying alternative package names...")
 
-        # Known package name fixes for compatibility
-        package_fixes = {
-            "pubsub": "PyPubSub",
-            "pyephem": "ephem",
-        }
-
-        # Install core packages individually with fixes
+        # Install core packages individually with compatibility renames
+        # (PyPubSub instead of pubsub; ephem instead of pyephem).
         core_packages = [
             "meshtastic[cli]",
             "PyPubSub",  # Instead of pubsub
@@ -1046,7 +1041,7 @@ This wizard will:
             else:
                 return False, None, None
         else:
-            print_warning(f"Directory exists but doesn't contain meshing-around")
+            print_warning("Directory exists but doesn't contain meshing-around")
             if not get_yes_no("Remove and use this directory?", False):
                 return False, None, None
             try:
@@ -1102,7 +1097,7 @@ This wizard will:
             ret, _, stderr = run_command(["python3", "-m", "venv", str(venv_path)])
 
             if ret == 0:
-                print_success(f"Virtual environment created")
+                print_success("Virtual environment created")
             else:
                 print_error(f"Failed to create venv: {stderr}")
                 errors.append("Virtual environment creation failed")
@@ -1613,7 +1608,7 @@ def show_system_info():
 
     # User groups
     in_dialout, in_gpio = check_user_groups()
-    print(f"\nUser groups:")
+    print("\nUser groups:")
     if in_dialout:
         print_success("  dialout: YES (serial port access)")
     else:
@@ -1649,7 +1644,7 @@ def show_system_info():
     if venv_path.exists():
         print_success(f"\nVirtual environment: {venv_path}")
     elif is_bookworm_or_newer():
-        print_warning(f"\nVirtual environment: Not found (recommended for Bookworm)")
+        print_warning("\nVirtual environment: Not found (recommended for Bookworm)")
 
     # Disk space
     ret, stdout, _ = run_command(["df", "-h", "/"], capture=True)
@@ -1671,7 +1666,7 @@ def load_config(config_file: str) -> configparser.ConfigParser:
         print_success(f"Loading existing config from {config_file}")
         config.read(config_file)
     else:
-        print_warning(f"No existing config found, creating new configuration")
+        print_warning("No existing config found, creating new configuration")
         # Initialize sections
         sections = [
             "interface",
@@ -1781,7 +1776,7 @@ def main_menu():
 
     # Determine config file location
     default_config = "config.ini"
-    config_file = get_input(f"Config file path", default_config)
+    config_file = get_input("Config file path", default_config)
 
     # Load or create config
     config = load_config(config_file)
@@ -1886,7 +1881,7 @@ def main_menu():
                 print_info(f"Copy config to: {meshing_path}/config.ini")
             if venv_path:
                 print_info(f"Activate venv: source {venv_path}/bin/activate")
-            print(f"\nRun the bot with: python3 mesh_bot.py")
+            print("\nRun the bot with: python3 mesh_bot.py")
             break
         elif choice == "22":
             save_config(config, config_file)
