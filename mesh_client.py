@@ -35,9 +35,9 @@ import socket
 import subprocess
 import sys
 import time
-from configparser import ConfigParser
+from configparser import ConfigParser, Error as ConfigParserError
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # =============================================================================
@@ -768,7 +768,8 @@ def list_profiles() -> List[Dict[str, str]]:
         parser = ConfigParser()
         try:
             parser.read(ini_file)
-        except Exception:
+        except (ConfigParserError, OSError, UnicodeDecodeError) as e:
+            log(f"Skipping unreadable profile {ini_file.name}: {e}", "DEBUG")
             continue
 
         if parser.has_section("profile"):
@@ -858,21 +859,24 @@ def apply_bot_profile(profile_id: str) -> bool:
                 log(f"Created {upstream_path} from template", "OK")
             else:
                 return False
-    except Exception:
+    except (OSError, AttributeError, ValueError) as e:
+        log(f"Could not locate upstream config: {e}", "DEBUG")
         return False
 
     # Load upstream config
     upstream = ConfigParser()
     try:
         upstream.read(str(upstream_path))
-    except Exception:
+    except (ConfigParserError, OSError, UnicodeDecodeError) as e:
+        log(f"Could not read upstream config {upstream_path}: {e}", "DEBUG")
         return False
 
     # Load bot profile
     bot_profile = ConfigParser()
     try:
         bot_profile.read(str(bot_profile_path))
-    except Exception:
+    except (ConfigParserError, OSError, UnicodeDecodeError) as e:
+        log(f"Could not read bot profile {bot_profile_path}: {e}", "DEBUG")
         return False
 
     # Backup upstream config
@@ -1024,7 +1028,7 @@ def import_upstream_config(source_path: str):
 
     try:
         # Try to use the config_schema module for proper conversion
-        from meshing_around_clients.setup.config_schema import ConfigLoader, UnifiedConfig
+        from meshing_around_clients.setup.config_schema import ConfigLoader
 
         SCHEMA_AVAILABLE = True
     except ImportError:

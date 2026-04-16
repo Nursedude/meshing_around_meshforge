@@ -29,7 +29,7 @@ import time
 import re
 import configparser
 from pathlib import Path
-from typing import Dict, List, Tuple, Any, Optional
+from typing import Any, List, Optional, Tuple
 from getpass import getpass
 
 # Version info
@@ -99,7 +99,7 @@ if not MODULES_AVAILABLE:
         sudo_user = os.environ.get("SUDO_USER")
         if sudo_user:
             return Path(f"/home/{sudo_user}")
-        return get_user_home()
+        return Path.home()
 
     class Colors:
         """ANSI color codes for terminal output"""

@@ -15,7 +15,9 @@ from meshing_around_clients.core.config import (
     Config,
     InterfaceConfig,
     LoggingConfig,
+    MQTTConfig,
     TuiConfig,
+    _coerce_int,
     _str_to_bool,
 )
 
@@ -416,6 +418,78 @@ class TestEnvVarOverrides(unittest.TestCase):
         cfg = Config(config_path="/nonexistent/path.ini")
         cfg._apply_env_overrides()
         self.assertEqual(cfg.tui.refresh_rate, 0.5)
+
+
+class TestCoerceInt(unittest.TestCase):
+    """Test _coerce_int() helper for malformed INI values."""
+
+    def test_valid_int_string_parses(self):
+        self.assertEqual(_coerce_int("42", 0), 42)
+
+    def test_valid_int_passthrough(self):
+        self.assertEqual(_coerce_int(115200, 9600), 115200)
+
+    def test_non_numeric_string_returns_default(self):
+        self.assertEqual(_coerce_int("abc", 1883), 1883)
+
+    def test_empty_string_returns_default(self):
+        self.assertEqual(_coerce_int("", 1883), 1883)
+
+    def test_none_returns_default(self):
+        self.assertEqual(_coerce_int(None, 10), 10)
+
+    def test_float_string_returns_default(self):
+        # int("3.14") raises ValueError — we want the default, not a crash
+        self.assertEqual(_coerce_int("3.14", 5), 5)
+
+    def test_whitespace_string_returns_default(self):
+        self.assertEqual(_coerce_int("  ", 300), 300)
+
+
+class TestInterfaceConfigMalformedValues(unittest.TestCase):
+    """InterfaceConfig.from_dict should not crash on non-numeric INI values."""
+
+    def test_bad_baudrate_falls_back_to_default(self):
+        cfg = InterfaceConfig.from_dict({"type": "serial", "baudrate": "not_a_number"})
+        self.assertEqual(cfg.baudrate, 115200)
+
+    def test_empty_baudrate_falls_back_to_default(self):
+        cfg = InterfaceConfig.from_dict({"type": "serial", "baudrate": ""})
+        self.assertEqual(cfg.baudrate, 115200)
+
+    def test_valid_baudrate_preserved(self):
+        cfg = InterfaceConfig.from_dict({"type": "serial", "baudrate": "57600"})
+        self.assertEqual(cfg.baudrate, 57600)
+
+
+class TestMQTTConfigMalformedValues(unittest.TestCase):
+    """MQTTConfig.from_dict should not crash on non-numeric INI values."""
+
+    def test_bad_port_falls_back_to_default(self):
+        cfg = MQTTConfig.from_dict({"port": "garbage"})
+        self.assertEqual(cfg.port, 1883)
+
+    def test_bad_qos_falls_back_to_default(self):
+        cfg = MQTTConfig.from_dict({"qos": "maybe"})
+        self.assertEqual(cfg.qos, 1)
+
+    def test_bad_timeouts_fall_back_to_defaults(self):
+        cfg = MQTTConfig.from_dict(
+            {
+                "connect_timeout": "soon",
+                "reconnect_delay": "later",
+                "max_reconnect_delay": "never",
+                "max_reconnect_attempts": "many",
+            }
+        )
+        self.assertEqual(cfg.connect_timeout, 10)
+        self.assertEqual(cfg.reconnect_delay, 5)
+        self.assertEqual(cfg.max_reconnect_delay, 300)
+        self.assertEqual(cfg.max_reconnect_attempts, 10)
+
+    def test_valid_port_preserved(self):
+        cfg = MQTTConfig.from_dict({"port": "8883"})
+        self.assertEqual(cfg.port, 8883)
 
 
 if __name__ == "__main__":
