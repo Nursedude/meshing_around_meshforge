@@ -48,7 +48,7 @@ class InterfaceConfig:
             port=str(data.get("port", "")),
             hostname=str(data.get("hostname", "")),
             mac=str(data.get("mac", "")),
-            baudrate=int(data.get("baudrate", 115200)),
+            baudrate=_coerce_int(data.get("baudrate", 115200), 115200),
             enabled=_str_to_bool(data.get("enabled", True)),
             http_url=str(data.get("http_url", "")),
             hardware_model=str(data.get("hardware_model", "")),
@@ -63,6 +63,19 @@ def _str_to_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() in ("true", "yes", "1", "on")
     return bool(value)
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    """Coerce *value* to int, returning *default* on malformed INI input.
+
+    INI values arrive as strings; a user who hand-edits mesh_client.ini and
+    types a non-numeric port/baudrate would otherwise trip a bare ValueError
+    during config load, which cascades into a crash before the UI is up.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 @dataclass
@@ -280,7 +293,7 @@ class MQTTConfig:
         return cls(
             enabled=_str_to_bool(data.get("enabled", False)),
             broker=str(data.get("broker", "mqtt.meshtastic.org")),
-            port=int(data.get("port", 1883)),
+            port=_coerce_int(data.get("port", 1883), 1883),
             use_tls=_str_to_bool(data.get("use_tls", False)),
             username=str(data.get("username", MQTT_PUBLIC_USERNAME)),
             password=str(data.get("password", MQTT_PUBLIC_PASSWORD)),
@@ -290,11 +303,11 @@ class MQTTConfig:
             node_id=str(data.get("node_id", "")),
             client_id=str(data.get("client_id", "")),
             encryption_key=str(data.get("encryption_key", "")),
-            qos=int(data.get("qos", 1)),
-            connect_timeout=int(data.get("connect_timeout", 10)),
-            reconnect_delay=int(data.get("reconnect_delay", 5)),
-            max_reconnect_delay=int(data.get("max_reconnect_delay", 300)),
-            max_reconnect_attempts=int(data.get("max_reconnect_attempts", 10)),
+            qos=_coerce_int(data.get("qos", 1), 1),
+            connect_timeout=_coerce_int(data.get("connect_timeout", 10), 10),
+            reconnect_delay=_coerce_int(data.get("reconnect_delay", 5), 5),
+            max_reconnect_delay=_coerce_int(data.get("max_reconnect_delay", 300), 300),
+            max_reconnect_attempts=_coerce_int(data.get("max_reconnect_attempts", 10), 10),
         )
 
 
