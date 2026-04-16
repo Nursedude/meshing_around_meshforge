@@ -36,6 +36,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Decoded telemetry path wiring in mqtt_client.py
 - "cmd"/"help" no longer triggers false emergency alerts (command handler intercepts first)
 - Channel activity auto-updates
+- **Critical: infinite recursion in `configure_bot.py` fallback `get_user_home()`**
+  when core modules failed to import and `SUDO_USER` was unset (PR #154)
+- **High: broken USB serial port detection** — `subprocess.run(["ls", "/dev/ttyUSB*"])`
+  never shell-expanded the glob, silently returning zero ports.  Switched to
+  `glob.glob()` (PR #157)
+- Unguarded `int()` / `float()` casts on INI values in `core/config.py` (7 sites,
+  PR #154) and `setup/config_schema.py` (20 sites, PR #155) — hand-edited
+  `port=abc` no longer crashes config load
+- Unguarded `int(stdout)` on `git rev-list --count` output in `check_for_updates`
+  (PR #157)
+- Four bare `except Exception:` in `mesh_client.py` swallowing file / INI errors
+  as "profile not available" (PR #154)
+- Silent protobuf decode failures in `mesh_crypto.py` now log at DEBUG (PR #154)
+- Silent AES-CTR decrypt / encrypt failures in `mesh_crypto.py` now log at DEBUG
+  (PR #155)
+- Silent `broker=host:abc` typo in MQTT config now logs WARNING with the
+  offending value (PR #155)
+- Command responses larger than `MAX_MESSAGE_BYTES` (228) — `lheard`, `leaderboard`
+  etc. — were silently rejected by `send_message`.  Now truncated with an
+  ellipsis at the dispatch site (PR #157)
+- Emergency keyword alerts now honor `_is_alert_cooled_down` (PR #157) —
+  previously "MAYDAY MAYDAY MAYDAY" produced one Alert per message
+- `MeshNetwork.load_from_file` now logs WARNING on corrupted state JSON instead
+  of silently returning an empty network (PR #157)
 
 ### Security
 - **Full security audit** — 22 findings documented in SECURITY_REVIEW.md, 6 fixed
@@ -47,6 +71,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added config validation bounds for port, save interval, reconnect delays
 - Pinned pyopenssl and cryptography to resolve version conflicts
 - Improved gitignore and dependency bounds
+- **URL fetch size cap** (1 MiB) in `meshtastic_api._fetch_url` and
+  `_fetch_data_source` — prevents OOM on Pi Zero from a misconfigured or
+  malicious `data_sources.url` (PR #157)
+
+### CI / Lint
+- `.flake8` per-file-ignores tightened — `F401` (unused imports), `F541` (empty
+  f-strings), `F841` (unused locals) are no longer silenced on `mesh_client.py`
+  or `configure_bot.py`.  Kept `F811` for intentional
+  `if not MODULES_AVAILABLE:` fallback redefinitions, and `C901` for naturally
+  complex dispatchers.  This was the root cause of the `F821 Config` bug sitting
+  latent in main for months (PR #156)
+- Tee pytest output to `/tmp/pytest.log` and post failure summaries as PR
+  comments on `test` job (PRs #153, #155)
+- `codecov.yml` — project and patch checks set to `informational: true` so
+  codecov reports without blocking merges; the hard coverage gate remains
+  `--cov-fail-under=65` in the workflow itself (PR #153)
+- 54 new tests across 7 test modules pinning all the behavior changes above
 
 ### Documentation
 - Deleted 7+ stale markdown files, consolidated session archives
