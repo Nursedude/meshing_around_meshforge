@@ -41,6 +41,12 @@ jobs:
           set -o pipefail
           python -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/pytest.log
 
+      - name: Run tests with coverage
+        if: matrix.python-version == '3.11' || matrix.python-version == '3.9'
+        run: |
+          set -o pipefail
+          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=65 2>&1 | tee /tmp/pytest-coverage.log
+
       - name: Post pytest failure summary
         if: failure() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
@@ -48,17 +54,30 @@ jobs:
           script: |
             const fs = require('fs');
             const pyVersion = '${{ matrix.python-version }}';
+            const candidates = ['/tmp/pytest-coverage.log', '/tmp/pytest.log'];
             let log = '';
-            try {
-              log = fs.readFileSync('/tmp/pytest.log', 'utf8');
-            } catch (e) {
-              log = '(no /tmp/pytest.log found — pytest may have failed before writing output)';
+            let source = '';
+            for (const path of candidates) {
+              try {
+                log = fs.readFileSync(path, 'utf8');
+                source = path;
+                break;
+              } catch (e) {
+                // try next
+              }
+            }
+            if (!log) {
+              log = '(no pytest log found — pytest may have failed before writing output)';
+              source = '(none)';
             }
             const lines = log.split('\n');
             const shortIdx = lines.findIndex(l => l.includes('short test summary info'));
+            const covIdx = lines.findIndex(l => l.includes('Required test coverage of'));
             let summary;
             if (shortIdx >= 0) {
               summary = lines.slice(shortIdx).join('\n');
+            } else if (covIdx >= 0) {
+              summary = lines.slice(Math.max(0, covIdx - 40)).join('\n');
             } else {
               summary = lines.slice(-80).join('\n');
             }
@@ -69,7 +88,7 @@ jobs:
             const body = [
               `### pytest failed on Python ${pyVersion}`,
               '',
-              `[Full CI log](${runUrl})`,
+              `Source: \`${source}\` · [Full CI log](${runUrl})`,
               '',
               '<details><summary>Failure summary</summary>',
               '',
@@ -85,11 +104,6 @@ jobs:
               issue_number: context.issue.number,
               body,
             });
-
-      - name: Run tests with coverage
-        if: matrix.python-version == '3.11' || matrix.python-version == '3.9'
-        run: |
-          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=65
 
       - name: Upload coverage
         if: matrix.python-version == '3.11'

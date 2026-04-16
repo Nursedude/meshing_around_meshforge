@@ -205,16 +205,46 @@ _UPSTREAM_CMD_MAP = {
 # Commands that REQUIRE the running bot (need runtime state, node DB, etc.)
 # These get sent via mesh when connected, or show "requires bot" when not.
 _BOT_ONLY_COMMANDS = {
-    "joke", "wiki", "askai", "bbshelp", "bbslist", "bbspost", "bbsread",
-    "checkin", "checkout", "dx", "games", "messages", "readnews", "readrss",
-    "rlist", "howfar", "howtall", "whoami", "sysinfo", "satpass",
-    "echo", "email:", "sms:", "survey", "quiz",
+    "joke",
+    "wiki",
+    "askai",
+    "bbshelp",
+    "bbslist",
+    "bbspost",
+    "bbsread",
+    "checkin",
+    "checkout",
+    "dx",
+    "games",
+    "messages",
+    "readnews",
+    "readrss",
+    "rlist",
+    "howfar",
+    "howtall",
+    "whoami",
+    "sysinfo",
+    "satpass",
+    "echo",
+    "email:",
+    "sms:",
+    "survey",
+    "quiz",
 }
 
 # Commands always handled locally by meshforge (no network needed)
 _LOCAL_COMMANDS = {
-    "cmd", "help", "ping", "version", "nodes", "status", "info", "uptime",
-    "lheard", "sitrep", "leaderboard",
+    "cmd",
+    "help",
+    "ping",
+    "version",
+    "nodes",
+    "status",
+    "info",
+    "uptime",
+    "lheard",
+    "sitrep",
+    "leaderboard",
 }
 
 
@@ -303,14 +333,17 @@ def _call_upstream_cmd(command: str, lat: float = 0.0, lon: float = 0.0) -> str:
     try:
         proc = subprocess.run(
             [str(_UPSTREAM_VENV_PYTHON), "-c", _UPSTREAM_SCRIPT],
-            capture_output=True, text=True, timeout=15, env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=env,
         )
         output = proc.stdout.strip()
         if output:
             return output
         if proc.stderr:
             # Filter out the harmless config warning
-            errs = [l for l in proc.stderr.splitlines() if "config.ini" not in l.lower()]
+            errs = [line for line in proc.stderr.splitlines() if "config.ini" not in line.lower()]
             if errs:
                 logger.warning("Upstream cmd %s stderr: %s", command, errs[0][:100])
         return f"{command}: no data"
@@ -327,7 +360,9 @@ def _fetch_url(url: str, timeout: int = 10) -> str:
     from urllib.request import Request, urlopen
 
     try:
-        req = Request(url, headers={"User-Agent": "MeshForge/0.5", "Accept": "application/json,application/xml,text/plain"})
+        req = Request(
+            url, headers={"User-Agent": "MeshForge/0.5", "Accept": "application/json,application/xml,text/plain"}
+        )
         with urlopen(req, timeout=timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except (URLError, OSError, ValueError) as e:
@@ -455,12 +490,13 @@ def _cmd_hfcond() -> str:
     data = _fetch_url("https://www.hamqsl.com/solarxml.php")
     if not data:
         return "HF: fetch failed"
+
     # Simple XML parsing for key fields
     def _extract(tag: str) -> str:
         start = data.find(f"<{tag}>")
         end = data.find(f"</{tag}>")
         if start >= 0 and end > start:
-            return data[start + len(tag) + 2:end].strip()
+            return data[start + len(tag) + 2 : end].strip()
         return "?"
 
     sfi = _extract("solarflux")
@@ -484,7 +520,6 @@ def _fetch_data_source(source) -> str:
     Returns:
         Summary string, or error message if fetch fails.
     """
-    import json
     from urllib.error import URLError
     from urllib.request import Request, urlopen
 
@@ -501,7 +536,10 @@ def _fetch_data_source(source) -> str:
         elif source.command == "volcano":
             pass  # Use the base URL directly
 
-        req = Request(url, headers={"User-Agent": "MeshForge/0.5", "Accept": "application/geo+json,application/json,application/xml"})
+        req = Request(
+            url,
+            headers={"User-Agent": "MeshForge/0.5", "Accept": "application/geo+json,application/json,application/xml"},
+        )
         with urlopen(req, timeout=10) as resp:
             data = resp.read().decode("utf-8", errors="replace")
 
@@ -532,7 +570,6 @@ def _parse_weather_response(data: str, source) -> str:
         temp_c = props.get("temperature", {}).get("value")
         humidity = props.get("relativeHumidity", {}).get("value")
         wind_speed = props.get("windSpeed", {}).get("value")
-        wind_dir = props.get("windDirection", {}).get("value")
 
         parts = [f"Wx {source.station}: {desc}"]
         if temp_c is not None:
@@ -586,9 +623,9 @@ def _parse_volcano_response(data: str, source) -> str:
         lon = getattr(source, "lon", 0.0)
         if lat != 0.0 or lon != 0.0:
             volcanoes = [
-                v for v in volcanoes
-                if (lat - 10 <= v.get("latitude", 0) <= lat + 10
-                    and lon - 10 <= v.get("longitude", 0) <= lon + 10)
+                v
+                for v in volcanoes
+                if (lat - 10 <= v.get("latitude", 0) <= lat + 10 and lon - 10 <= v.get("longitude", 0) <= lon + 10)
             ]
 
         if not volcanoes:
@@ -718,7 +755,7 @@ class MeshtasticAPI(CallbackMixin):
         import socket
 
         try:
-            with socket.create_connection((host, port), timeout=3) as sock:
+            with socket.create_connection((host, port), timeout=3):
                 # Connection succeeded — meshtasticd is listening.
                 # We can't easily tell how many OTHER clients exist from
                 # outside, but for non-localhost targets the mere act of
@@ -816,8 +853,7 @@ class MeshtasticAPI(CallbackMixin):
                 self._leaked_thread_count += 1
                 # SEC-21: Log at ERROR with thread identity for debugging
                 logger.error(
-                    "Worker thread %s (ident=%s) did not stop within 5s "
-                    "(leaked threads: %d)",
+                    "Worker thread %s (ident=%s) did not stop within 5s " "(leaked threads: %d)",
                     self._worker_thread.name,
                     self._worker_thread.ident,
                     self._leaked_thread_count,
@@ -1302,8 +1338,7 @@ class MeshtasticAPI(CallbackMixin):
             broker = getattr(self.config.mqtt, "broker", "")
             if broker in self._PUBLIC_BROKERS:
                 logger.warning(
-                    "auto_respond blocked: %s is a public broker. "
-                    "Bot responses are not allowed on public MQTT.",
+                    "auto_respond blocked: %s is a public broker. " "Bot responses are not allowed on public MQTT.",
                     broker,
                 )
             else:
@@ -1313,7 +1348,7 @@ class MeshtasticAPI(CallbackMixin):
 
         return True
 
-    def _get_command_response(self, command: str) -> str:
+    def _get_command_response(self, command: str) -> str:  # noqa: C901
         """Generate response text for a recognized command.
 
         For data-source commands (weather, tsunami, etc.), fetches live data
@@ -1340,7 +1375,7 @@ class MeshtasticAPI(CallbackMixin):
         elif command == "info":
             return f"MeshForge v{__version__} mesh monitor"
         elif command == "uptime":
-            if hasattr(self, '_connect_time') and self._connect_time:
+            if hasattr(self, "_connect_time") and self._connect_time:
                 delta = datetime.now(timezone.utc) - self._connect_time
                 hours, rem = divmod(int(delta.total_seconds()), 3600)
                 mins, secs = divmod(rem, 60)
@@ -1430,6 +1465,7 @@ class MeshtasticAPI(CallbackMixin):
             if not motd and hasattr(self.config, "read_upstream_settings"):
                 try:
                     import configparser as _cp
+
                     p = _cp.ConfigParser()
                     uc = self.config.find_upstream_config()
                     if uc:
@@ -1699,16 +1735,31 @@ class MockMeshtasticAPI(MeshtasticAPI):
 
         # Generate demo nodes with positions (Hawaiian coordinates for realism)
         demo_nodes = [
-            ("!abc12345", 0xABC12345, "BaseStation", "HQ Base Station", "TBEAM",
-             21.3069, -157.8583, 15, NodeRole.CLIENT),
-            ("!def67890", 0xDEF67890, "Mobile1", "Field Unit Alpha", "TLORA",
-             21.2770, -157.8260, 5, NodeRole.CLIENT),
-            ("!fed98765", 0xFED98765, "Relay", "Mountain Repeater", "HELTEC",
-             21.3310, -157.8000, 450, NodeRole.ROUTER),
-            ("!123abcde", 0x123ABCDE, "Solar1", "Solar Powered Node", "RAK4631",
-             21.2900, -157.8450, 30, NodeRole.CLIENT),
-            ("!456f0e1a", 0x456F0E1A, "Router", "Community Router", "TBEAM",
-             21.3150, -157.8150, 120, NodeRole.ROUTER),
+            (
+                "!abc12345",
+                0xABC12345,
+                "BaseStation",
+                "HQ Base Station",
+                "TBEAM",
+                21.3069,
+                -157.8583,
+                15,
+                NodeRole.CLIENT,
+            ),
+            ("!def67890", 0xDEF67890, "Mobile1", "Field Unit Alpha", "TLORA", 21.2770, -157.8260, 5, NodeRole.CLIENT),
+            ("!fed98765", 0xFED98765, "Relay", "Mountain Repeater", "HELTEC", 21.3310, -157.8000, 450, NodeRole.ROUTER),
+            (
+                "!123abcde",
+                0x123ABCDE,
+                "Solar1",
+                "Solar Powered Node",
+                "RAK4631",
+                21.2900,
+                -157.8450,
+                30,
+                NodeRole.CLIENT,
+            ),
+            ("!456f0e1a", 0x456F0E1A, "Router", "Community Router", "TBEAM", 21.3150, -157.8150, 120, NodeRole.ROUTER),
         ]
 
         node_ids = []
@@ -1773,14 +1824,24 @@ class MockMeshtasticAPI(MeshtasticAPI):
 
         # Configure demo channels with realistic settings
         self.network.channels[0] = Channel(
-            index=0, name="LongFast", role=ChannelRole.PRIMARY,
-            psk="AQ==", uplink_enabled=True, downlink_enabled=True,
-            message_count=42, last_activity=now,
+            index=0,
+            name="LongFast",
+            role=ChannelRole.PRIMARY,
+            psk="AQ==",
+            uplink_enabled=True,
+            downlink_enabled=True,
+            message_count=42,
+            last_activity=now,
         )
         self.network.channels[1] = Channel(
-            index=1, name="MeshForge", role=ChannelRole.SECONDARY,
-            psk="meshforge-key", uplink_enabled=False, downlink_enabled=False,
-            message_count=7, last_activity=now,
+            index=1,
+            name="MeshForge",
+            role=ChannelRole.SECONDARY,
+            psk="meshforge-key",
+            uplink_enabled=False,
+            downlink_enabled=False,
+            message_count=7,
+            last_activity=now,
         )
 
         self._running.set()

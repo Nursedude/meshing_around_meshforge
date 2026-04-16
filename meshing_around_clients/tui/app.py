@@ -45,11 +45,11 @@ try:
     from rich.layout import Layout
     from rich.live import Live
     from rich.markdown import Markdown
+    from rich.markup import escape as rich_escape
     from rich.panel import Panel
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.prompt import Confirm, Prompt
     from rich.table import Table
-    from rich.markup import escape as rich_escape
     from rich.text import Text
     from rich.tree import Tree
 
@@ -80,7 +80,7 @@ from meshing_around_clients import __version__ as VERSION  # noqa: E402
 from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.config import InterfaceConfig  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
-from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES, Message, MessageType  # noqa: E402
+from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
 
 
 class PlainTextTUI:
@@ -104,8 +104,6 @@ class PlainTextTUI:
 
     def run(self) -> None:
         """Run the plain-text dashboard loop."""
-        import os
-
         print("=" * 60)
         print(f"  MESHING-AROUND v{VERSION}  (plain-text mode)")
         print("  Rich library not found — install for full TUI")
@@ -229,10 +227,12 @@ class DashboardScreen(Screen):
         if self._bot_running is not None and now - self._bot_check_time < 30.0:
             return self._bot_running
         import subprocess
+
         try:
             result = subprocess.run(
                 ["pgrep", "-f", "mesh_bot.py"],
-                capture_output=True, timeout=2,
+                capture_output=True,
+                timeout=2,
             )
             self._bot_running = result.returncode == 0
         except (OSError, subprocess.TimeoutExpired):
@@ -309,9 +309,12 @@ class DashboardScreen(Screen):
 
         # Row 1: Connection + nodes + messages
         stats_table.add_row(
-            "Status", Text(label, style=style),
-            "Nodes", f"{len(network.online_nodes)}/{len(network.nodes)}",
-            "Messages", str(network.total_messages),
+            "Status",
+            Text(label, style=style),
+            "Nodes",
+            f"{len(network.online_nodes)}/{len(network.nodes)}",
+            "Messages",
+            str(network.total_messages),
         )
 
         # Row 2: Interface info — adapt labels to connection type
@@ -352,9 +355,12 @@ class DashboardScreen(Screen):
         alert_count = len(network.unread_alerts)
         alert_str = f"[red bold]{alert_count} unread[/red bold]" if alert_count else "[dim green]none[/dim green]"
         stats_table.add_row(
-            "Health", Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
-            "Rx Msgs", rx_str,
-            "Alerts", Text.from_markup(alert_str),
+            "Health",
+            Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
+            "Rx Msgs",
+            rx_str,
+            "Alerts",
+            Text.from_markup(alert_str),
         )
 
         # Row 4: Default channel + avg SNR + channel utilization
@@ -378,9 +384,12 @@ class DashboardScreen(Screen):
         else:
             util_str = "--"
         stats_table.add_row(
-            "Bot Ch", default_ch,
-            "Avg SNR", f"{avg_snr:.1f} dB" if avg_snr else "--",
-            "Ch Util", Text.from_markup(util_str),
+            "Bot Ch",
+            default_ch,
+            "Avg SNR",
+            f"{avg_snr:.1f} dB" if avg_snr else "--",
+            "Ch Util",
+            Text.from_markup(util_str),
         )
 
         return Panel(stats_table, title="[bold]Network Status[/bold]", border_style="blue")
@@ -408,8 +417,10 @@ class DashboardScreen(Screen):
 
             # Check for emergency keywords (incoming messages only —
             # outgoing bot responses listing commands like "tsunami" aren't emergencies)
-            is_emergency = msg.is_incoming and msg.text and any(
-                kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords
+            is_emergency = (
+                msg.is_incoming
+                and msg.text
+                and any(kw.lower() in msg.text.lower() for kw in self.app.config.alerts.emergency_keywords)
             )
 
             text = msg.text or ""
@@ -449,7 +460,7 @@ class DashboardScreen(Screen):
             border_style="magenta",
         )
 
-    def _create_sidebar_panel(self) -> Panel:
+    def _create_sidebar_panel(self) -> Panel:  # noqa: C901
         """Create sidebar with bot status, nodes, and alerts."""
         network = self.app.api.network
         content = []
@@ -480,6 +491,7 @@ class DashboardScreen(Screen):
                 else:
                     # Last-resort: direct read of hardcoded path
                     import configparser as _fallback_cp
+
                     _primary = Path("/opt/meshing-around/config.ini")
                     _fallback_parser = _fallback_cp.ConfigParser()
                     try:
@@ -1150,10 +1162,7 @@ class TopologyScreen(Screen):
             )
 
         # If no hardware channels shown, display MQTT subscription info
-        has_rows = any(
-            ch.role and ch.role.value != "DISABLED"
-            for ch in network.channels.values()
-        )
+        has_rows = any(ch.role and ch.role.value != "DISABLED" for ch in network.channels.values())
         if not has_rows and hasattr(self.app, "config"):
             conn = self.app.api.connection_info
             if conn.interface_type == "mqtt":
@@ -1371,6 +1380,7 @@ class _BaseConfigEditor(Screen):
     def _parse_template_comments(template_path: Path) -> "dict[str, dict[str, str]]":
         """Extract commented-out key=value lines from a template file."""
         import re
+
         result: dict[str, dict[str, str]] = {}
         current_section: Optional[str] = None
         try:
@@ -1405,6 +1415,7 @@ class _BaseConfigEditor(Screen):
             return
 
         import configparser as _cp
+
         template_parser = _cp.ConfigParser()
         try:
             template_parser.read(str(template_path))
@@ -1433,6 +1444,7 @@ class _BaseConfigEditor(Screen):
     def _apply_regional_template(self, template_path: Path) -> None:
         """Apply a regional config template — overwrites with profile values."""
         import configparser as _cp
+
         template = _cp.ConfigParser()
         try:
             template.read(str(template_path))
@@ -1471,6 +1483,7 @@ class _BaseConfigEditor(Screen):
     def _load(self) -> None:
         """Load config into memory, merging template defaults."""
         import configparser as _cp
+
         self._parser = _cp.ConfigParser()
         self._error = ""
         self._loaded = True
@@ -1506,7 +1519,7 @@ class _BaseConfigEditor(Screen):
                 items.append((section, key, value))
         self._items = items
 
-    def render(self) -> Panel:
+    def render(self) -> Panel:  # noqa: C901
         if not self._loaded:
             self._load()
         elif self._auto_reload and self._config_path:
@@ -1568,11 +1581,14 @@ class _BaseConfigEditor(Screen):
         save_indicator = " [yellow]*UNSAVED*[/yellow]" if self._dirty else ""
         template_count = len(self._template_keys)
         template_info = f" [dim]({template_count} defaults)[/dim]" if template_count else ""
+        _base_keys = "[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[e] editor  \\[w] save"
+        _tail_keys = "\\[P] profile  \\[R] reload  \\[q] back[/dim]"
+        _suffix = f"{save_indicator}{template_info}"
         if self._is_template:
-            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[e] editor  \\[w] save  \\[C] create .ini  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
+            subtitle = f"{_base_keys}  \\[C] create .ini  {_tail_keys}{_suffix}"
             title_suffix = " [yellow](template)[/yellow]"
         else:
-            subtitle = f"[dim]\\[j/k] scroll  \\[Enter] edit  \\[t] toggle  \\[e] editor  \\[w] save  \\[P] profile  \\[R] reload  \\[q] back[/dim]{save_indicator}{template_info}"
+            subtitle = f"{_base_keys}  {_tail_keys}{_suffix}"
             title_suffix = ""
 
         return Panel(
@@ -1582,7 +1598,7 @@ class _BaseConfigEditor(Screen):
             border_style="yellow",
         )
 
-    def handle_input(self, key: str) -> bool:
+    def handle_input(self, key: str) -> bool:  # noqa: C901
         try:
             if key == "j":
                 self._cursor = min(self._cursor + 1, max(0, len(self._items) - 1))
@@ -1630,11 +1646,10 @@ class _BaseConfigEditor(Screen):
     def _create_from_template(self) -> None:
         """Create config.ini from the current template."""
         import shutil as _shutil
+
         if not self._config_path:
             return
-        target = self._config_path.with_name(
-            self._config_path.name.replace(".template", "")
-        )
+        target = self._config_path.with_name(self._config_path.name.replace(".template", ""))
         if target.exists():
             self._error = f"Config already exists at {target}"
             return
@@ -1685,7 +1700,7 @@ class _BaseConfigEditor(Screen):
             self.console.print("[yellow]This will overwrite current values with profile values.[/yellow]\n")
             for idx, (name, path) in enumerate(templates, 1):
                 self.console.print(f"  [cyan]{idx}[/cyan]) {name} [dim]({path.name})[/dim]")
-            self.console.print(f"  [cyan]0[/cyan]) Cancel\n")
+            self.console.print("  [cyan]0[/cyan]) Cancel\n")
             try:
                 choice = Prompt.ask("Select profile", default="0")
                 choice_idx = int(choice)
@@ -1719,6 +1734,7 @@ class _BaseConfigEditor(Screen):
     def _save(self) -> None:
         """Save config back to file with .ini.bak backup."""
         import shutil as _shutil
+
         if not self._dirty or not self._config_path:
             return
         try:
@@ -1762,6 +1778,7 @@ class ConfigScreen(Screen):
             try:
                 size = self._config_path.stat().st_size
                 from datetime import datetime as _dt
+
                 mtime = _dt.fromtimestamp(self._config_path.stat().st_mtime)
                 lines.append(f"  Size: {size} bytes\n", style="dim")
                 lines.append(f"  Modified: {mtime:%Y-%m-%d %H:%M:%S}\n\n", style="dim")
@@ -1817,15 +1834,21 @@ class ClientConfigScreen(_BaseConfigEditor):
     """
 
     _SECTION_ORDER = [
-        "interface", "mqtt", "features", "commands", "data_sources",
-        "maps", "alerts", "network", "display", "logging", "advanced",
+        "interface",
+        "mqtt",
+        "features",
+        "commands",
+        "data_sources",
+        "maps",
+        "alerts",
+        "network",
+        "display",
+        "logging",
+        "advanced",
     ]
     _panel_title = "Client Config (mesh_client.ini)"
     _profile_label = "Regional Client Profile"
-    _not_found_hint = (
-        "mesh_client.ini not found.\n"
-        "Run: python3 mesh_client.py --setup  to create one."
-    )
+    _not_found_hint = "mesh_client.ini not found.\n" "Run: python3 mesh_client.py --setup  to create one."
 
     def _find_config(self) -> Optional[Path]:
         """Return the client's own mesh_client.ini path."""
@@ -1893,6 +1916,7 @@ class MapsScreen(Screen):
         """Lazy-init maps client from config."""
         if self._client is None and hasattr(self.app, "config"):
             from meshing_around_clients.core.maps_client import MapsClient
+
             self._client = MapsClient(self.app.config.maps.base_url)
         return self._client
 
@@ -2043,6 +2067,7 @@ class MapsScreen(Screen):
             return True
         elif key == "o":
             import webbrowser
+
             try:
                 webbrowser.open(self.app.config.maps.base_url)
             except (OSError, ValueError):
@@ -2284,7 +2309,6 @@ class MeshingAroundTUI:
         self._alert_flash_text: str = ""
         self._alert_flash_time: float = 0.0
         self._alert_flash_lock = threading.Lock()
-        _ALERT_FLASH_DURATION = 10  # seconds
 
         # Command activity log (last N commands seen)
         self._recent_commands: list = []
@@ -2318,7 +2342,15 @@ class MeshingAroundTUI:
 
     def _register_dirty_callbacks(self) -> None:
         """Register API callbacks that trigger display refresh on data changes."""
-        for event in ("on_message", "on_node_update", "on_alert", "on_connect", "on_disconnect", "on_telemetry", "on_command"):
+        for event in (
+            "on_message",
+            "on_node_update",
+            "on_alert",
+            "on_connect",
+            "on_disconnect",
+            "on_telemetry",
+            "on_command",
+        ):
             self.api.register_callback(event, self._mark_dirty)
         # Track unread incoming messages when not viewing messages screen
         self.api.register_callback("on_message", self._on_message_received)
@@ -2639,8 +2671,9 @@ class MeshingAroundTUI:
         """Disconnect from the device."""
         self.api.disconnect()
 
-    def _connect_mqtt(self, broker: str, port: int, username: str, password: str,
-                      topic: str, channel: str, use_tls: bool = False) -> bool:
+    def _connect_mqtt(
+        self, broker: str, port: int, username: str, password: str, topic: str, channel: str, use_tls: bool = False
+    ) -> bool:
         """Configure MQTT settings, create client, and connect.
 
         Raises ImportError if paho-mqtt is not installed.
@@ -2660,7 +2693,7 @@ class MeshingAroundTUI:
         self._register_dirty_callbacks()
         return self.connect()
 
-    def _connection_fallback_menu(self) -> bool:
+    def _connection_fallback_menu(self) -> bool:  # noqa: C901
         """Show connection type selection menu after a connection failure.
 
         Returns True if a connection was established, False to exit.
@@ -2691,9 +2724,12 @@ class MeshingAroundTUI:
                     channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
                     try:
                         return self._connect_mqtt(
-                            broker="mqtt.meshtastic.org", port=1883,
-                            username=mqtt.username, password=mqtt.password,
-                            topic=topic, channel=channel,
+                            broker="mqtt.meshtastic.org",
+                            port=1883,
+                            username=mqtt.username,
+                            password=mqtt.password,
+                            topic=topic,
+                            channel=channel,
                         )
                     except ImportError:
                         self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
@@ -2719,9 +2755,12 @@ class MeshingAroundTUI:
                     channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
                     try:
                         return self._connect_mqtt(
-                            broker=broker, port=port,
-                            username=username, password=password,
-                            topic=topic, channel=channel,
+                            broker=broker,
+                            port=port,
+                            username=username,
+                            password=password,
+                            topic=topic,
+                            channel=channel,
                         )
                     except ImportError:
                         self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
@@ -2733,9 +2772,13 @@ class MeshingAroundTUI:
                     channel = Prompt.ask("Channel", default="meshforge")
                     try:
                         return self._connect_mqtt(
-                            broker="localhost", port=1883,
-                            username="", password="",
-                            topic=topic, channel=channel, use_tls=False,
+                            broker="localhost",
+                            port=1883,
+                            username="",
+                            password="",
+                            topic=topic,
+                            channel=channel,
+                            use_tls=False,
                         )
                     except ImportError:
                         self.console.print("[red]MQTT library (paho-mqtt) not installed[/red]")
@@ -3097,10 +3140,7 @@ class MeshingAroundTUI:
                 time.sleep(2)
                 return
 
-            self.console.print(
-                f"[bold green]Connected[/bold green] — "
-                f"commands sent to bot on ch{default_ch}\n"
-            )
+            self.console.print(f"[bold green]Connected[/bold green] — " f"commands sent to bot on ch{default_ch}\n")
             self.console.print(MeshtasticAPI.get_command_list(self.config))
             self.console.print()
 
@@ -3144,12 +3184,14 @@ class MeshingAroundTUI:
             venv_missing = bot_dir and not (bot_dir / "venv" / "bin" / "python3").exists()
 
             if venv_missing:
-                self.console.print(Panel(
-                    f"[yellow]Bot found at {bot_dir} but venv is missing[/yellow]\n"
-                    "The bot needs a virtual environment with its dependencies.",
-                    title="[bold cyan]Bot Service Management[/bold cyan]",
-                    border_style="yellow",
-                ))
+                self.console.print(
+                    Panel(
+                        f"[yellow]Bot found at {bot_dir} but venv is missing[/yellow]\n"
+                        "The bot needs a virtual environment with its dependencies.",
+                        title="[bold cyan]Bot Service Management[/bold cyan]",
+                        border_style="yellow",
+                    )
+                )
                 try:
                     install = Prompt.ask("Install bot venv + dependencies?", choices=["y", "n"], default="y")
                     if install == "y":
@@ -3173,28 +3215,32 @@ class MeshingAroundTUI:
             service_exists = ret == 0
 
             if not service_exists:
-                self.console.print(Panel(
-                    "[yellow]mesh_bot.service not installed[/yellow]\n\n"
-                    "Run setup to install:\n"
-                    "  [cyan]./setup_headless.sh[/cyan]  (includes bot service setup)\n\n"
-                    "Or install manually:\n"
-                    "  [cyan]sudo cp templates/mesh_bot.service /etc/systemd/system/[/cyan]\n"
-                    "  Edit User= and WorkingDirectory= for your setup\n"
-                    "  [cyan]sudo systemctl daemon-reload && sudo systemctl enable mesh_bot[/cyan]",
-                    title="[bold cyan]Bot Service Management[/bold cyan]",
-                    border_style="yellow",
-                ))
+                self.console.print(
+                    Panel(
+                        "[yellow]mesh_bot.service not installed[/yellow]\n\n"
+                        "Run setup to install:\n"
+                        "  [cyan]./setup_headless.sh[/cyan]  (includes bot service setup)\n\n"
+                        "Or install manually:\n"
+                        "  [cyan]sudo cp templates/mesh_bot.service /etc/systemd/system/[/cyan]\n"
+                        "  Edit User= and WorkingDirectory= for your setup\n"
+                        "  [cyan]sudo systemctl daemon-reload && sudo systemctl enable mesh_bot[/cyan]",
+                        title="[bold cyan]Bot Service Management[/bold cyan]",
+                        border_style="yellow",
+                    )
+                )
                 input("\nPress Enter to continue...")
                 return
 
             # Check current status
             is_running, status_text = check_service_status(SERVICE_NAME)
             status_style = "bold green" if is_running else "bold red"
-            self.console.print(Panel(
-                f"[{status_style}]{SERVICE_NAME}: {status_text}[/{status_style}]",
-                title="[bold cyan]Bot Service Management[/bold cyan]",
-                border_style="cyan",
-            ))
+            self.console.print(
+                Panel(
+                    f"[{status_style}]{SERVICE_NAME}: {status_text}[/{status_style}]",
+                    title="[bold cyan]Bot Service Management[/bold cyan]",
+                    border_style="cyan",
+                )
+            )
             self.console.print("  [cyan]1[/cyan]) Status (detailed)")
             self.console.print("  [cyan]2[/cyan]) Start")
             self.console.print("  [cyan]3[/cyan]) Stop")
@@ -3225,11 +3271,13 @@ class MeshingAroundTUI:
                     time.sleep(1.5)
                 elif choice == "5":
                     ok, output = get_service_logs(SERVICE_NAME, lines=50)
-                    self.console.print(Panel(
-                        output or "No logs available",
-                        title=f"[bold]journalctl -u {SERVICE_NAME}[/bold]",
-                        border_style="cyan",
-                    ))
+                    self.console.print(
+                        Panel(
+                            output or "No logs available",
+                            title=f"[bold]journalctl -u {SERVICE_NAME}[/bold]",
+                            border_style="cyan",
+                        )
+                    )
                     input("\nPress Enter to continue...")
             except KeyboardInterrupt:
                 pass
@@ -3279,9 +3327,7 @@ class MeshingAroundTUI:
                     try:
                         int(dest.lstrip("!"), 16) if dest.startswith("!") else int(dest)
                     except ValueError:
-                        self.console.print(
-                            "[red]Invalid destination: use ^all, a node number, or !hex_id[/red]"
-                        )
+                        self.console.print("[red]Invalid destination: use ^all, a node number, or !hex_id[/red]")
                         time.sleep(1)
                         return
 

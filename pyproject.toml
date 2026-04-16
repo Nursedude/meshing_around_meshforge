@@ -19,3 +19,21 @@ line_length = 120
 [tool.bandit]
 exclude_dirs = ["tests", ".venv", "venv", "__pycache__"]
 skips = ["B101"]  # assert statements are fine in non-production code
+
+[tool.coverage.run]
+source = ["meshing_around_clients"]
+omit = [
+    # Interactive dialog wrappers — exercised via end-to-end manual flows,
+    # not unit tests.  Mocking whiptail dialogs or Rich live-update loops
+    # drives the test suite into fragile territory without catching real bugs.
+    "meshing_around_clients/tui/whiptail_tui.py",
+    "meshing_around_clients/tui/app.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

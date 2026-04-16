@@ -15,7 +15,7 @@ alert_configurators, config_schema) have been moved to
 meshing_around_clients.setup.
 """
 
-from .config import Config, LoggingConfig, MQTTConfig, MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
+from .config import MQTT_PUBLIC_PASSWORD, MQTT_PUBLIC_USERNAME, Config, LoggingConfig, MQTTConfig
 from .meshtastic_api import MeshtasticAPI, MockMeshtasticAPI
 from .models import Alert, MeshNetwork, Message, Node, NodeTelemetry, Position
 
