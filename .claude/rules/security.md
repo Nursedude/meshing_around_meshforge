@@ -42,6 +42,41 @@ except (ValueError, ConnectionError) as e:
 subprocess.run(["long", "command"], timeout=30)
 ```
 
+## MF005: INI int/float coercion — NEVER call int()/float() raw
+
+User-edited INI values arrive as strings; a hand-typed `port=abc` or
+`baudrate=fast` crashes config load with an uncaught `ValueError` before
+the UI or logger is up.  Use the local `_coerce_int` / `_coerce_float`
+helpers.
+
+```python
+# WRONG — crashes on malformed INI
+port = int(data.get("port", 1883))
+
+# CORRECT — falls back to default on TypeError/ValueError
+port = _coerce_int(data.get("port", 1883), 1883)
+```
+
+Helpers live in:
+- `meshing_around_clients/core/config.py` (`_coerce_int`)
+- `meshing_around_clients/setup/config_schema.py` (`_coerce_int`, `_coerce_float`)
+
+## MF006: subprocess + glob — use glob.glob() NOT subprocess ls
+
+`subprocess.run(["ls", "/dev/ttyUSB*"])` does NOT shell-expand the glob.
+`ls` receives the literal `*` and exits "No such file or directory" every
+time.  Use Python's glob module directly.
+
+```python
+# WRONG — USB port detection silently returns zero
+subprocess.run(["ls", "/dev/ttyUSB*"], capture_output=True)
+
+# CORRECT
+import glob
+for port in glob.glob("/dev/ttyUSB*"):
+    ...
+```
+
 ## Repo-Specific Rules
 
 ### No hardcoded MQTT credentials in code
