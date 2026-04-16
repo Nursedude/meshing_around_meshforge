@@ -76,7 +76,7 @@ class InterfaceConfig:
             port=str(data.get("port", "")),
             hostname=str(data.get("hostname", "")),
             mac=str(data.get("mac", "")),
-            baudrate=int(data.get("baudrate", 115200)),
+            baudrate=_coerce_int(data.get("baudrate", 115200), 115200),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -150,13 +150,13 @@ class EmergencyAlertConfig:
         return cls(
             enabled=_str_to_bool(data.get("enabled", True)),
             keywords=keywords,
-            alert_channel=int(data.get("alert_channel", 2)),
-            alert_interface=int(data.get("alert_interface", 1)),
+            alert_channel=_coerce_int(data.get("alert_channel", 2), 2),
+            alert_interface=_coerce_int(data.get("alert_interface", 1), 1),
             play_sound=_str_to_bool(data.get("play_sound", False)),
             sound_file=str(data.get("sound_file", "")),
             send_email=_str_to_bool(data.get("send_email", False)),
             send_sms=_str_to_bool(data.get("send_sms", False)),
-            cooldown_period=int(data.get("cooldown_period", 300)),
+            cooldown_period=_coerce_int(data.get("cooldown_period", 300), 300),
             log_to_file=_str_to_bool(data.get("log_to_file", True)),
             log_file=str(data.get("log_file", "logs/emergency_alerts.log")),
         )
@@ -222,15 +222,15 @@ class SentryConfig:
         """Create from MeshForge [proximityAlert] section format."""
         return cls(
             enabled=_str_to_bool(data.get("enabled", False)),
-            target_latitude=float(data.get("target_latitude", 0.0)),
-            target_longitude=float(data.get("target_longitude", 0.0)),
-            radius_meters=int(data.get("radius_meters", 100)),
-            channel=int(data.get("alert_channel", 0)),
-            check_interval=int(data.get("check_interval", 60)),
+            target_latitude=_coerce_float(data.get("target_latitude", 0.0), 0.0),
+            target_longitude=_coerce_float(data.get("target_longitude", 0.0), 0.0),
+            radius_meters=_coerce_int(data.get("radius_meters", 100), 100),
+            channel=_coerce_int(data.get("alert_channel", 0), 0),
+            check_interval=_coerce_int(data.get("check_interval", 60), 60),
             run_script=_str_to_bool(data.get("run_script", False)),
             script_near=str(data.get("script_path", "")),
             email_alerts=_str_to_bool(data.get("send_email", False)),
-            node_cooldown=int(data.get("node_cooldown", 600)),
+            node_cooldown=_coerce_int(data.get("node_cooldown", 600), 600),
             log_to_file=_str_to_bool(data.get("log_to_file", True)),
             log_file=str(data.get("log_file", "logs/proximity_alerts.log")),
         )
@@ -586,7 +586,7 @@ class ConfigLoader:
                 bot_name=data.get("bot_name", "MeshBot"),
                 respond_by_dm_only=_str_to_bool(data.get("respond_by_dm_only", True)),
                 auto_ping_in_channel=_str_to_bool(data.get("autopinginchannel", False)),
-                default_channel=int(data.get("defaultchannel", 0)),
+                default_channel=_coerce_int(data.get("defaultchannel", 0), 0),
                 ignore_default_channel=_str_to_bool(data.get("ignoredefaultchannel", False)),
                 ignore_channels=_str_to_int_list(data.get("ignorechannels", "")),
                 cmd_bang=_str_to_bool(data.get("cmdbang", False)),
@@ -596,11 +596,11 @@ class ConfigLoader:
                 motd=data.get("motd", ""),
                 welcome_message=data.get("welcome_message", ""),
                 zulu_time=_str_to_bool(data.get("zulutime", False)),
-                url_timeout=int(data.get("urltimeout", 15)),
+                url_timeout=_coerce_int(data.get("urltimeout", 15), 15),
                 log_messages=_str_to_bool(data.get("logmessagestofile", False)),
                 syslog_to_file=_str_to_bool(data.get("syslogtofile", True)),
                 syslog_level=data.get("sysloglevel", "DEBUG"),
-                log_backup_count=int(data.get("log_backup_count", 32)),
+                log_backup_count=_coerce_int(data.get("log_backup_count", 32), 32),
             )
 
         # Load emergency handler
@@ -667,10 +667,10 @@ class ConfigLoader:
             data = dict(parser.items("altitudeAlert"))
             config.altitude = AltitudeAlertConfig(
                 enabled=_str_to_bool(data.get("enabled", False)),
-                min_altitude=int(data.get("min_altitude", 1000)),
-                channel=int(data.get("alert_channel", 0)),
-                check_interval=int(data.get("check_interval", 120)),
-                cooldown_period=int(data.get("cooldown_period", 300)),
+                min_altitude=_coerce_int(data.get("min_altitude", 1000), 1000),
+                channel=_coerce_int(data.get("alert_channel", 0), 0),
+                check_interval=_coerce_int(data.get("check_interval", 120), 120),
+                cooldown_period=_coerce_int(data.get("cooldown_period", 300), 300),
                 log_to_file=_str_to_bool(data.get("log_to_file", True)),
                 log_file=data.get("log_file", "logs/altitude_alerts.log"),
             )
@@ -684,10 +684,10 @@ class ConfigLoader:
         if parser.has_section("tui"):
             data = dict(parser.items("tui"))
             config.tui = TUIConfig(
-                refresh_rate=float(data.get("refresh_rate", 1.0)),
+                refresh_rate=_coerce_float(data.get("refresh_rate", 1.0), 1.0),
                 color_scheme=data.get("color_scheme", "default"),
                 show_timestamps=_str_to_bool(data.get("show_timestamps", True)),
-                message_history=int(data.get("message_history", 500)),
+                message_history=_coerce_int(data.get("message_history", 500), 500),
                 alert_sound=_str_to_bool(data.get("alert_sound", True)),
             )
 
@@ -814,6 +814,29 @@ def _str_to_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.lower() in ("true", "yes", "1", "on")
     return bool(value)
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    """Coerce *value* to int, returning *default* on malformed INI input.
+
+    Mirrors the helper in `core/config.py` but lives here to keep this
+    module self-contained for upstream-config conversion.  A user who
+    hand-edits the upstream `config.ini` and types a non-numeric channel,
+    timeout, or radius would otherwise trip a ValueError mid-conversion
+    and lose their config load.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    """Coerce *value* to float, returning *default* on malformed INI input."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _str_to_list(value: str) -> List[str]:
