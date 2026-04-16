@@ -99,7 +99,7 @@ if not MODULES_AVAILABLE:
         sudo_user = os.environ.get("SUDO_USER")
         if sudo_user:
             return Path(f"/home/{sudo_user}")
-        return get_user_home()
+        return Path.home()
 
     class Colors:
         """ANSI color codes for terminal output"""
