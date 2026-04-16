@@ -276,7 +276,15 @@ def check_for_updates(repo_path: Path, remote: str = "origin", branch: str = "ma
     # Count commits behind
     ret, stdout, _ = run_command(["git", "rev-list", "--count", f"HEAD..{remote}/{branch}"], cwd=repo_path)
     if ret == 0:
-        commits_behind = int(stdout.strip())
+        try:
+            commits_behind = int(stdout.strip())
+        except ValueError:
+            # Corrupted git state, unusual locale, or wrapper modification
+            # could leave `git rev-list --count` returning non-numeric
+            # output.  Don't crash update checks — report ambiguity and
+            # let the caller decide how to proceed.
+            logger.warning("Unexpected rev-list output %r; treating as unknown", stdout.strip()[:40])
+            return False, "Could not parse commit count", 0
         if commits_behind > 0:
             return True, f"{commits_behind} commits behind {remote}/{branch}", commits_behind
         else:
