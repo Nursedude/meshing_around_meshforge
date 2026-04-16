@@ -213,10 +213,11 @@ class MeshCrypto:
             decryptor = cipher.decryptor()
             return decryptor.update(encrypted_data) + decryptor.finalize()
 
-        except (ValueError, TypeError, struct.error):
+        except (ValueError, TypeError, struct.error) as e:
             # ValueError: Invalid key/nonce size or cipher error
             # TypeError: Invalid input types
             # struct.error: Nonce packing error
+            logger.debug("AES-CTR decrypt failed: %s", type(e).__name__)
             return b""
 
     def encrypt(self, plaintext: bytes, packet_id: int, sender: int) -> bytes:
@@ -243,10 +244,11 @@ class MeshCrypto:
             encryptor = cipher.encryptor()
             return encryptor.update(plaintext) + encryptor.finalize()
 
-        except (ValueError, TypeError, struct.error):
+        except (ValueError, TypeError, struct.error) as e:
             # ValueError: Invalid key/nonce size or cipher error
             # TypeError: Invalid input types
             # struct.error: Nonce packing error
+            logger.debug("AES-CTR encrypt failed: %s", type(e).__name__)
             return b""
 
 
