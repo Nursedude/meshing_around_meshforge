@@ -716,8 +716,8 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
     """Test _BaseConfigEditor template merging (used by ClientConfigScreen)."""
 
     def setUp(self):
-        import tempfile
         import configparser
+        import tempfile
 
         from meshing_around_clients.tui.app import ClientConfigScreen, MeshingAroundTUI
 
@@ -756,13 +756,15 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def tearDown(self):
         import shutil
+
         self.tui.api.disconnect()
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
     def test_parse_template_comments_extracts_keys(self):
         """Commented key=value lines are extracted from template."""
-        from meshing_around_clients.tui.app import _BaseConfigEditor
         from pathlib import Path
+
+        from meshing_around_clients.tui.app import _BaseConfigEditor
 
         result = _BaseConfigEditor._parse_template_comments(Path(self.template_path))
         self.assertIn("general", result)
@@ -771,9 +773,10 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def test_parse_template_comments_skips_documentation(self):
         """Documentation comments with multiple key=value are filtered."""
-        from meshing_around_clients.tui.app import _BaseConfigEditor
-        from pathlib import Path
         import tempfile
+        from pathlib import Path
+
+        from meshing_around_clients.tui.app import _BaseConfigEditor
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".template", delete=False) as f:
             f.write("[location]\n")
@@ -792,8 +795,9 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
 
     def _setup_merge_test(self):
         """Helper: set up screen with test config and test template."""
-        from pathlib import Path
         import configparser
+        from pathlib import Path
+
         self.screen._parser = configparser.ConfigParser()
         self.screen._parser.read(self.config_path)
         self.screen._config_path = Path(self.config_path)
@@ -839,13 +843,12 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
         """Regional client templates are discovered in profiles/ directory."""
         templates = self.screen._find_regional_templates()
         # Client profiles (not *_bot.ini) should be found
-        self.assertTrue(len(templates) > 0,
-                        "Expected at least one client profile")
+        self.assertTrue(len(templates) > 0, "Expected at least one client profile")
 
     def test_render_shows_default_indicator(self):
         """Template-sourced values show (default) indicator in render output."""
-        from pathlib import Path
         import configparser
+        from pathlib import Path
 
         self.screen._parser = configparser.ConfigParser()
         self.screen._parser.read(self.config_path)
@@ -902,12 +905,12 @@ class TestClientConfigScreen(unittest.TestCase):
         """Client profiles exclude *_bot.ini files."""
         templates = self.screen._find_regional_templates()
         for name, path in templates:
-            self.assertFalse(path.name.endswith("_bot.ini"),
-                             f"Bot profile should be excluded: {path}")
+            self.assertFalse(path.name.endswith("_bot.ini"), f"Bot profile should be excluded: {path}")
 
     def test_post_edit_validate_tcp_no_hostname(self):
         """Warns when type set to tcp but hostname is empty."""
         import configparser
+
         self.screen._parser = configparser.ConfigParser()
         self.screen._parser.add_section("interface")
         self.screen._parser.set("interface", "type", "tcp")
@@ -919,6 +922,7 @@ class TestClientConfigScreen(unittest.TestCase):
     def test_post_edit_validate_tcp_with_hostname(self):
         """No warning when type set to tcp and hostname is set."""
         import configparser
+
         self.screen._parser = configparser.ConfigParser()
         self.screen._parser.add_section("interface")
         self.screen._parser.set("interface", "type", "tcp")
@@ -944,6 +948,7 @@ class TestScreenKeyBindings(unittest.TestCase):
     def setUp(self):
         self.config = Config()
         from meshing_around_clients.tui.app import MeshingAroundTUI
+
         self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
         self.tui.api.connect()
 
@@ -977,20 +982,24 @@ class TestBaseConfigEditorInheritance(unittest.TestCase):
 
     def test_config_screen_is_screen(self):
         from meshing_around_clients.tui.app import ConfigScreen, Screen
+
         self.assertTrue(issubclass(ConfigScreen, Screen))
 
     def test_client_config_screen_is_base_editor(self):
         from meshing_around_clients.tui.app import ClientConfigScreen, _BaseConfigEditor
+
         self.assertTrue(issubclass(ClientConfigScreen, _BaseConfigEditor))
 
     def test_base_editor_has_open_in_editor(self):
         """_BaseConfigEditor should have _open_in_editor method."""
         from meshing_around_clients.tui.app import _BaseConfigEditor
+
         self.assertTrue(hasattr(_BaseConfigEditor, "_open_in_editor"))
 
     def test_e_key_handled_by_base_editor(self):
         """The 'e' key should be handled by _BaseConfigEditor.handle_input."""
         from meshing_around_clients.tui.app import ClientConfigScreen, MeshingAroundTUI
+
         config = Config()
         tui = MeshingAroundTUI(config=config, demo_mode=True)
         tui.api.connect()
@@ -1019,8 +1028,7 @@ class TestConfigHelperMethods(unittest.TestCase):
         config = Config()
         profiles = config.find_client_profiles()
         for name, path in profiles:
-            self.assertFalse(path.name.endswith("_bot.ini"),
-                             f"Bot profile should be excluded: {path}")
+            self.assertFalse(path.name.endswith("_bot.ini"), f"Bot profile should be excluded: {path}")
 
     def test_find_client_profiles_includes_regional(self):
         """Should find regional profiles like hawaii.ini, europe.ini."""
@@ -1028,8 +1036,7 @@ class TestConfigHelperMethods(unittest.TestCase):
         profiles = config.find_client_profiles()
         names = [name for name, _ in profiles]
         # At least one regional profile should exist
-        self.assertTrue(len(profiles) > 0,
-                        "Expected at least one client profile")
+        self.assertTrue(len(profiles) > 0, "Expected at least one client profile")
 
 
 import os

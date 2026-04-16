@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from meshing_around_clients.core.config import MQTT_PUBLIC_PASSWORD, MQTT_PUBLIC_USERNAME
 from meshing_around_clients.setup.config_schema import (
     AlertPriority,
     AltitudeAlertConfig,
@@ -42,7 +43,6 @@ from meshing_around_clients.setup.config_schema import (
     _str_to_int_list,
     _str_to_list,
 )
-from meshing_around_clients.core.config import MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
 
 
 class TestHelperFunctions(unittest.TestCase):

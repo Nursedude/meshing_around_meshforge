@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .callbacks import CallbackMixin, extract_position, safe_float, safe_int
-from .config import Config, MQTTConfig, MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
+from .config import MQTT_PUBLIC_PASSWORD, MQTT_PUBLIC_USERNAME, Config, MQTTConfig
 from .models import (
     CHUTIL_CRITICAL_THRESHOLD,
     CHUTIL_WARNING_THRESHOLD,
@@ -135,6 +135,7 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         # Chunk reassembly buffer (bot splits long responses into ~160-char chunks)
         from .meshtastic_api import _ChunkBuffer
+
         self._chunk_buffer = _ChunkBuffer(timeout=config.chunk_reassembly_timeout)
         self._chunk_buffer._flush_callback = self._emit_reassembled_message
 
@@ -321,7 +322,10 @@ class MQTTMeshtasticClient(CallbackMixin):
                 self._client.username_pw_set(self.mqtt_config.username, self.mqtt_config.password)
 
                 # SEC-07: Warn when non-default credentials are sent without TLS
-                _is_default_creds = self.mqtt_config.username == MQTT_PUBLIC_USERNAME and self.mqtt_config.password == MQTT_PUBLIC_PASSWORD
+                _is_default_creds = (
+                    self.mqtt_config.username == MQTT_PUBLIC_USERNAME
+                    and self.mqtt_config.password == MQTT_PUBLIC_PASSWORD
+                )
                 if not _is_default_creds and not self.mqtt_config.use_tls and self.mqtt_config.port != DEFAULT_PORT_TLS:
                     logger.warning(
                         "Non-default MQTT credentials configured without TLS (port %d). "
@@ -770,8 +774,13 @@ class MQTTMeshtasticClient(CallbackMixin):
         """
         parts = topic.split("/")
         info = {
-            "region": "", "subregion": "", "channel": "",
-            "msg_type": "", "node_id": "", "version": "", "raw_topic": topic,
+            "region": "",
+            "subregion": "",
+            "channel": "",
+            "msg_type": "",
+            "node_id": "",
+            "version": "",
+            "raw_topic": topic,
         }
 
         # Detect v2 format: 7 parts with parts[3] in {"2"} (protocol version)
@@ -939,8 +948,12 @@ class MQTTMeshtasticClient(CallbackMixin):
         channel = data.get("channel", 0)
 
         meta = {
-            "sender_id": sender_id, "msg_id": msg_id, "channel": channel,
-            "snr": snr, "rssi": rssi, "hop_count": hop_count,
+            "sender_id": sender_id,
+            "msg_id": msg_id,
+            "channel": channel,
+            "snr": snr,
+            "rssi": rssi,
+            "hop_count": hop_count,
             "recipient_id": str(data.get("to", "")),
         }
 
@@ -1327,9 +1340,13 @@ class MQTTMeshtasticClient(CallbackMixin):
         channel = self._channel_name_to_index(topic_info.get("channel", ""))
 
         meta = {
-            "sender_id": sender_id, "msg_id": msg_id, "channel": channel,
+            "sender_id": sender_id,
+            "msg_id": msg_id,
+            "channel": channel,
             "channel_name": topic_info.get("channel", ""),
-            "snr": snr, "rssi": rssi, "hop_count": hop_count,
+            "snr": snr,
+            "rssi": rssi,
+            "hop_count": hop_count,
             "recipient_id": str(decoded.get("to", "")),
         }
 
@@ -1367,8 +1384,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             broker = self.mqtt_config.broker
             if broker in self._PUBLIC_BROKERS:
                 logger.warning(
-                    "auto_respond blocked: %s is a public broker. "
-                    "Bot responses are not allowed on public MQTT.",
+                    "auto_respond blocked: %s is a public broker. " "Bot responses are not allowed on public MQTT.",
                     broker,
                 )
             else:
@@ -1386,6 +1402,7 @@ class MQTTMeshtasticClient(CallbackMixin):
         are driven by mesh_client.ini.
         """
         from meshing_around_clients import __version__
+
         from .meshtastic_api import _fetch_data_source
 
         if command in ("cmd", "help"):
@@ -1613,7 +1630,9 @@ class MQTTMeshtasticClient(CallbackMixin):
         # node_id matches a real radio's ID, the firmware filters it as
         # loopback and never retransmits.
         nid_lower = self.mqtt_config.node_id.lower().lstrip("!")
-        if nid_lower and not (nid_lower.startswith("c0de") or nid_lower.startswith("feed") or nid_lower.startswith("dead")):
+        if nid_lower and not (
+            nid_lower.startswith("c0de") or nid_lower.startswith("feed") or nid_lower.startswith("dead")
+        ):
             if not getattr(self, "_node_id_warned", False):
                 logger.warning(
                     "node_id %r looks like a real hardware ID, not a virtual one. "

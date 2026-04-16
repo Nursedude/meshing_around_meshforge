@@ -9,6 +9,9 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -35,12 +38,72 @@ jobs:
 
       - name: Run tests
         run: |
-          python -m pytest tests/ -v --tb=short
+          set -o pipefail
+          python -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/pytest.log
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.11' || matrix.python-version == '3.9'
         run: |
-          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=65
+          set -o pipefail
+          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=65 2>&1 | tee /tmp/pytest-coverage.log
+
+      - name: Post pytest failure summary
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const pyVersion = '${{ matrix.python-version }}';
+            const candidates = ['/tmp/pytest-coverage.log', '/tmp/pytest.log'];
+            let log = '';
+            let source = '';
+            for (const path of candidates) {
+              try {
+                log = fs.readFileSync(path, 'utf8');
+                source = path;
+                break;
+              } catch (e) {
+                // try next
+              }
+            }
+            if (!log) {
+              log = '(no pytest log found — pytest may have failed before writing output)';
+              source = '(none)';
+            }
+            const lines = log.split('\n');
+            const shortIdx = lines.findIndex(l => l.includes('short test summary info'));
+            const covIdx = lines.findIndex(l => l.includes('Required test coverage of'));
+            let summary;
+            if (shortIdx >= 0) {
+              summary = lines.slice(shortIdx).join('\n');
+            } else if (covIdx >= 0) {
+              summary = lines.slice(Math.max(0, covIdx - 40)).join('\n');
+            } else {
+              summary = lines.slice(-80).join('\n');
+            }
+            const truncated = summary.length > 60000
+              ? summary.slice(0, 60000) + '\n... (truncated)'
+              : summary;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              `### pytest failed on Python ${pyVersion}`,
+              '',
+              `Source: \`${source}\` · [Full CI log](${runUrl})`,
+              '',
+              '<details><summary>Failure summary</summary>',
+              '',
+              '```',
+              truncated,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
 
       - name: Upload coverage
         if: matrix.python-version == '3.11'

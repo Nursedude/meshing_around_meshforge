@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
-from meshing_around_clients.core.config import Config, MQTT_PUBLIC_USERNAME, MQTT_PUBLIC_PASSWORD
+from meshing_around_clients.core.config import MQTT_PUBLIC_PASSWORD, MQTT_PUBLIC_USERNAME, Config
 from meshing_around_clients.core.models import Alert, AlertType, Message, Node
 
 
@@ -728,9 +728,7 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
         self.config.mqtt.channels = "*"  # wildcard so _resolve_channel_name falls back to `channel`
         self.config.mqtt.topic_root = "msh/US"
         # 256-bit (32-byte) base64-encoded PSK
-        self.config.mqtt.encryption_key = (
-            "SlVxOEZEZWhqencwR0NCOWlWdGJkSTVZdWY5aUIwblY="
-        )
+        self.config.mqtt.encryption_key = "SlVxOEZEZWhqencwR0NCOWlWdGJkSTVZdWY5aUIwblY="
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_build_encrypted_envelope_produces_valid_service_envelope(self, mock_mqtt):
@@ -764,8 +762,8 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_encrypted_envelope_roundtrips_through_processor(self, mock_mqtt):
         """Built envelope should decrypt back to the original text via MeshPacketProcessor."""
-        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
         from meshing_around_clients.core.mesh_crypto import MeshPacketProcessor
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
         try:
             from meshtastic.protobuf import mqtt_pb2  # noqa: F401
@@ -774,14 +772,10 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
 
         client = MQTTMeshtasticClient(self.config)
         text = "roundtrip test message"
-        envelope_bytes = client._build_encrypted_envelope(
-            text=text, channel_name="meshforge", destination="^all"
-        )
+        envelope_bytes = client._build_encrypted_envelope(text=text, channel_name="meshforge", destination="^all")
         self.assertIsNotNone(envelope_bytes)
 
-        processor = MeshPacketProcessor(
-            encryption_key=self.config.mqtt.encryption_key
-        )
+        processor = MeshPacketProcessor(encryption_key=self.config.mqtt.encryption_key)
         result = processor.process_encrypted_packet(envelope_bytes)
 
         self.assertTrue(result.success, f"Decode failed: {result.error}")
@@ -799,9 +793,7 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
 
         self.config.mqtt.node_id = "Borg server"  # display name, not !hex
         client = MQTTMeshtasticClient(self.config)
-        envelope_bytes = client._build_encrypted_envelope(
-            text="hi", channel_name="meshforge", destination="^all"
-        )
+        envelope_bytes = client._build_encrypted_envelope(text="hi", channel_name="meshforge", destination="^all")
         self.assertIsNone(envelope_bytes)
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
@@ -856,8 +848,8 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_own_sent_packet_ids_suppresses_echo(self, mock_mqtt):
         """A received packet matching a recently-sent packet_id should be skipped."""
-        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
         from meshing_around_clients.core.mesh_crypto import DecryptedPacket
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
         client = MQTTMeshtasticClient(self.config)
 
@@ -883,8 +875,9 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
     def test_own_sent_ttl_expires(self, mock_mqtt):
         """Expired own-sent packet_ids should no longer be suppressed."""
-        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
         import time as _t
+
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
         client = MQTTMeshtasticClient(self.config)
         client._remember_own_sent(12345)
@@ -996,9 +989,7 @@ class TestMQTTEncryptedDownlink(unittest.TestCase):
             self.skipTest("meshtastic library not installed")
 
         client = MQTTMeshtasticClient(self.config)
-        envelope_bytes = client._build_encrypted_envelope(
-            text="test", channel_name="meshforge", destination="^all"
-        )
+        envelope_bytes = client._build_encrypted_envelope(text="test", channel_name="meshforge", destination="^all")
         self.assertIsNotNone(envelope_bytes)
 
         envelope = mqtt_pb2.ServiceEnvelope()

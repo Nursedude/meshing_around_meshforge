@@ -450,7 +450,7 @@ class Config:
         if not self._interfaces:
             self._interfaces = [InterfaceConfig()]
 
-    def load(self) -> bool:
+    def load(self) -> bool:  # noqa: C901
         """Load configuration from file.
 
         Supports both MeshForge and upstream meshing-around formats.
@@ -521,20 +521,14 @@ class Config:
 
             # Network
             if self._parser.has_section("network"):
-                self.network_cfg.default_channel = self._parser.getint(
-                    "network", "default_channel", fallback=0
-                )
+                self.network_cfg.default_channel = self._parser.getint("network", "default_channel", fallback=0)
                 mc_str = self._parser.get("network", "monitored_channels", fallback="")
                 if mc_str:
                     self.network_cfg.monitored_channels = [
                         int(c.strip()) for c in mc_str.split(",") if c.strip().isdigit()
                     ]
-                self.network_cfg.message_history = self._parser.getint(
-                    "network", "message_history", fallback=500
-                )
-                self.network_cfg.max_message_length = self._parser.getint(
-                    "network", "max_message_length", fallback=200
-                )
+                self.network_cfg.message_history = self._parser.getint("network", "message_history", fallback=500)
+                self.network_cfg.max_message_length = self._parser.getint("network", "max_message_length", fallback=200)
 
             # NOTE: default_channel is USER-configured, not auto-synced from
             # upstream bot. The bot's defaultchannel + ignoredefaultchannel
@@ -745,7 +739,7 @@ class Config:
             except (ValueError, TypeError):
                 pass  # Skip invalid env var values silently
 
-    def save(self) -> bool:
+    def save(self) -> bool:  # noqa: C901
         """Save configuration to file.
 
         Saves all interfaces using [interface.1], [interface.2], etc. format.
@@ -1053,7 +1047,7 @@ class Config:
             pass
         return profiles
 
-    def read_upstream_commands(self) -> Dict[str, bool]:
+    def read_upstream_commands(self) -> Dict[str, bool]:  # noqa: C901
         """Read upstream meshing-around config to discover enabled bot commands.
 
         Returns a dict of command_display_name -> enabled status.

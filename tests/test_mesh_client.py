@@ -363,12 +363,21 @@ class TestDefaultConfigTemplate(unittest.TestCase):
         """DEFAULT_CONFIG should have all expected sections."""
         config = ConfigParser()
         config.read_string(mesh_client.DEFAULT_CONFIG)
-        expected = ["interface", "mqtt", "features", "commands",
-                    "data_sources", "maps", "alerts", "network",
-                    "display", "logging", "advanced"]
+        expected = [
+            "interface",
+            "mqtt",
+            "features",
+            "commands",
+            "data_sources",
+            "maps",
+            "alerts",
+            "network",
+            "display",
+            "logging",
+            "advanced",
+        ]
         for section in expected:
-            self.assertTrue(config.has_section(section),
-                            f"Missing section: {section}")
+            self.assertTrue(config.has_section(section), f"Missing section: {section}")
 
     def test_embedded_fallback_is_valid(self):
         """The embedded fallback config should parse correctly."""
@@ -380,8 +389,7 @@ class TestDefaultConfigTemplate(unittest.TestCase):
     def test_template_file_exists(self):
         """mesh_client.ini.template should exist in project root."""
         template = Path(mesh_client.SCRIPT_DIR) / "mesh_client.ini.template"
-        self.assertTrue(template.exists(),
-                        f"Template not found at {template}")
+        self.assertTrue(template.exists(), f"Template not found at {template}")
 
 
 if __name__ == "__main__":

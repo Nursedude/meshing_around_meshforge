@@ -24,10 +24,13 @@ class MapsClient:
         """Fetch JSON from maps API. Returns empty dict on failure."""
         url = f"{self.base_url}{path}"
         try:
-            req = Request(url, headers={
-                "User-Agent": "MeshForge-TUI/0.6",
-                "Accept": "application/json",
-            })
+            req = Request(
+                url,
+                headers={
+                    "User-Agent": "MeshForge-TUI/0.6",
+                    "Accept": "application/json",
+                },
+            )
             with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8", errors="replace"))
         except (URLError, OSError, json.JSONDecodeError, ValueError) as e:

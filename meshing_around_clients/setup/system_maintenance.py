@@ -24,12 +24,12 @@ from typing import Callable, List, Optional, Tuple
 
 from meshing_around_clients.core.config import get_user_home
 
-logger = logging.getLogger(__name__)
-
 from .pi_utils import (
     get_pip_command,
     get_pip_install_flags,
 )
+
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Data Classes
@@ -868,7 +868,8 @@ def get_service_logs(name: str, lines: int = 50) -> Tuple[bool, str]:
     """
     ret, stdout, stderr = run_command(
         ["journalctl", "-u", name, "-n", str(lines), "--no-pager"],
-        sudo=False, timeout=10,
+        sudo=False,
+        timeout=10,
     )
     if ret == 0:
         return True, stdout

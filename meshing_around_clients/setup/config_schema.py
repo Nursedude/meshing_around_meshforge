@@ -369,7 +369,6 @@ class GlobalAlertConfig:
 
 from meshing_around_clients.core.config import MQTTConfig  # noqa: E402
 
-
 # =============================================================================
 # Notification Configuration
 # =============================================================================

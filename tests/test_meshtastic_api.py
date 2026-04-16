@@ -908,6 +908,7 @@ class TestChunkBuffer(unittest.TestCase):
 
     def setUp(self):
         from meshing_around_clients.core.meshtastic_api import _ChunkBuffer
+
         self.flushed = []
         self.buffer = _ChunkBuffer(timeout=0.3)
         self.buffer._flush_callback = lambda text, pkt, count: self.flushed.append((text, count))
@@ -916,8 +917,16 @@ class TestChunkBuffer(unittest.TestCase):
         self.buffer.cancel_all()
 
     def _packet(self, sender="!aabb1234", channel=0):
-        return {"fromId": sender, "toId": "^all", "channel": channel,
-                "decoded": {}, "hopStart": 3, "hopLimit": 2, "snr": 5.0, "rssi": -80}
+        return {
+            "fromId": sender,
+            "toId": "^all",
+            "channel": channel,
+            "decoded": {},
+            "hopStart": 3,
+            "hopLimit": 2,
+            "snr": 5.0,
+            "rssi": -80,
+        }
 
     def test_short_message_passes_through(self):
         """Messages under 40 bytes pass through instantly (no timer created)."""
@@ -970,6 +979,7 @@ class TestChunkBuffer(unittest.TestCase):
     def test_reassembly_disabled_when_zero(self):
         """Timeout=0 disables buffering entirely."""
         from meshing_around_clients.core.meshtastic_api import _ChunkBuffer
+
         buf = _ChunkBuffer(timeout=0)
         self.assertFalse(buf.enabled)
         result = buf.add("!aabb1234", 0, "A" * 200, self._packet())
@@ -1091,7 +1101,6 @@ class TestCheckVenvPathSafe(unittest.TestCase):
     def test_world_writable_rejected(self, mock_stat):
         """World-writable path should return False."""
         import stat
-
         from pathlib import Path
 
         mock_stat.return_value = unittest.mock.Mock(st_mode=0o100777)

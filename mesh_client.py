@@ -429,6 +429,7 @@ def activate_venv():
 # CONFIGURATION
 # =============================================================================
 
+
 def _load_default_config_text() -> str:
     """Load the canonical config template, falling back to embedded default.
 
@@ -670,11 +671,10 @@ def upgrade_config(config: ConfigParser) -> bool:
 # Known-bad config values that should be auto-corrected on load.
 # upgrade_config() only adds missing keys — it never updates existing values.
 # This map fixes exact known-bad values without touching user customizations.
+_VOLCANO_URL_OLD = "https://volcanoes.usgs.gov/vsc/api/volcanoApi/"
+_VOLCANO_URL_NEW = "https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated"
 _STALE_VALUE_FIXES = {
-    ("data_sources", "volcano_url"): {
-        "https://volcanoes.usgs.gov/vsc/api/volcanoApi/":
-            "https://volcanoes.usgs.gov/hans-public/api/volcano/getCapElevated",
-    },
+    ("data_sources", "volcano_url"): {_VOLCANO_URL_OLD: _VOLCANO_URL_NEW},
 }
 
 
@@ -727,6 +727,7 @@ def save_config(config: ConfigParser):
         bak_path = CONFIG_FILE.with_suffix(".ini.bak")
         try:
             import shutil
+
             shutil.copy2(str(CONFIG_FILE), str(bak_path))
         except OSError as e:
             log(f"Warning: could not create config backup: {e}", "WARN")
@@ -837,6 +838,8 @@ def apply_bot_profile(profile_id: str) -> bool:
     it into the upstream config with backup.  Returns True if applied.
     """
     import shutil as _shutil
+
+    from meshing_around_clients.core.config import Config
 
     bot_profile_path = PROFILES_DIR / f"{profile_id}_bot.ini"
     if not bot_profile_path.exists():
@@ -1128,10 +1131,7 @@ def interactive_setup():
     # Regional profile selection
     profiles = list_profiles()
     if profiles:
-        profile_items = [
-            (p["id"], f"{p['name']} - {p['description']}")
-            for p in profiles
-        ]
+        profile_items = [(p["id"], f"{p['name']} - {p['description']}") for p in profiles]
         profile_items.append(("skip", "Skip - configure manually"))
 
         profile_choice = menu("Select Your Region", profile_items, default="skip")
@@ -1166,10 +1166,7 @@ def interactive_setup():
     elif profiles and profile_choice and profile_choice != "skip":
         profile = load_profile(profile_choice)
         if profile and profile.has_option("profile", "recommended_hardware"):
-            rec_hw_list = [
-                h.strip()
-                for h in profile.get("profile", "recommended_hardware").split(",")
-            ]
+            rec_hw_list = [h.strip() for h in profile.get("profile", "recommended_hardware").split(",")]
 
     hw_items = [
         # Standalone radios (USB/WiFi/BLE to Pi)
@@ -1650,9 +1647,7 @@ def _ensure_local_broker() -> None:
             from meshing_around_clients.setup.whiptail import yesno
 
             if yesno("Start Mosquitto service?"):
-                subprocess.run(
-                    ["sudo", "systemctl", "start", "mosquitto"], timeout=30
-                )
+                subprocess.run(["sudo", "systemctl", "start", "mosquitto"], timeout=30)
                 time.sleep(1)
                 try:
                     with socket.create_connection(("localhost", 1883), timeout=2):
@@ -1760,17 +1755,14 @@ def configure_wifi_radio(config: ConfigParser) -> None:
 
     # --- Step 1: Device IP ---
     device_ip = inputbox(
-        "WiFi Meshtastic device IP address\n"
-        "(must be reachable from this machine, TCP port 4403)",
+        "WiFi Meshtastic device IP address\n" "(must be reachable from this machine, TCP port 4403)",
         default="",
     )
     if not device_ip:
         log("Cancelled — no device IP entered", "WARN")
         return
 
-    host, tcp_port = (
-        device_ip.rsplit(":", 1) if ":" in device_ip else (device_ip, "4403")
-    )
+    host, tcp_port = device_ip.rsplit(":", 1) if ":" in device_ip else (device_ip, "4403")
 
     # --- Step 2: Connectivity check ---
     log(f"Checking TCP connectivity to {host}:{tcp_port}...", "INFO")
@@ -1796,8 +1788,7 @@ def configure_wifi_radio(config: ConfigParser) -> None:
     except ImportError:
         log("meshtastic library not installed — run: pip install meshtastic", "ERROR")
         msgbox(
-            "The meshtastic Python library is required.\n"
-            "Install with: pip install meshtastic",
+            "The meshtastic Python library is required.\n" "Install with: pip install meshtastic",
             title="Missing Dependency",
         )
         return
@@ -1826,8 +1817,11 @@ def configure_wifi_radio(config: ConfigParser) -> None:
         current_root = mqtt_cfg.root or "msh"
         current_encryption = mqtt_cfg.encryption_enabled
 
-        log(f"Current MQTT: enabled={current_enabled}, broker={current_broker}, "
-            f"root={current_root}, encrypted={current_encryption}", "INFO")
+        log(
+            f"Current MQTT: enabled={current_enabled}, broker={current_broker}, "
+            f"root={current_root}, encrypted={current_encryption}",
+            "INFO",
+        )
 
         # --- Step 4: Configure new MQTT settings ---
         local_ip = _detect_routable_ip(host)
@@ -1846,10 +1840,9 @@ def configure_wifi_radio(config: ConfigParser) -> None:
             installed = False
             if listener_template.exists() and not listener_conf.exists():
                 from meshing_around_clients.setup.whiptail import yesno
+
                 if yesno(
-                    f"Mosquitto is only on localhost.\n"
-                    f"Install listener config for 0.0.0.0:1883?\n"
-                    f"(requires sudo)"
+                    "Mosquitto is only on localhost.\n" "Install listener config for 0.0.0.0:1883?\n" "(requires sudo)"
                 ):
                     try:
                         subprocess.run(
@@ -1883,8 +1876,7 @@ def configure_wifi_radio(config: ConfigParser) -> None:
                 )
 
         broker_addr = inputbox(
-            f"MQTT broker address for the radio\n"
-            f"(auto-detected: this Pi is {local_ip})",
+            f"MQTT broker address for the radio\n" f"(auto-detected: this Pi is {local_ip})",
             default=f"{local_ip}:1883",
         )
         if not broker_addr:
@@ -1950,15 +1942,14 @@ def configure_wifi_radio(config: ConfigParser) -> None:
         # Generate a stable virtual node_id derived from the device's hardware ID.
         # XOR with 0xc0de_0000 puts it in a range unlikely to collide with real
         # hardware node numbers, while keeping it deterministic per-device.
-        device_node_num = sender_node if "sender_node" in dir() else 0
-        if not device_node_num:
-            try:
-                device_node_num = getattr(node, "nodeNum", 0) or 0
-            except (AttributeError, TypeError):
-                device_node_num = 0
+        try:
+            device_node_num = getattr(node, "nodeNum", 0) or 0
+        except (AttributeError, TypeError):
+            device_node_num = 0
         # Fallback: use the lower 16 bits of the broker port + a random component
         if not device_node_num:
             import random as _rnd
+
             virtual_id_int = 0xC0DE0000 | _rnd.randint(1, 0xFFFF)
         else:
             virtual_id_int = (device_node_num & 0x0000FFFF) | 0xC0DE0000
@@ -1968,14 +1959,13 @@ def configure_wifi_radio(config: ConfigParser) -> None:
         # so mesh_client can encrypt outbound messages with the right key.
         device_psk_b64 = ""
         for ch in node.channels:
-            if ch.role != 0 and ch.settings.name == config.get(
-                "mqtt", "channel", fallback=""
-            ):
+            if ch.role != 0 and ch.settings.name == config.get("mqtt", "channel", fallback=""):
                 import base64 as _b64
+
                 device_psk_b64 = _b64.b64encode(ch.settings.psk).decode()
                 break
 
-        log(f"Updating mesh_client.ini for MQTT mode...", "INFO")
+        log("Updating mesh_client.ini for MQTT mode...", "INFO")
         config.set("interface", "type", "mqtt")
         config.set("mqtt", "enabled", "true")
         config.set("mqtt", "broker", "localhost")
@@ -2009,6 +1999,7 @@ def configure_wifi_radio(config: ConfigParser) -> None:
     except Exception as e:
         log(f"Unexpected error: {e}", "ERROR")
         import traceback
+
         traceback.print_exc()
     finally:
         if iface is not None:
@@ -2124,10 +2115,7 @@ def launcher_menu(config: ConfigParser) -> bool:
             if not profiles:
                 profile_msgbox("No profiles found in profiles/ directory.", title="Profiles")
             else:
-                profile_items = [
-                    (p["id"], f"{p['name']} - {p['description']}")
-                    for p in profiles
-                ]
+                profile_items = [(p["id"], f"{p['name']} - {p['description']}") for p in profiles]
                 pick = profile_menu("Select Regional Profile", profile_items)
                 if pick:
                     profile = load_profile(pick)
@@ -2140,8 +2128,7 @@ def launcher_menu(config: ConfigParser) -> bool:
                         profile_msgbox(
                             f"Profile '{pname}' applied and saved.\n"
                             f"Topic: {config.get('mqtt', 'topic_root', fallback='msh/US')}\n"
-                            f"Channels: {config.get('mqtt', 'channels', fallback='LongFast')}"
-                            + bot_msg,
+                            f"Channels: {config.get('mqtt', 'channels', fallback='LongFast')}" + bot_msg,
                             title="Profile Applied",
                         )
             continue
@@ -2415,9 +2402,13 @@ Examples:
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
     parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
-    parser.add_argument("--profile", metavar="NAME", help="Apply a regional profile (e.g., hawaii, europe, local_broker)")
+    parser.add_argument(
+        "--profile", metavar="NAME", help="Apply a regional profile (e.g., hawaii, europe, local_broker)"
+    )
     parser.add_argument("--list-profiles", action="store_true", help="List available regional profiles")
-    parser.add_argument("--upgrade-config", action="store_true", help="Add new config sections without overwriting existing settings")
+    parser.add_argument(
+        "--upgrade-config", action="store_true", help="Add new config sections without overwriting existing settings"
+    )
     parser.add_argument("--check-config", action="store_true", help="Validate config file and exit")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
