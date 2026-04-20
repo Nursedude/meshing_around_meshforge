@@ -17,7 +17,8 @@ Extracted from configure_bot.py for modularity.
 """
 
 import configparser
-from typing import Callable
+from contextlib import contextmanager
+from typing import Any, Callable, Iterator
 
 from .cli_utils import (
     get_input,
@@ -28,6 +29,61 @@ from .cli_utils import (
     validate_coordinates,
     validate_email,
 )
+
+
+class Prompter:
+    """Protocol for a prompt backend (CLI stdin or TUI Rich).
+
+    Duck-typed — any object with these methods works. configure_bot.py uses
+    the module-level cli_utils functions directly; the TUI can pass its own
+    Rich-backed prompter into `use_prompter()` to drive the same
+    configurator functions without stdin.
+    """
+
+    def get_input(
+        self,
+        prompt: str,
+        default: str = "",
+        input_type: type = str,
+        password: bool = False,
+        validator: "Callable[[Any], bool] | None" = None,
+        error_message: str = "Invalid input",
+    ) -> Any:
+        raise NotImplementedError
+
+    def get_yes_no(self, prompt: str, default: bool = False) -> bool:
+        raise NotImplementedError
+
+    def print_section(self, text: str) -> None:
+        raise NotImplementedError
+
+    def print_success(self, text: str) -> None:
+        raise NotImplementedError
+
+    def print_warning(self, text: str) -> None:
+        raise NotImplementedError
+
+
+@contextmanager
+def use_prompter(prompter: Prompter) -> "Iterator[None]":
+    """Temporarily swap the I/O helpers so a configurator runs against a custom Prompter.
+
+    Used by the TUI to drive these wizards via Rich prompts instead of stdin.
+    Single-threaded — do not nest or call from a worker thread. The
+    configurator functions themselves are unchanged; this rebinds the
+    module-level names they resolve at call time.
+    """
+    global get_input, get_yes_no, print_section, print_success, print_warning
+    orig = (get_input, get_yes_no, print_section, print_success, print_warning)
+    get_input = prompter.get_input
+    get_yes_no = prompter.get_yes_no
+    print_section = prompter.print_section
+    print_success = prompter.print_success
+    print_warning = prompter.print_warning
+    try:
+        yield
+    finally:
+        (get_input, get_yes_no, print_section, print_success, print_warning) = orig
 
 
 def _in_range(lo: int, hi: int) -> Callable[[int], bool]:
@@ -434,6 +490,144 @@ def configure_global_settings(config: configparser.ConfigParser) -> None:
     print_success("Global settings configured")
 
 
+def configure_ipaws_alerts(config: configparser.ConfigParser) -> None:
+    """Configure IPAWS (Integrated Public Alert & Warning System) alerts."""
+    print_section("IPAWS Alert Configuration")
+
+    if "ipawsAlert" not in config:
+        config.add_section("ipawsAlert")
+
+    if not get_yes_no("Enable IPAWS alerts?", False):
+        config["ipawsAlert"]["enabled"] = "False"
+        return
+
+    config["ipawsAlert"]["enabled"] = "True"
+
+    state = get_input("2-letter state code (e.g., HI, CA, TX)", "US")
+    config["ipawsAlert"]["state"] = state.upper()
+
+    if get_yes_no("Filter to specific county FIPS codes?", False):
+        fips = get_input("FIPS codes (comma-separated)")
+        config["ipawsAlert"]["fips_codes"] = fips
+
+    channel = get_input(
+        "Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7"
+    )
+    config["ipawsAlert"]["alert_channel"] = str(channel)
+
+    cooldown = get_input(
+        "Repeat cooldown (seconds)", "300", int, validator=_positive, error_message="Must be positive"
+    )
+    config["ipawsAlert"]["cooldown_seconds"] = str(cooldown)
+
+    print_success("IPAWS alerts configured")
+
+
+def configure_volcano_alerts(config: configparser.ConfigParser) -> None:
+    """Configure USGS volcano alerts."""
+    print_section("Volcano Alert Configuration")
+
+    if "volcanoAlert" not in config:
+        config.add_section("volcanoAlert")
+
+    if not get_yes_no("Enable volcano alerts?", False):
+        config["volcanoAlert"]["enabled"] = "False"
+        return
+
+    config["volcanoAlert"]["enabled"] = "True"
+
+    lat = get_input("Latitude for proximity filtering", "0.0", float)
+    lon = get_input("Longitude for proximity filtering", "0.0", float)
+    if not validate_coordinates(lat, lon):
+        print_warning("Coordinates look unusual — double-check lat/lon values")
+    config["volcanoAlert"]["latitude"] = str(lat)
+    config["volcanoAlert"]["longitude"] = str(lon)
+
+    radius = get_input(
+        "Alert radius (km)", "500", int, validator=_positive, error_message="Must be positive"
+    )
+    config["volcanoAlert"]["radius_km"] = str(radius)
+
+    channel = get_input(
+        "Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7"
+    )
+    config["volcanoAlert"]["alert_channel"] = str(channel)
+
+    print_success("Volcano alerts configured")
+
+
+def configure_snr_alerts(config: configparser.ConfigParser) -> None:
+    """Configure SNR (signal-to-noise) threshold alerts."""
+    print_section("SNR Alert Configuration")
+
+    if "snrAlert" not in config:
+        config.add_section("snrAlert")
+
+    if not get_yes_no("Enable SNR alerts?", False):
+        config["snrAlert"]["enabled"] = "False"
+        return
+
+    config["snrAlert"]["enabled"] = "True"
+
+    threshold = get_input(
+        "SNR threshold (dB) — alert when node falls below", "-5", int
+    )
+    config["snrAlert"]["threshold_db"] = str(threshold)
+
+    if get_yes_no("Monitor all nodes? (No = specific nodes)", True):
+        config["snrAlert"]["monitor_all"] = "True"
+    else:
+        nodes = get_input("Node numbers to monitor (comma-separated)")
+        config["snrAlert"]["monitor_nodes"] = nodes
+
+    channel = get_input(
+        "Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7"
+    )
+    config["snrAlert"]["alert_channel"] = str(channel)
+
+    cooldown = get_input(
+        "Repeat cooldown (seconds)", "600", int, validator=_positive, error_message="Must be positive"
+    )
+    config["snrAlert"]["cooldown_seconds"] = str(cooldown)
+
+    print_success("SNR alerts configured")
+
+
+def configure_custom_alerts(config: configparser.ConfigParser) -> None:
+    """Configure custom pattern-matching alerts."""
+    print_section("Custom Alert Configuration")
+
+    if "customAlert" not in config:
+        config.add_section("customAlert")
+
+    if not get_yes_no("Enable custom alerts?", False):
+        config["customAlert"]["enabled"] = "False"
+        return
+
+    config["customAlert"]["enabled"] = "True"
+
+    name = get_input("Rule name (e.g., 'low_battery_fleet')", "custom_rule")
+    config["customAlert"]["rule_name"] = name
+
+    pattern = get_input("Match pattern (regex or plain text)")
+    config["customAlert"]["pattern"] = pattern
+
+    if get_yes_no("Treat pattern as regex?", False):
+        config["customAlert"]["pattern_is_regex"] = "True"
+
+    channel = get_input(
+        "Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7"
+    )
+    config["customAlert"]["alert_channel"] = str(channel)
+
+    severity = get_input(
+        "Severity (1-5, 5=critical)", "3", int, validator=_in_range(1, 5), error_message="Must be 1-5"
+    )
+    config["customAlert"]["severity"] = str(severity)
+
+    print_success("Custom alerts configured")
+
+
 def create_basic_config() -> configparser.ConfigParser:
     """Create a basic configuration interactively."""
     print_section("Basic Configuration")
@@ -494,10 +688,14 @@ ALERT_CONFIGURATORS = {
     "proximity": configure_proximity_alerts,
     "altitude": configure_altitude_alerts,
     "weather": configure_weather_alerts,
+    "ipaws": configure_ipaws_alerts,
+    "volcano": configure_volcano_alerts,
     "battery": configure_battery_alerts,
     "noisy_node": configure_noisy_node_alerts,
     "new_node": configure_new_node_alerts,
+    "snr": configure_snr_alerts,
     "disconnect": configure_disconnect_alerts,
+    "custom": configure_custom_alerts,
     "email_sms": configure_email_sms,
     "global": configure_global_settings,
 }
@@ -511,9 +709,13 @@ def run_all_configurators(config: configparser.ConfigParser) -> None:
     configure_proximity_alerts(config)
     configure_altitude_alerts(config)
     configure_weather_alerts(config)
+    configure_ipaws_alerts(config)
+    configure_volcano_alerts(config)
     configure_battery_alerts(config)
     configure_noisy_node_alerts(config)
     configure_new_node_alerts(config)
+    configure_snr_alerts(config)
     configure_disconnect_alerts(config)
+    configure_custom_alerts(config)
     configure_email_sms(config)
     configure_global_settings(config)

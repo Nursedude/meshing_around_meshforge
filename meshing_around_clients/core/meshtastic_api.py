@@ -1515,6 +1515,64 @@ class MeshtasticAPI(CallbackMixin):
         return ""
 
     @staticmethod
+    def get_command_catalog(config=None) -> "list[tuple[str, str, str]]":
+        """Return a structured list of (name, description, category) for the command palette.
+
+        Sibling of get_command_list() which returns a display string; this one
+        is machine-readable so a TUI picker can render it as a Rich table.
+        """
+        catalog: "list[tuple[str, str, str]]" = [
+            # Data commands
+            ("wx", "Weather (NOAA/Meteo)", "Data"),
+            ("wxc", "Weather (metric)", "Data"),
+            ("mwx", "Marine weather", "Data"),
+            ("wxa", "Weather alerts (NWS)", "Data"),
+            ("ealert", "Emergency alerts (iPAWS)", "Data"),
+            ("valert", "Volcano alerts (USGS)", "Data"),
+            ("earthquake", "Earthquakes (USGS)", "Data"),
+            ("solar", "Solar / space weather", "Data"),
+            ("hfcond", "HF band conditions", "Data"),
+            ("moon", "Moon phase / rise / set", "Data"),
+            ("sun", "Sunrise / sunset", "Data"),
+            ("tide", "NOAA tide data", "Data"),
+            ("riverflow", "River flow data", "Data"),
+            ("whereami", "Location info", "Data"),
+            ("tsunami", "Tsunami alerts (PTWC)", "Data"),
+            ("motd", "Message of the day", "Data"),
+            # Network commands
+            ("lheard", "Last heard nodes", "Network"),
+            ("sitrep", "Situation report", "Network"),
+            ("leaderboard", "Most active nodes", "Network"),
+            ("nodes", "Node list", "Network"),
+            ("status", "Bot status", "Network"),
+            ("ping", "Ping the bot", "Network"),
+            ("version", "Bot version", "Network"),
+            ("uptime", "Bot uptime", "Network"),
+            ("cmd", "Show command list", "Network"),
+            ("help", "Show help", "Network"),
+            # Bot commands
+            ("joke", "Dad joke", "Bot"),
+            ("wiki", "Wikipedia summary", "Bot"),
+            ("askai", "Ask the AI", "Bot"),
+            ("bbshelp", "BBS help", "Bot"),
+            ("bbslist", "BBS message list", "Bot"),
+            ("games", "Games menu", "Bot"),
+            ("readrss", "Read RSS feed", "Bot"),
+            ("readnews", "Read news feed", "Bot"),
+            ("dx", "DX cluster", "Bot"),
+            ("rlist", "Repeater list", "Bot"),
+            ("howfar", "Distance to a node", "Bot"),
+            ("howtall", "Altitude difference", "Bot"),
+            ("whoami", "Node info (self)", "Bot"),
+            ("sysinfo", "System info", "Bot"),
+            ("satpass", "Satellite passes", "Bot"),
+            ("checkin", "Net check-in", "Bot"),
+            ("checkout", "Net check-out", "Bot"),
+            ("messages", "Read stored messages", "Bot"),
+        ]
+        return catalog
+
+    @staticmethod
     def get_command_list(config=None) -> str:
         """Return a formatted string of available commands for display."""
         from meshing_around_clients import __version__

@@ -32,10 +32,14 @@ class TestAlertConfiguratorsMapping:
             "proximity",
             "altitude",
             "weather",
+            "ipaws",
+            "volcano",
             "battery",
             "noisy_node",
             "new_node",
+            "snr",
             "disconnect",
+            "custom",
             "email_sms",
             "global",
         ]
@@ -445,6 +449,153 @@ class TestAlertConfiguratorFunctions:
         mock_yes_no.return_value = False
         configure_global_settings(config)
         assert config.get("alertGlobal", "global_enabled") == "False"
+
+
+class TestNewAlertConfigurators:
+    """Tests for the 4 alert types added for the TUI/bot integration (IPAWS, VOLCANO, SNR, CUSTOM)."""
+
+    @patch("meshing_around_clients.setup.alert_configurators.get_input")
+    @patch("meshing_around_clients.setup.alert_configurators.get_yes_no")
+    @patch("meshing_around_clients.setup.alert_configurators.print_section")
+    @patch("meshing_around_clients.setup.alert_configurators.print_success")
+    def test_configure_ipaws_enabled(self, _s, _sec, mock_yes_no, mock_input):
+        from meshing_around_clients.setup.alert_configurators import configure_ipaws_alerts
+
+        config = configparser.ConfigParser()
+        # enable, filter_by_fips
+        mock_yes_no.side_effect = [True, False]
+        mock_input.side_effect = ["HI", "2", "300"]
+        configure_ipaws_alerts(config)
+        assert config.get("ipawsAlert", "enabled") == "True"
+        assert config.get("ipawsAlert", "state") == "HI"
+        assert config.get("ipawsAlert", "alert_channel") == "2"
+
+    @patch("meshing_around_clients.setup.alert_configurators.get_yes_no")
+    @patch("meshing_around_clients.setup.alert_configurators.print_section")
+    def test_configure_ipaws_disabled(self, _sec, mock_yes_no):
+        from meshing_around_clients.setup.alert_configurators import configure_ipaws_alerts
+
+        config = configparser.ConfigParser()
+        mock_yes_no.return_value = False
+        configure_ipaws_alerts(config)
+        assert config.get("ipawsAlert", "enabled") == "False"
+
+    @patch("meshing_around_clients.setup.alert_configurators.get_input")
+    @patch("meshing_around_clients.setup.alert_configurators.get_yes_no")
+    @patch("meshing_around_clients.setup.alert_configurators.print_section")
+    @patch("meshing_around_clients.setup.alert_configurators.print_success")
+    @patch("meshing_around_clients.setup.alert_configurators.validate_coordinates", return_value=True)
+    def test_configure_volcano_enabled(self, _vc, _s, _sec, mock_yes_no, mock_input):
+        from meshing_around_clients.setup.alert_configurators import configure_volcano_alerts
+
+        config = configparser.ConfigParser()
+        mock_yes_no.return_value = True
+        mock_input.side_effect = ["19.4", "-155.3", "500", "2"]
+        configure_volcano_alerts(config)
+        assert config.get("volcanoAlert", "enabled") == "True"
+        assert config.get("volcanoAlert", "latitude") == "19.4"
+        assert config.get("volcanoAlert", "radius_km") == "500"
+
+    @patch("meshing_around_clients.setup.alert_configurators.get_input")
+    @patch("meshing_around_clients.setup.alert_configurators.get_yes_no")
+    @patch("meshing_around_clients.setup.alert_configurators.print_section")
+    @patch("meshing_around_clients.setup.alert_configurators.print_success")
+    def test_configure_snr_enabled_all_nodes(self, _s, _sec, mock_yes_no, mock_input):
+        from meshing_around_clients.setup.alert_configurators import configure_snr_alerts
+
+        config = configparser.ConfigParser()
+        # enable, monitor_all
+        mock_yes_no.side_effect = [True, True]
+        mock_input.side_effect = ["-5", "0", "600"]
+        configure_snr_alerts(config)
+        assert config.get("snrAlert", "enabled") == "True"
+        assert config.get("snrAlert", "threshold_db") == "-5"
+        assert config.get("snrAlert", "monitor_all") == "True"
+
+    @patch("meshing_around_clients.setup.alert_configurators.get_input")
+    @patch("meshing_around_clients.setup.alert_configurators.get_yes_no")
+    @patch("meshing_around_clients.setup.alert_configurators.print_section")
+    @patch("meshing_around_clients.setup.alert_configurators.print_success")
+    def test_configure_custom_enabled_regex(self, _s, _sec, mock_yes_no, mock_input):
+        from meshing_around_clients.setup.alert_configurators import configure_custom_alerts
+
+        config = configparser.ConfigParser()
+        # enable, regex
+        mock_yes_no.side_effect = [True, True]
+        mock_input.side_effect = ["mayday_match", "mayday|sos|911", "0", "4"]
+        configure_custom_alerts(config)
+        assert config.get("customAlert", "enabled") == "True"
+        assert config.get("customAlert", "rule_name") == "mayday_match"
+        assert config.get("customAlert", "pattern") == "mayday|sos|911"
+        assert config.get("customAlert", "pattern_is_regex") == "True"
+        assert config.get("customAlert", "severity") == "4"
+
+
+class TestPrompterContextManager:
+    """use_prompter() swaps the module-level I/O helpers for a custom Prompter."""
+
+    def test_use_prompter_swaps_get_input(self):
+        """Inside the context, a configurator sees the prompter's get_input, not cli_utils."""
+        from meshing_around_clients.setup import alert_configurators as ac
+
+        class FakePrompter:
+            def __init__(self):
+                self.calls = []
+
+            def get_input(self, prompt, default="", **kw):
+                self.calls.append(("input", prompt))
+                # Return values tailored for configure_ipaws_alerts's input sequence.
+                mapping = {"2-letter state code": "HI", "Alert channel": "2"}
+                for key, val in mapping.items():
+                    if key in prompt:
+                        return val if default == "" or isinstance(default, str) else int(val)
+                return default or ""
+
+            def get_yes_no(self, prompt, default=False):
+                self.calls.append(("yes_no", prompt))
+                # enable=True, filter_fips=False
+                return "Enable IPAWS" in prompt
+
+            def print_section(self, text):
+                self.calls.append(("section", text))
+
+            def print_success(self, text):
+                self.calls.append(("success", text))
+
+            def print_warning(self, text):
+                self.calls.append(("warning", text))
+
+        fake = FakePrompter()
+        from meshing_around_clients.setup.cli_utils import get_input as real_get_input
+
+        # Inside the context, module-level get_input is the fake's bound method.
+        with ac.use_prompter(fake):
+            # Calling ac.get_input should hit FakePrompter.get_input, not cli_utils.
+            result = ac.get_input("test prompt")
+            assert ("input", "test prompt") in fake.calls
+            # Returning the default (empty string) since no keyword matched.
+            assert result == ""
+        # After context exit, the real cli_utils function is restored.
+        assert ac.get_input is real_get_input
+
+    def test_use_prompter_restores_on_exception(self):
+        """Originals are restored even if the wrapped code raises."""
+        from meshing_around_clients.setup import alert_configurators as ac
+        from meshing_around_clients.setup.cli_utils import get_input as real_get_input
+
+        class Minimal:
+            get_input = staticmethod(lambda *a, **kw: "x")
+            get_yes_no = staticmethod(lambda *a, **kw: False)
+            print_section = staticmethod(lambda *a: None)
+            print_success = staticmethod(lambda *a: None)
+            print_warning = staticmethod(lambda *a: None)
+
+        try:
+            with ac.use_prompter(Minimal()):
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        assert ac.get_input is real_get_input
 
 
 class TestValidatorHelpers:

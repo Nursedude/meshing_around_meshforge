@@ -942,6 +942,95 @@ class TestClientConfigScreen(unittest.TestCase):
 
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestConfigScreenInlineEditor(unittest.TestCase):
+    """ConfigScreen is now a _BaseConfigEditor subclass — mirror of ClientConfigScreen tests."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import ConfigScreen, MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = ConfigScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_is_base_editor_subclass(self):
+        from meshing_around_clients.tui.app import ConfigScreen, _BaseConfigEditor
+
+        self.assertTrue(issubclass(ConfigScreen, _BaseConfigEditor))
+
+    def test_section_order_is_bot_sections(self):
+        """ConfigScreen uses bot-specific section ordering."""
+        self.assertIn("interface", self.screen._SECTION_ORDER)
+        self.assertIn("general", self.screen._SECTION_ORDER)
+        self.assertIn("bbs", self.screen._SECTION_ORDER)
+        self.assertIn("emergencyHandler", self.screen._SECTION_ORDER)
+        # Should NOT have client-only sections
+        self.assertNotIn("mqtt", self.screen._SECTION_ORDER)
+        self.assertNotIn("maps", self.screen._SECTION_ORDER)
+
+    def test_panel_title_is_bot(self):
+        """ConfigScreen panel title should mention 'Bot'."""
+        self.assertIn("Bot", self.screen._panel_title)
+
+    def test_find_regional_templates_only_bot_profiles(self):
+        """Bot profile picker returns *_bot.ini files only."""
+        templates = self.screen._find_regional_templates()
+        for _name, path in templates:
+            self.assertTrue(
+                path.name.endswith("_bot.ini"),
+                f"Non-bot profile should be excluded: {path}",
+            )
+
+    def test_find_config_returns_upstream_path_when_exists(self):
+        """_find_config() delegates to Config.find_upstream_config()."""
+        from unittest.mock import MagicMock
+        from pathlib import Path as _P
+
+        fake = _P("/tmp/fake-bot-config.ini")
+        self.tui.config.find_upstream_config = MagicMock(return_value=fake)  # type: ignore[assignment]
+        # Fake path doesn't exist — the fallback primary path is also checked.
+        # What we assert is that find_upstream_config was tried first.
+        self.screen._find_config()
+        self.tui.config.find_upstream_config.assert_called()
+
+    def test_post_save_hook_sets_restart_message(self):
+        """After save, the operator is reminded to restart the bot service."""
+        self.screen._post_save_hook()
+        self.assertIn("restart", self.screen._error.lower())
+        self.assertIn("mesh_bot", self.screen._error)
+
+    def test_render_does_not_crash_with_no_config(self):
+        """Rendering with no config file returns the 'not found' panel."""
+        from unittest.mock import patch
+
+        with patch.object(self.screen, "_find_config", return_value=None):
+            self.screen._load()
+            panel = self.screen.render()
+            self.assertIsNotNone(panel)
+
+
+class TestFindBotProfiles(unittest.TestCase):
+    """Config.find_bot_profiles() mirrors find_client_profiles for *_bot.ini files."""
+
+    def test_find_bot_profiles_only_bot_ini(self):
+        """Returns only *_bot.ini files, never client profiles."""
+        config = Config()
+        profiles = config.find_bot_profiles()
+        for _name, path in profiles:
+            self.assertTrue(path.name.endswith("_bot.ini"))
+
+    def test_find_bot_profiles_includes_hawaii_bot(self):
+        """Repo ships hawaii_bot.ini — it must be discoverable."""
+        config = Config()
+        profiles = config.find_bot_profiles()
+        paths = [path.name for _name, path in profiles]
+        self.assertIn("hawaii_bot.ini", paths)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
 class TestScreenKeyBindings(unittest.TestCase):
     """Test screen navigation key mappings."""
 
@@ -1111,6 +1200,211 @@ class TestAlertFlashSecurity(unittest.TestCase):
         self.tui._on_alert_received(alert)
         flash = self.tui._alert_flash_text
         self.assertIsInstance(flash, str)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestMapsScreenRenderIsOffline(unittest.TestCase):
+    """MapsScreen.render() must not perform network I/O — it only reads cached data."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.screen = self.tui.screens["maps"]
+
+    def tearDown(self):
+        self.screen.close()
+
+    def test_render_does_not_spawn_worker_when_start_worker_patched(self):
+        """If the worker never starts, render() still returns a Panel without raising."""
+        from unittest.mock import patch
+
+        with patch.object(self.screen, "_start_worker") as mock_start:
+            panel = self.screen.render()
+            self.assertIsNotNone(panel)
+            mock_start.assert_called_once()
+
+    def test_render_does_not_call_maps_client_methods(self):
+        """render() must not reach into the HTTP client — only the worker does."""
+        from unittest.mock import MagicMock, patch
+
+        mock_client = MagicMock()
+        self.screen._client = mock_client
+
+        # Patch the worker starter so the background thread never runs during the test.
+        with patch.object(self.screen, "_start_worker"):
+            self.screen.render()
+
+        mock_client.get_status.assert_not_called()
+        mock_client.get_health_summary.assert_not_called()
+        mock_client.get_active_alerts.assert_not_called()
+        mock_client.get_analytics_summary.assert_not_called()
+        mock_client.get_topology.assert_not_called()
+
+    def test_force_refresh_sets_event_instead_of_blocking(self):
+        """The [r] keybind must wake the worker via self._force, not call HTTP inline."""
+        from unittest.mock import patch
+
+        with patch.object(self.screen, "_start_worker") as mock_start:
+            self.assertFalse(self.screen._force.is_set())
+            handled = self.screen.handle_input("r")
+            self.assertTrue(handled)
+            self.assertTrue(self.screen._force.is_set())
+            mock_start.assert_called()
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestRunCommandPromptChannelPick(unittest.TestCase):
+    """_run_command_prompt must route to the user-picked channel, not default_channel."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        self.config = Config()
+        # Deterministic default so the test is explicit about what "override" means.
+        self.config.network_cfg.default_channel = 4
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def _run_with(self, cmd_answer, channel_answer):
+        """Invoke _run_command_prompt with scripted Prompt.ask answers + mocked send_message."""
+        from unittest.mock import MagicMock, patch
+
+        mock_send = MagicMock(return_value=True)
+        self.tui.api.send_message = mock_send  # type: ignore[method-assign]
+
+        # Prompt.ask returns the command first, then the channel.
+        with patch("meshing_around_clients.tui.app.Prompt.ask", side_effect=[cmd_answer, channel_answer]):
+            with patch("builtins.input", return_value=""):
+                self.tui._run_command_prompt()
+
+        return mock_send
+
+    def test_accepting_default_channel_uses_default(self):
+        """User hits Enter at the channel prompt — send_message uses default_channel."""
+        mock_send = self._run_with("ping", "4")
+        mock_send.assert_called_once_with("ping", "^all", 4)
+
+    def test_override_channel_routes_to_picked_channel(self):
+        """User types '0' at the channel prompt — send_message uses channel 0, not default."""
+        mock_send = self._run_with("ping", "0")
+        mock_send.assert_called_once_with("ping", "^all", 0)
+
+    def test_invalid_channel_falls_back_to_default(self):
+        """User types garbage — send_message falls back to default_channel."""
+        mock_send = self._run_with("ping", "abc")
+        mock_send.assert_called_once_with("ping", "^all", 4)
+
+    def test_out_of_range_channel_falls_back_to_default(self):
+        """Channel outside 0–7 — falls back to default_channel."""
+        mock_send = self._run_with("ping", "99")
+        mock_send.assert_called_once_with("ping", "^all", 4)
+
+    def test_prefill_cmd_skips_command_prompt(self):
+        """When _run_command_prompt is called with prefill_cmd, only the channel is prompted."""
+        from unittest.mock import MagicMock, patch
+
+        mock_send = MagicMock(return_value=True)
+        self.tui.api.send_message = mock_send  # type: ignore[method-assign]
+
+        # Only ONE Prompt.ask call (for the channel) — the command is pre-filled.
+        with patch("meshing_around_clients.tui.app.Prompt.ask", side_effect=["2"]) as mock_ask:
+            with patch("builtins.input", return_value=""):
+                self.tui._run_command_prompt(prefill_cmd="weather")
+
+        self.assertEqual(mock_ask.call_count, 1)
+        mock_send.assert_called_once_with("weather", "^all", 2)
+
+
+class TestCommandCatalog(unittest.TestCase):
+    """MeshtasticAPI.get_command_catalog returns structured command entries."""
+
+    def test_catalog_has_expected_categories(self):
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        catalog = MeshtasticAPI.get_command_catalog()
+        categories = {c for _name, _desc, c in catalog}
+        self.assertIn("Data", categories)
+        self.assertIn("Network", categories)
+        self.assertIn("Bot", categories)
+
+    def test_catalog_entries_are_tuples_of_three_strings(self):
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        catalog = MeshtasticAPI.get_command_catalog()
+        self.assertTrue(len(catalog) > 10)
+        for entry in catalog:
+            self.assertEqual(len(entry), 3)
+            for field in entry:
+                self.assertIsInstance(field, str)
+                self.assertTrue(len(field) > 0)
+
+    def test_catalog_includes_common_commands(self):
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        names = [name for name, _, _ in MeshtasticAPI.get_command_catalog()]
+        for expected in ("ping", "wx", "help", "nodes", "ealert", "valert", "tsunami"):
+            self.assertIn(expected, names, f"Expected command '{expected}' in catalog")
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestCommandPaletteKeyBinding(unittest.TestCase):
+    """[p] key opens the command palette; index selection routes to _run_command_prompt."""
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        self.config = Config()
+        self.config.network_cfg.default_channel = 4
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def test_p_key_invokes_command_palette(self):
+        """Pressing 'p' at the TUI top level calls _run_command_palette."""
+        from unittest.mock import patch
+
+        self.tui.current_screen = "dashboard"
+        with patch.object(self.tui, "_run_command_palette") as mock_palette:
+            self.tui._handle_key("p")
+        mock_palette.assert_called_once()
+
+    def test_palette_index_selection_sends_selected_command(self):
+        """Picking '1' from the palette sends the first catalog entry's command."""
+        from unittest.mock import MagicMock, patch
+        from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
+
+        catalog = MeshtasticAPI.get_command_catalog(self.config)
+        first_cmd = catalog[0][0]
+
+        mock_send = MagicMock(return_value=True)
+        self.tui.api.send_message = mock_send  # type: ignore[method-assign]
+
+        # Palette prompts '1' (selection), then the channel picker fires.
+        with patch("meshing_around_clients.tui.app.Prompt.ask", side_effect=["1", "4"]):
+            with patch("builtins.input", return_value=""):
+                self.tui._run_command_palette()
+
+        mock_send.assert_called_once_with(first_cmd, "^all", 4)
+
+    def test_palette_accepts_typed_command_name(self):
+        """User typing a command name instead of a number also works."""
+        from unittest.mock import MagicMock, patch
+
+        mock_send = MagicMock(return_value=True)
+        self.tui.api.send_message = mock_send  # type: ignore[method-assign]
+
+        with patch("meshing_around_clients.tui.app.Prompt.ask", side_effect=["ping", "4"]):
+            with patch("builtins.input", return_value=""):
+                self.tui._run_command_palette()
+
+        mock_send.assert_called_once_with("ping", "^all", 4)
 
 
 if __name__ == "__main__":

@@ -210,6 +210,10 @@ class Screen:
         """Handle keyboard input. Return True if handled."""
         return False
 
+    def close(self) -> None:
+        """Release any resources held by the screen (background threads, sockets)."""
+        return None
+
 
 class DashboardScreen(Screen):
     """Main dashboard screen — message-centric live feed with network status."""
@@ -1751,79 +1755,85 @@ class _BaseConfigEditor(Screen):
             self._error = f"Save failed: {e}"
 
 
-class ConfigScreen(Screen):
-    """Bot config — opens nano on the real config.ini. One file, one truth."""
+class ConfigScreen(_BaseConfigEditor):
+    """Bot config editor — edits /opt/meshing-around/config.ini inline.
 
-    def __init__(self, app: "MeshingAroundTUI"):
-        super().__init__(app)
-        self._config_path = self._find_config()
-        self._status = ""
+    Screen [8] in the TUI. Mirrors ClientConfigScreen: section-aware Rich UI
+    with template-merge, inline Prompt editing, external-editor fallback ([e]),
+    regional profile picker ([P]), and .ini.bak backup on save.
+    """
 
-    @staticmethod
-    def _find_config() -> Optional[Path]:
-        """Find the bot config.ini."""
+    _SECTION_ORDER = [
+        "interface",
+        "interface2",
+        "general",
+        "location",
+        "emergencyHandler",
+        "sentry",
+        "bbs",
+        "repeater",
+        "radioMon",
+        "fileMon",
+        "scheduler",
+        "messagingSettings",
+        "games",
+        "checklist",
+        "inventory",
+        "qrz",
+        "smtp",
+    ]
+    _panel_title = "Bot Config (meshing-around/config.ini)"
+    _profile_label = "Regional Bot Profile"
+    _not_found_hint = (
+        "Bot config.ini not found.\n"
+        "Install meshing-around or create a symlink:\n"
+        "  sudo ln -s /path/to/meshing-around/config.ini "
+        "/opt/meshing-around/config.ini"
+    )
+
+    def _find_config(self) -> Optional[Path]:
+        """Return the meshing-around bot config path."""
+        if hasattr(self.app, "config") and hasattr(self.app.config, "find_upstream_config"):
+            try:
+                found = self.app.config.find_upstream_config()
+                if found:
+                    return found
+            except Exception as e:
+                logger.debug("Failed to locate bot config: %s", e)
+        # Fallback to the historical hardcoded primary path.
         primary = Path("/opt/meshing-around/config.ini")
-        if primary.exists():
-            return primary
-        project_root = Path(__file__).resolve().parent.parent.parent
-        sibling = project_root.parent / "meshing-around" / "config.ini"
-        if sibling.exists():
-            return sibling
+        try:
+            if primary.exists():
+                return primary
+        except (OSError, PermissionError):
+            pass
         return None
 
-    def render(self) -> Panel:
-        lines = Text()
-        if self._config_path:
-            lines.append(f"  File: {self._config_path}\n\n", style="cyan")
+    def _find_template(self) -> Optional[Path]:
+        """Return the bot's config.template path (ships with meshing-around)."""
+        if hasattr(self.app, "config") and hasattr(self.app.config, "get_upstream_template_path"):
             try:
-                size = self._config_path.stat().st_size
-                from datetime import datetime as _dt
+                found = self.app.config.get_upstream_template_path()
+                if found:
+                    return found
+            except Exception as e:
+                logger.debug("Failed to locate bot template: %s", e)
+        return None
 
-                mtime = _dt.fromtimestamp(self._config_path.stat().st_mtime)
-                lines.append(f"  Size: {size} bytes\n", style="dim")
-                lines.append(f"  Modified: {mtime:%Y-%m-%d %H:%M:%S}\n\n", style="dim")
-            except OSError:
-                pass
-            lines.append("  Press ", style="white")
-            lines.append("Enter", style="bold green")
-            lines.append(" to edit in nano\n", style="white")
-        else:
-            lines.append(
-                "  Bot config.ini not found.\n"
-                "  Searched: /opt/meshing-around/ and sibling directory.\n\n"
-                "  Install meshing-around or create a symlink:\n"
-                "    ln -s /path/to/meshing-around/config.ini "
-                "/opt/meshing-around/config.ini\n",
-                style="yellow",
-            )
-        if self._status:
-            lines.append(f"\n  {self._status}\n", style="green")
-        return Panel(
-            lines,
-            title="[bold]Bot Config (config.ini)[/bold]",
-            subtitle="[dim]\\[Enter] edit in nano  \\[q] back[/dim]",
-            border_style="yellow",
-        )
+    def _find_regional_templates(self) -> "list[tuple[str, Path]]":
+        """Find bot regional profiles (*_bot.ini in profiles/)."""
+        if hasattr(self.app, "config") and hasattr(self.app.config, "find_bot_profiles"):
+            try:
+                return self.app.config.find_bot_profiles()
+            except Exception as e:
+                logger.debug("Failed to find bot profiles: %s", e)
+        return []
 
-    def handle_input(self, key: str) -> bool:
-        if key in ("\n", "\r", "e"):
-            self._open_nano()
-            return True
-        return False
-
-    def _open_nano(self) -> None:
-        if not self._config_path:
-            self._status = "No config.ini found"
-            return
-        from meshing_around_clients.setup.cli_utils import open_in_editor
-
-        with self.app._prompt_mode():
-            self.console.clear()
-            error = open_in_editor(str(self._config_path))
-            if error:
-                self._status = error
-            else:
-                self._status = "Saved. Restart bot: sudo systemctl restart mesh_bot.service"
+    def _post_save_hook(self) -> None:
+        """Remind the operator to restart the bot service so changes take effect."""
+        # _error is surfaced in render(); use it as an informational banner.
+        # Base class clears self._error at load time so this won't leak across reloads.
+        self._error = "Saved. Restart bot: sudo systemctl restart mesh_bot.service"
 
 
 class ClientConfigScreen(_BaseConfigEditor):
@@ -1903,53 +1913,103 @@ class ClientConfigScreen(_BaseConfigEditor):
 
 
 class MapsScreen(Screen):
-    """meshforge-maps integration — shows node health, topology, alerts, analytics."""
+    """meshforge-maps integration — shows node health, topology, alerts, analytics.
+
+    HTTP polling runs on a background daemon thread so render() never blocks on
+    network I/O. The render path only reads cached results under a lock.
+    """
+
+    _REFRESH_INTERVAL = 10.0  # seconds between background fetches
 
     def __init__(self, app: "MeshingAroundTUI"):
         super().__init__(app)
         self._client = None
-        self._data = {}  # cached API responses
-        self._last_fetch = 0.0
+        self._data: Dict[str, Any] = {}
         self._status_msg = ""
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._force = threading.Event()
+        self._worker: Optional[threading.Thread] = None
 
     def _get_client(self):
-        """Lazy-init maps client from config."""
+        """Lazy-init maps client from config. Only called from the worker thread."""
         if self._client is None and hasattr(self.app, "config"):
             from meshing_around_clients.core.maps_client import MapsClient
 
             self._client = MapsClient(self.app.config.maps.base_url)
         return self._client
 
-    def _refresh(self, force: bool = False) -> None:
-        """Fetch data from maps API (throttled to 10s)."""
-        now = time.monotonic()
-        if not force and now - self._last_fetch < 10:
-            return
+    def _fetch_once(self) -> None:
+        """One synchronous fetch cycle. Runs on the worker thread only."""
         client = self._get_client()
         if not client:
-            self._status_msg = "Maps not configured"
+            with self._lock:
+                self._status_msg = "Maps not configured"
+                self._data = {}
             return
         status = client.get_status()
         if not status:
-            self._status_msg = f"Maps server not found at {self.app.config.maps.base_url}"
-            self._data = {}
+            with self._lock:
+                self._status_msg = f"Maps server not found at {self.app.config.maps.base_url}"
+                self._data = {}
             return
-        self._status_msg = ""
-        self._data = {
-            "status": status,
-            "health": client.get_health_summary(),
-            "alerts": client.get_active_alerts(),
-            "analytics": client.get_analytics_summary(),
-            "topology": client.get_topology(),
-        }
-        self._last_fetch = now
+        health = client.get_health_summary()
+        alerts = client.get_active_alerts()
+        analytics = client.get_analytics_summary()
+        topology = client.get_topology()
+        with self._lock:
+            self._status_msg = ""
+            self._data = {
+                "status": status,
+                "health": health,
+                "alerts": alerts,
+                "analytics": analytics,
+                "topology": topology,
+            }
+
+    def _worker_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._fetch_once()
+            except Exception as e:
+                # Don't let worker die on transient errors — surface as status.
+                logger.debug("MapsScreen fetch failed: %s", e)
+                with self._lock:
+                    self._status_msg = f"Maps fetch error: {type(e).__name__}"
+            # Wait up to REFRESH_INTERVAL or until [r] force event fires.
+            self._force.wait(self._REFRESH_INTERVAL)
+            self._force.clear()
+
+    def _start_worker(self) -> None:
+        """Spawn the fetch worker on first render. Safe to call repeatedly."""
+        if self._worker is not None and self._worker.is_alive():
+            return
+        self._stop.clear()
+        self._force.clear()
+        self._worker = threading.Thread(
+            target=self._worker_loop,
+            name="MapsScreen-worker",
+            daemon=True,
+        )
+        self._worker.start()
+
+    def close(self) -> None:
+        """Signal the worker to stop and wait briefly for it to exit."""
+        self._stop.set()
+        self._force.set()  # wake the worker from its wait
+        if self._worker is not None and self._worker.is_alive():
+            self._worker.join(timeout=1.0)
+        self._worker = None
 
     def render(self) -> Panel:
-        self._refresh()
+        self._start_worker()
+        with self._lock:
+            status_msg = self._status_msg
+            data = dict(self._data)
 
-        if self._status_msg:
+        if status_msg:
             content = []
-            content.append(Text(self._status_msg, style="yellow"))
+            content.append(Text(status_msg, style="yellow"))
             content.append(Text(""))
             content.append(Text("Configure in mesh_client.ini:", style="dim"))
             content.append(Text("  [maps]", style="cyan"))
@@ -1977,14 +2037,14 @@ class MapsScreen(Screen):
         )
 
         # Status bar
-        status = self._data.get("status", {})
+        status = data.get("status", {})
         node_count = status.get("total_nodes", 0)
         sources = status.get("sources", {})
         active_sources = sum(1 for s in sources.values() if isinstance(s, dict) and s.get("enabled"))
         url = self.app.config.maps.base_url
 
         # Health quadrant
-        health = self._data.get("health", {})
+        health = data.get("health", {})
         dist = health.get("distribution", {})
         health_content = []
         health_content.append(Text("Node Health", style="bold green"))
@@ -1999,7 +2059,7 @@ class MapsScreen(Screen):
         layout["health"].update(Panel(Group(*health_content), border_style="green"))
 
         # Topology quadrant
-        topo = self._data.get("topology", {})
+        topo = data.get("topology", {})
         links = topo.get("links", [])[:8]
         topo_content = []
         topo_content.append(Text("Topology Links", style="bold magenta"))
@@ -2020,7 +2080,7 @@ class MapsScreen(Screen):
         layout["topology"].update(Panel(Group(*topo_content), border_style="magenta"))
 
         # Alerts quadrant
-        alerts = self._data.get("alerts", {})
+        alerts = data.get("alerts", {})
         alert_list = alerts.get("alerts", []) if isinstance(alerts, dict) else []
         alert_content = []
         alert_content.append(Text("Active Alerts", style="bold red"))
@@ -2036,7 +2096,7 @@ class MapsScreen(Screen):
         layout["alerts"].update(Panel(Group(*alert_content), border_style="red"))
 
         # Analytics quadrant
-        analytics = self._data.get("analytics", {})
+        analytics = data.get("analytics", {})
         analytics_content = []
         analytics_content.append(Text("Analytics", style="bold blue"))
         growth = analytics.get("growth", {})
@@ -2063,7 +2123,10 @@ class MapsScreen(Screen):
 
     def handle_input(self, key: str) -> bool:
         if key == "r":
-            self._refresh(force=True)
+            # Wake the worker so it fetches immediately instead of waiting
+            # up to _REFRESH_INTERVAL seconds.
+            self._start_worker()
+            self._force.set()
             return True
         elif key == "o":
             import webbrowser
@@ -2098,7 +2161,8 @@ class HelpScreen(Screen):
 
 ## Actions
 - **s** - Send message to mesh
-- **r** - Run command (local or via mesh)
+- **r** - Run command (free-form prompt + channel picker)
+- **p** - Bot command palette (pick from catalog, prefilled into [r])
 - **b** - Bot service management (start/stop/restart/status/logs)
 - **c** - Connect/Disconnect
 - **?** / **h** - This help
@@ -3027,6 +3091,12 @@ class MeshingAroundTUI:
                 except (OSError, ValueError) as e:
                     logger.debug("Terminal flush failed: %s", e)
             self._running = False
+            # Stop any per-screen background workers (e.g. MapsScreen HTTP poller)
+            for screen in self.screens.values():
+                try:
+                    screen.close()
+                except Exception as e:
+                    logger.debug("Screen close failed for %s: %s", type(screen).__name__, e)
             # Remove TUI log handler from root logger
             if self._log_handler in logging.getLogger().handlers:
                 logging.getLogger().removeHandler(self._log_handler)
@@ -3072,6 +3142,8 @@ class MeshingAroundTUI:
             self._send_message_prompt()
         elif key == "r":
             self._run_command_prompt()
+        elif key == "p":
+            self._run_command_palette()
         elif key == "c":
             if self.api.is_connected:
                 self.disconnect()
@@ -3128,30 +3200,52 @@ class MeshingAroundTUI:
 
             self._dirty = True
 
-    def _run_command_prompt(self) -> None:
-        """Send a bot command to mesh on default_channel."""
+    def _run_command_prompt(self, prefill_cmd: Optional[str] = None) -> None:
+        """Send a bot command to mesh. Channel is prompted (default: network.default_channel).
+
+        If prefill_cmd is given (e.g. selected from the [p] command palette),
+        skip the free-form command prompt and go straight to the channel picker.
+        """
         default_ch = self.config.network_cfg.default_channel
         with self._prompt_mode():
             self.console.clear()
-            self.console.print(Panel("[bold cyan]Run Command[/bold cyan]", border_style="cyan"))
+            title = "Run Command" if prefill_cmd is None else f"Run Command: {prefill_cmd}"
+            self.console.print(Panel(f"[bold cyan]{title}[/bold cyan]", border_style="cyan"))
 
             if not self.api.is_connected:
                 self.console.print("[red]Not connected — connect first[/red]")
                 time.sleep(2)
                 return
 
-            self.console.print(f"[bold green]Connected[/bold green] — " f"commands sent to bot on ch{default_ch}\n")
-            self.console.print(MeshtasticAPI.get_command_list(self.config))
-            self.console.print()
+            self.console.print(
+                f"[bold green]Connected[/bold green] — default bot channel is ch{default_ch}\n"
+            )
+            if prefill_cmd is None:
+                self.console.print(MeshtasticAPI.get_command_list(self.config))
+                self.console.print()
 
             try:
-                cmd = Prompt.ask("Command").strip()
+                if prefill_cmd is not None:
+                    cmd = prefill_cmd.strip()
+                else:
+                    cmd = Prompt.ask("Command").strip()
                 if not cmd:
                     return
 
-                if self.api.send_message(cmd, "^all", default_ch):
+                ch_raw = Prompt.ask("Channel", default=str(default_ch))
+                try:
+                    chosen_ch = int(ch_raw)
+                    if not 0 <= chosen_ch <= 7:
+                        raise ValueError
+                except ValueError:
                     self.console.print(
-                        f"\n[green]Sent '{cmd}' on ch{default_ch}[/green]"
+                        f"[yellow]Invalid channel '{ch_raw}', using default ch{default_ch}[/yellow]"
+                    )
+                    chosen_ch = default_ch
+
+                if self.api.send_message(cmd, "^all", chosen_ch):
+                    self.console.print(
+                        f"\n[green]Sent '{cmd}' on ch{chosen_ch}[/green]"
                         f"\n[dim]Bot response will appear in Live Feed (screen 1)."
                         f"\nPress Enter...[/dim]"
                     )
@@ -3162,6 +3256,62 @@ class MeshingAroundTUI:
                     time.sleep(1)
             except KeyboardInterrupt:
                 pass
+
+    def _run_command_palette(self) -> None:
+        """Pick a bot command from a numbered Rich table, then run it via _run_command_prompt."""
+        catalog = MeshtasticAPI.get_command_catalog(self.config)
+        if not catalog:
+            return
+
+        with self._prompt_mode():
+            self.console.clear()
+            self.console.print(
+                Panel("[bold cyan]Bot Command Palette[/bold cyan]", border_style="cyan")
+            )
+
+            if not self.api.is_connected:
+                self.console.print("[red]Not connected — connect first[/red]")
+                time.sleep(2)
+                return
+
+            # Render a numbered, category-grouped table.
+            from rich.table import Table
+
+            table = Table(show_header=True, header_style="bold magenta", padding=(0, 1))
+            table.add_column("#", style="dim", width=4, justify="right")
+            table.add_column("Command", style="cyan", no_wrap=True)
+            table.add_column("Description", style="white")
+            table.add_column("Category", style="yellow", no_wrap=True)
+            for idx, (name, desc, category) in enumerate(catalog, start=1):
+                table.add_row(str(idx), name, desc, category)
+            self.console.print(table)
+            self.console.print()
+
+            try:
+                pick = Prompt.ask(
+                    f"Pick a command [1-{len(catalog)}] or type a name", default=""
+                ).strip()
+                if not pick:
+                    return
+                # Number selection
+                if pick.isdigit():
+                    idx = int(pick)
+                    if 1 <= idx <= len(catalog):
+                        cmd = catalog[idx - 1][0]
+                    else:
+                        self.console.print(
+                            f"[yellow]Index {idx} out of range 1..{len(catalog)}[/yellow]"
+                        )
+                        time.sleep(1)
+                        return
+                else:
+                    cmd = pick  # user typed a command name directly
+            except KeyboardInterrupt:
+                return
+
+        # Delegate to the existing send path so the channel picker and
+        # connectivity checks stay in one place.
+        self._run_command_prompt(prefill_cmd=cmd)
 
     def _manage_bot_prompt(self) -> None:
         """Interactive bot service management (start/stop/restart/status/logs)."""

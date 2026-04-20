@@ -74,10 +74,14 @@ try:
         configure_proximity_alerts,
         configure_altitude_alerts,
         configure_weather_alerts,
+        configure_ipaws_alerts,
+        configure_volcano_alerts,
         configure_battery_alerts,
         configure_noisy_node_alerts,
         configure_new_node_alerts,
+        configure_snr_alerts,
         configure_disconnect_alerts,
+        configure_custom_alerts,
         configure_email_sms,
         configure_global_settings,
         create_basic_config,
@@ -1799,28 +1803,33 @@ def main_menu():
         print("4.  Proximity Alerts")
         print("5.  Altitude Alerts")
         print("6.  Weather Alerts")
-        print("7.  Battery Alerts")
-        print("8.  Noisy Node Detection")
-        print("9.  New Node Welcomes")
-        print("10. Email/SMS Settings")
-        print("11. Global Alert Settings")
+        print("7.  IPAWS Alerts (state + FIPS codes)")
+        print("8.  Volcano Alerts (USGS)")
+        print("9.  Battery Alerts")
+        print("10. Noisy Node Detection")
+        print("11. New Node Welcomes")
+        print("12. SNR Threshold Alerts")
+        print("13. Disconnect Alerts")
+        print("14. Custom Pattern Alerts")
+        print("15. Email/SMS Settings")
+        print("16. Global Alert Settings")
         print(f"\n{Colors.BOLD}--- System Maintenance ---{Colors.ENDC}")
-        print("12. System Update (apt update/upgrade)")
-        print("13. Install Meshing-Around (fresh install)")
-        print("14. Update Meshing-Around (git pull)")
-        print("15. Install Dependencies")
-        print("16. Run install.sh (use meshing-around's installer)")
-        print("17. Verify Bot Running")
-        print("18. Launch Bot (using launch.sh if available)")
-        print("19. Show System Info")
+        print("17. System Update (apt update/upgrade)")
+        print("18. Install Meshing-Around (fresh install)")
+        print("19. Update Meshing-Around (git pull)")
+        print("20. Install Dependencies")
+        print("21. Run install.sh (use meshing-around's installer)")
+        print("22. Verify Bot Running")
+        print("23. Launch Bot (using launch.sh if available)")
+        print("24. Show System Info")
         if is_raspberry_pi():
-            print("20. Raspberry Pi Setup")
+            print("25. Raspberry Pi Setup")
         print(f"\n{Colors.BOLD}--- Save & Exit ---{Colors.ENDC}")
-        print("21. Save and Exit")
-        print("22. Save, Deploy & Start Bot")
-        print("23. Exit without Saving")
+        print("26. Save and Exit")
+        print("27. Save, Deploy & Start Bot")
+        print("28. Exit without Saving")
 
-        choice = get_input("\nSelect option (1-23)", "21")
+        choice = get_input("\nSelect option (1-28)", "26")
 
         if choice == "1":
             configure_interface(config)
@@ -1835,46 +1844,56 @@ def main_menu():
         elif choice == "6":
             configure_weather_alerts(config)
         elif choice == "7":
-            configure_battery_alerts(config)
+            configure_ipaws_alerts(config)
         elif choice == "8":
-            configure_noisy_node_alerts(config)
+            configure_volcano_alerts(config)
         elif choice == "9":
-            configure_new_node_alerts(config)
+            configure_battery_alerts(config)
         elif choice == "10":
-            configure_email_sms(config)
+            configure_noisy_node_alerts(config)
         elif choice == "11":
-            configure_global_settings(config)
+            configure_new_node_alerts(config)
         elif choice == "12":
-            system_update()
+            configure_snr_alerts(config)
         elif choice == "13":
-            success, meshing_path, venv_path = install_meshing_around()
+            configure_disconnect_alerts(config)
         elif choice == "14":
-            success, meshing_path = update_meshing_around(meshing_path)
+            configure_custom_alerts(config)
         elif choice == "15":
+            configure_email_sms(config)
+        elif choice == "16":
+            configure_global_settings(config)
+        elif choice == "17":
+            system_update()
+        elif choice == "18":
+            success, meshing_path, venv_path = install_meshing_around()
+        elif choice == "19":
+            success, meshing_path = update_meshing_around(meshing_path)
+        elif choice == "20":
             if meshing_path:
                 install_dependencies(meshing_path, venv_path)
             else:
-                print_error("Meshing-around not found. Run option 13 or 14 first.")
-        elif choice == "16":
+                print_error("Meshing-around not found. Run option 18 or 19 first.")
+        elif choice == "21":
             if meshing_path:
                 run_install_script(meshing_path)
             else:
-                print_error("Meshing-around not found. Run option 13 or 14 first.")
-        elif choice == "17":
+                print_error("Meshing-around not found. Run option 18 or 19 first.")
+        elif choice == "22":
             if meshing_path:
                 verify_bot_running(meshing_path)
             else:
-                print_error("Meshing-around not found. Run option 13 or 14 first.")
-        elif choice == "18":
+                print_error("Meshing-around not found. Run option 18 or 19 first.")
+        elif choice == "23":
             if meshing_path:
                 run_launch_script(meshing_path, venv_path)
             else:
-                print_error("Meshing-around not found. Run option 13 or 14 first.")
-        elif choice == "19":
+                print_error("Meshing-around not found. Run option 18 or 19 first.")
+        elif choice == "24":
             show_system_info()
-        elif choice == "20" and is_raspberry_pi():
+        elif choice == "25" and is_raspberry_pi():
             _, venv_path = raspberry_pi_setup()
-        elif choice == "21":
+        elif choice == "26":
             save_config(config, config_file)
             print_success("\nConfiguration complete!")
             if meshing_path:
@@ -1883,14 +1902,14 @@ def main_menu():
                 print_info(f"Activate venv: source {venv_path}/bin/activate")
             print("\nRun the bot with: python3 mesh_bot.py")
             break
-        elif choice == "22":
+        elif choice == "27":
             save_config(config, config_file)
             if meshing_path:
                 deploy_and_start(config_file, meshing_path)
             else:
                 print_error("Meshing-around not found. Configure path first.")
             break
-        elif choice == "23":
+        elif choice == "28":
             if get_yes_no("Exit without saving changes?", False):
                 print_warning("Exiting without saving")
                 break

@@ -1060,6 +1060,28 @@ class Config:
             pass
         return profiles
 
+    def find_bot_profiles(self) -> "List[tuple]":
+        """Find bot regional profiles (*_bot.ini) in the profiles directory.
+
+        Mirror of find_client_profiles() — returns list of (name, Path) tuples.
+        """
+        profiles_dir = Path(__file__).resolve().parent.parent.parent / "profiles"
+        profiles: list = []
+        try:
+            if not profiles_dir.is_dir():
+                return profiles
+            for p in sorted(profiles_dir.glob("*_bot.ini")):
+                parser = configparser.ConfigParser()
+                try:
+                    parser.read(str(p))
+                    name = parser.get("profile", "name", fallback=p.stem)
+                except configparser.Error:
+                    name = p.stem
+                profiles.append((name, p))
+        except (OSError, PermissionError):
+            pass
+        return profiles
+
     def read_upstream_commands(self) -> Dict[str, bool]:  # noqa: C901
         """Read upstream meshing-around config to discover enabled bot commands.
 
