@@ -1292,13 +1292,16 @@ class TestMQTTMultiPSKDecrypt(unittest.TestCase):
         self.assertEqual(captured[0].text, "multi-psk hello")
 
     @patch("meshing_around_clients.core.mqtt_client.mqtt")
-    def test_undecryptable_packet_fires_rate_limited_warning(self, mock_mqtt):
+    def test_undecryptable_packet_logs_debug_and_drops_silently(self, mock_mqtt):
         """
         Genuinely-non-AQ== custom-PSK channels (e.g. "HI" with a Hawaii-
-        community PSK we don't have) should still produce the rate-limited
-        WARNING — that channel's traffic is correctly silenced after one
-        log line per minute.
+        community PSK we don't have) should drop silently at default log
+        level.  A DEBUG breadcrumb is rate-limited per channel for the
+        operator who explicitly turns up the log level — never WARNING,
+        never on the default-INFO console.
         """
+        import logging as _logging
+
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
 
         try:
@@ -1306,7 +1309,6 @@ class TestMQTTMultiPSKDecrypt(unittest.TestCase):
         except ImportError:
             self.skipTest("meshtastic library not installed")
 
-        # Sender on a PSK the receiver doesn't know.
         sender_config = Config(config_path="/nonexistent/path")
         sender_config.storage.enabled = False
         sender_config.alerts.enabled = False
@@ -1330,16 +1332,19 @@ class TestMQTTMultiPSKDecrypt(unittest.TestCase):
         self.config.mqtt.encryption_key = _b64.b64encode(b"\x77" * 32).decode()
         receiver = MQTTMeshtasticClient(self.config)
 
-        with self.assertLogs("meshing_around_clients.core.mqtt_client", level="WARNING") as log:
+        # 1. At DEBUG, a single breadcrumb fires.
+        with self.assertLogs("meshing_around_clients.core.mqtt_client", level=_logging.DEBUG) as log:
             receiver._handle_encrypted_message(
                 topic="msh/US/2/e/HI/!c0deba5e",
                 payload=envelope,
                 topic_info={"channel": "HI", "node_id": "!c0deba5e"},
             )
-        # WARNING fires; channel name + tried-count present in the message.
         joined = "\n".join(log.output)
         self.assertIn("'HI'", joined)
-        self.assertIn("tried", joined)
+        self.assertIn("DEBUG", joined)
+        # Must NOT be a WARNING — that's the user-visible noise we removed.
+        for line in log.output:
+            self.assertFalse(line.startswith("WARNING"), f"Unexpected WARNING: {line}")
 
 
 if __name__ == "__main__":

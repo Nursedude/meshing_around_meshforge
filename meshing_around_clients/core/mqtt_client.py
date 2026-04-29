@@ -1254,19 +1254,21 @@ class MQTTMeshtasticClient(CallbackMixin):
                     self._process_decoded_packet(result, sender_id, topic_info)
                     return
 
-                # All candidates failed — surface a rate-limited WARNING so
-                # a custom-PSK channel doesn't silently drop.  Without this,
-                # the only sign of a wrong key was an empty Messages screen.
-                tried = max(len(candidates), 1)
+                # All candidates failed — likely a custom-PSK channel we
+                # don't have the key for (channel-name reuse is legal and
+                # common on public-bridge brokers).  Log at DEBUG and rate-
+                # limit per channel so an operator who turns up the log
+                # level still gets a useful breadcrumb without flooding.
+                # Default-INFO operators see nothing, matching the silent
+                # pre-c23625d behavior — the Messages screen is the source
+                # of truth for what actually decoded.
                 now = time.monotonic()
                 last = self._decrypt_warn_last.get(channel_name, 0.0)
                 if now - last >= 60.0:
                     self._decrypt_warn_last[channel_name] = now
-                    logger.warning(
-                        "MQTT: decrypt failed on channel %r (tried %d key%s; likely custom PSK); suppressing for 60s",
+                    logger.debug(
+                        "MQTT decrypt failed on channel %r (likely custom PSK)",
                         channel_name,
-                        tried,
-                        "" if tried == 1 else "s",
                     )
 
             # Fallback: Extract metadata from topic and header
