@@ -1631,26 +1631,46 @@ class MeshtasticAPI(CallbackMixin):
             self._trigger_callbacks("on_position", sender_id, node.position)
 
     def _handle_telemetry(self, packet: dict) -> None:
-        """Handle telemetry update with input validation."""
+        """Handle telemetry update with input validation.
+
+        Decodes both deviceMetrics (battery/voltage/airtime) and
+        environmentMetrics (temp/humidity/pressure/gas) — the latter is
+        what BME280/BME680/BMP280 sensor nodes broadcast.
+        """
         sender_id = packet.get("fromId", "")
         decoded = packet.get("decoded", {})
         telemetry_data = decoded.get("telemetry", {})
         device_metrics = telemetry_data.get("deviceMetrics", {})
+        env_metrics = telemetry_data.get("environmentMetrics", {})
 
         if sender_id in self.network.nodes:
             node = self.network.nodes[sender_id]
+            prev = node.telemetry or NodeTelemetry()
             # Validate all numeric fields (matching MQTT client robustness)
             battery = safe_int(device_metrics.get("batteryLevel"), 0, 101)
             voltage = safe_float(device_metrics.get("voltage"), 0.0, 10.0)
             ch_util = safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0)
             air_util = safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0)
             uptime = safe_int(device_metrics.get("uptimeSeconds"), 0, 2**31)
+            # Environment metrics — sensor nodes only, otherwise empty dict.
+            # Carry previous values forward when this packet doesn't include
+            # them so a device-metrics update doesn't wipe sensor history.
+            temperature = safe_float(env_metrics.get("temperature"), -100.0, 150.0)
+            humidity = safe_float(env_metrics.get("relativeHumidity"), 0.0, 100.0)
+            pressure = safe_float(env_metrics.get("barometricPressure"), 300.0, 1100.0)
+            gas_resistance = safe_float(env_metrics.get("gasResistance"), 0.0, 1e9)
             node.telemetry = NodeTelemetry(
-                battery_level=battery if battery is not None else node.telemetry.battery_level,
-                voltage=voltage if voltage is not None else node.telemetry.voltage,
-                channel_utilization=ch_util if ch_util is not None else node.telemetry.channel_utilization,
-                air_util_tx=air_util if air_util is not None else node.telemetry.air_util_tx,
-                uptime_seconds=uptime if uptime is not None else node.telemetry.uptime_seconds,
+                battery_level=battery if battery is not None else prev.battery_level,
+                voltage=voltage if voltage is not None else prev.voltage,
+                channel_utilization=ch_util if ch_util is not None else prev.channel_utilization,
+                air_util_tx=air_util if air_util is not None else prev.air_util_tx,
+                uptime_seconds=uptime if uptime is not None else prev.uptime_seconds,
+                snr=prev.snr,
+                rssi=prev.rssi,
+                temperature=temperature if temperature is not None else prev.temperature,
+                humidity=humidity if humidity is not None else prev.humidity,
+                pressure=pressure if pressure is not None else prev.pressure,
+                gas_resistance=gas_resistance if gas_resistance is not None else prev.gas_resistance,
                 last_updated=datetime.now(timezone.utc),
             )
             node.last_heard = datetime.now(timezone.utc)

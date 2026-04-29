@@ -537,13 +537,35 @@ class DashboardScreen(Screen):
                     nstyle = "dim"
                 else:
                     nstyle = "white"
-                line = Text()
-                line.append(f"  {name:<14s}", style=nstyle)
-                line.append(f" {heard}", style="dim")
-                batt = node.telemetry.battery_level if node.telemetry else None
-                if batt is not None:
-                    line.append(f" {batt}%", style="green" if batt > 20 else "red")
-                content.append(line)
+                tel = node.telemetry
+
+                # Line 1: name + last-heard + battery% + voltage
+                line1 = Text()
+                line1.append(f"  {name:<14s}", style=nstyle)
+                line1.append(f" {heard}", style="dim")
+                batt = tel.battery_level if tel else None
+                if batt:
+                    line1.append(f" {batt}%", style="green" if batt > 20 else "red")
+                if tel and tel.voltage and tel.voltage > 0.5:
+                    line1.append(f" {tel.voltage:.1f}V", style="cyan")
+                content.append(line1)
+
+                # Line 2: SNR + hops + env (only when something present)
+                detail_parts = []
+                if tel and tel.snr:
+                    snr_style = "green" if tel.snr >= 0 else ("yellow" if tel.snr > -10 else "red")
+                    detail_parts.append((f"SNR {tel.snr:+.0f}", snr_style))
+                if node.hop_count:
+                    detail_parts.append((f"hops {node.hop_count}", "dim"))
+                if tel and tel.temperature is not None:
+                    detail_parts.append((f"{tel.temperature:.0f}C", "magenta"))
+                if detail_parts:
+                    line2 = Text("    ", style="dim")
+                    for i, (txt, style) in enumerate(detail_parts):
+                        if i:
+                            line2.append("  ", style="dim")
+                        line2.append(txt, style=style)
+                    content.append(line2)
         else:
             content.append(Text("  Waiting for nodes...", style="dim"))
         content.append(Text(""))
@@ -624,6 +646,20 @@ class NodesScreen(Screen):
         if has_env:
             table.add_column("Temp", justify="right")
             table.add_column("Hum", justify="right")
+            # Optional sensors — only added when at least one node on the page reports them
+            has_pressure = any(
+                n.telemetry and n.telemetry.pressure is not None for n in page_nodes
+            )
+            has_gas = any(
+                n.telemetry and n.telemetry.gas_resistance is not None for n in page_nodes
+            )
+            if has_pressure:
+                table.add_column("hPa", justify="right")
+            if has_gas:
+                table.add_column("Gas", justify="right")
+        else:
+            has_pressure = False
+            has_gas = False
 
         for idx, node in enumerate(page_nodes, start + 1):
             # Status indicator
@@ -656,14 +692,26 @@ class NodesScreen(Screen):
 
             # Environment telemetry columns
             if has_env:
-                if node.telemetry and node.telemetry.temperature is not None:
-                    row.append(f"{node.telemetry.temperature:.1f}C")
+                tel = node.telemetry
+                if tel and tel.temperature is not None:
+                    row.append(f"{tel.temperature:.1f}C")
                 else:
                     row.append("-")
-                if node.telemetry and node.telemetry.humidity is not None:
-                    row.append(f"{node.telemetry.humidity:.0f}%")
+                if tel and tel.humidity is not None:
+                    row.append(f"{tel.humidity:.0f}%")
                 else:
                     row.append("-")
+                if has_pressure:
+                    if tel and tel.pressure is not None:
+                        row.append(f"{tel.pressure:.0f}")
+                    else:
+                        row.append("-")
+                if has_gas:
+                    if tel and tel.gas_resistance is not None:
+                        # Gas resistance is in Ohms — show in kΩ for readability
+                        row.append(f"{tel.gas_resistance / 1000:.0f}k")
+                    else:
+                        row.append("-")
 
             table.add_row(*row)
 
@@ -752,8 +800,14 @@ class MessagesScreen(Screen):
 
         table = Table(show_header=True, header_style="bold cyan", box=box.SIMPLE, expand=True)
 
+        # Show the channel column wider when at least one message has a name
+        # (common on MQTT — LongFast/ShortTurbo/etc); fall back to the
+        # numeric index when names aren't available (serial/TCP messages).
+        any_named = any(getattr(m, "channel_name", "") for m in messages)
+        ch_col_width = 11 if any_named else 3
+
         table.add_column("Time", style="dim", width=8)
-        table.add_column("Ch", justify="center", width=3)
+        table.add_column("Ch", justify="center", width=ch_col_width)
         table.add_column("Dir", width=3)
         table.add_column("From", style="cyan", width=15)
         table.add_column("To", style="blue", width=15)
@@ -770,7 +824,13 @@ class MessagesScreen(Screen):
 
             snr_str = format_snr(msg.snr)
 
-            table.add_row(msg.time_formatted, str(msg.channel), direction, from_str, to_str, text, snr_str)
+            ch_name = getattr(msg, "channel_name", "") or ""
+            if any_named:
+                ch_display = ch_name[:11] if ch_name else str(msg.channel)
+            else:
+                ch_display = str(msg.channel)
+
+            table.add_row(msg.time_formatted, ch_display, direction, from_str, to_str, text, snr_str)
 
         filter_text = f"Channel {self.channel_filter}" if self.channel_filter is not None else "All channels"
 
@@ -2642,19 +2702,19 @@ class MeshingAroundTUI:
                 shortcuts.append(f"[{key}]", style="white bold on cyan")
                 shortcuts.append(f"{label} ", style="white bold")
             else:
-                shortcuts.append(f"[{key}]", style="cyan bold")
-                shortcuts.append(f"{label} ", style="dim")
+                shortcuts.append(f"[{key}]", style="bright_cyan bold")
+                shortcuts.append(f"{label} ", style="white")
 
-        shortcuts.append("[s]", style="green bold")
-        shortcuts.append("Send ", style="white")
-        shortcuts.append("[r]", style="green bold")
-        shortcuts.append("Run Cmd ", style="white")
-        shortcuts.append("[?]", style="yellow bold")
-        shortcuts.append("Help ", style="white")
-        shortcuts.append("[q]", style="red bold")
-        shortcuts.append("Quit", style="dim")
+        shortcuts.append("[s]", style="bright_green bold")
+        shortcuts.append("Send ", style="white bold")
+        shortcuts.append("[r]", style="bright_green bold")
+        shortcuts.append("Run Cmd ", style="white bold")
+        shortcuts.append("[?]", style="bright_yellow bold")
+        shortcuts.append("Help ", style="white bold")
+        shortcuts.append("[q]", style="bright_red bold")
+        shortcuts.append("Quit", style="white bold")
 
-        return Panel(Align.center(shortcuts), box=box.SIMPLE, border_style="dim")
+        return Panel(Align.center(shortcuts), box=box.SIMPLE, border_style="bright_black")
 
     def _get_alert_flash(self) -> Optional[Panel]:
         """Return an alert flash banner if one is active, else None."""
@@ -2965,13 +3025,17 @@ class MeshingAroundTUI:
         self._start_space_weather_fetch()
 
         try:
-            with Live(self._render(), console=self.console, refresh_per_second=1, screen=True) as live:
+            # Match interactive mode: auto_refresh=False + manual live.refresh()
+            # avoids the auto-timer racing with our dirty-flag updates (the
+            # residual flicker source after the Maps-pane fix).
+            with Live(self._render(), console=self.console, auto_refresh=False, screen=True) as live:
                 while self._running:
                     if self._dirty:
                         self._dirty = False
                         self._last_render_time = time.monotonic()
                         try:
                             live.update(self._render())
+                            live.refresh()
                         except (AttributeError, KeyError, TypeError, IndexError) as e:
                             # Guard against transient data issues during updates
                             logger.debug("Display-mode render error: %s", e)

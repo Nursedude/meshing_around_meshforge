@@ -168,6 +168,9 @@ class MQTTMeshtasticClient(CallbackMixin):
         self._last_logged_health: str = ""
         self._save_lock = threading.Lock()
 
+        # Maps GeoJSON export (file-based bridge to meshforge-maps)
+        self._maps_export_thread: Optional[threading.Thread] = None
+
         # Malformed message rejection rate tracking (SEC-14)
         self._rejection_window_start: float = time.monotonic()
         self._rejection_window_count: int = 0
@@ -190,6 +193,10 @@ class MQTTMeshtasticClient(CallbackMixin):
         self._packet_processor: Optional[MeshPacketProcessor] = None
         if MESH_CRYPTO_AVAILABLE:
             self._packet_processor = MeshPacketProcessor(encryption_key=self.mqtt_config.encryption_key)
+
+        # Rate-limit decrypt-failure WARNINGs to one per topic per minute
+        # (busy public broker would otherwise drown the operator).
+        self._decrypt_warn_last: Dict[str, float] = {}
 
     # ==================== Persistence Methods ====================
 
@@ -244,6 +251,71 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self._auto_save_thread = threading.Thread(target=auto_save_loop, daemon=True, name="mqtt-auto-save")
         self._auto_save_thread.start()
+
+    def _start_maps_export(self) -> None:
+        """Start background thread that periodically writes nodes.geojson.
+
+        meshforge-maps is pull-only — it reads /var/lib/meshforge/nodes.geojson
+        on its 5-second collector cycle, so this thread keeps the file fresh.
+        Off when [maps_export].enabled = false in mesh_client.ini.
+        """
+        export_cfg = getattr(self.config, "maps_export", None)
+        if not export_cfg or not export_cfg.enabled:
+            return
+
+        path_str = str(export_cfg.path)
+        interval = max(5, int(export_cfg.interval) if export_cfg.interval else 30)
+
+        # Validate the parent directory exists, or try to create it.
+        # If we can't write, log once and bail — don't crash the MQTT client.
+        try:
+            import os as _os
+            from pathlib import Path as _Path
+
+            target = _Path(path_str)
+            parent = target.parent
+            if not parent.exists():
+                parent.mkdir(parents=True, exist_ok=True)
+            if not _os.access(str(parent), _os.W_OK):
+                logger.warning(
+                    "Maps export disabled — no write access to %s", parent
+                )
+                return
+        except (OSError, PermissionError) as e:
+            logger.warning("Maps export disabled — cannot prepare %s: %s", path_str, e)
+            return
+
+        def export_loop():
+            while not self._stop_event.is_set():
+                if self._stop_event.wait(timeout=interval):
+                    break
+                try:
+                    self._write_geojson_export(path_str)
+                except (OSError, ValueError) as e:
+                    logger.debug("Maps export write failed: %s", e)
+
+        self._maps_export_thread = threading.Thread(
+            target=export_loop, daemon=True, name="mqtt-maps-export"
+        )
+        self._maps_export_thread.start()
+        logger.info("Maps export enabled: %s every %ds", path_str, interval)
+
+    def _write_geojson_export(self, path_str: str) -> None:
+        """Atomic write of the network's GeoJSON to path_str.
+
+        Writes to a sibling .tmp file then renames over the target so a
+        partial write never reaches a meshforge-maps collector mid-read.
+        """
+        from pathlib import Path as _Path
+
+        target = _Path(path_str)
+        tmp = target.with_suffix(target.suffix + ".tmp")
+        data = self.get_geojson()
+        # Add an 'updated' timestamp so consumers can spot a stale file
+        data["updated"] = datetime.now(timezone.utc).isoformat()
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        tmp.replace(target)
 
     @property
     def is_connected(self) -> bool:
@@ -399,6 +471,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                     # Start background threads
                     self._start_cleanup_thread()
                     self._start_auto_save()
+                    self._start_maps_export()
                     return True
                 else:
                     # Connection timed out - stop the background loop thread
@@ -481,6 +554,8 @@ class MQTTMeshtasticClient(CallbackMixin):
             self._auto_save_thread.join(timeout=5)
         if self._cleanup_thread and self._cleanup_thread.is_alive():
             self._cleanup_thread.join(timeout=5)
+        if self._maps_export_thread and self._maps_export_thread.is_alive():
+            self._maps_export_thread.join(timeout=5)
 
         if self._client:
             try:
@@ -918,6 +993,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             sender_name=sender_name,
             recipient_id=str(meta.get("recipient_id", "")),
             channel=meta.get("channel", 0),
+            channel_name=meta.get("channel_name", ""),
             text=text,
             message_type=MessageType.TEXT,
             timestamp=datetime.now(timezone.utc),
@@ -928,7 +1004,8 @@ class MQTTMeshtasticClient(CallbackMixin):
         )
 
         self.network.add_message(message)
-        _message_logger.info("ch%d %s (%s): %s", message.channel, sender_name, sender_id, text)
+        ch_label = message.channel_name or f"ch{message.channel}"
+        _message_logger.info("%s %s (%s): %s", ch_label, sender_name, sender_id, text)
         self._trigger_callbacks("on_message", message)
 
         if not self._handle_command(message):
@@ -1026,12 +1103,17 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         node = self.network.get_node(sender_id)
         if node:
+            prev = node.telemetry or NodeTelemetry()
 
-            # Validate device metrics (from meshforge patterns)
-            battery = safe_int(device_metrics.get("batteryLevel"), 0, 101) or 0
-            voltage = safe_float(device_metrics.get("voltage"), 0.0, 10.0) or 0.0
-            ch_util = safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0) or 0.0
-            air_util = safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0) or 0.0
+            # Validate device metrics (from meshforge patterns).
+            # Carry prev values forward when this packet doesn't include
+            # them — a device-metrics-only update shouldn't wipe the env
+            # sensor history captured on an earlier packet (and vice versa).
+            battery = safe_int(device_metrics.get("batteryLevel"), 0, 101)
+            voltage = safe_float(device_metrics.get("voltage"), 0.0, 10.0)
+            ch_util = safe_float(device_metrics.get("channelUtilization"), 0.0, 100.0)
+            air_util = safe_float(device_metrics.get("airUtilTx"), 0.0, 100.0)
+            uptime = safe_int(device_metrics.get("uptimeSeconds"), 0, 2**31)
 
             # Environment metrics (BME280, BME680, BMP280)
             env_metrics = telemetry.get("environmentMetrics", {})
@@ -1041,16 +1123,22 @@ class MQTTMeshtasticClient(CallbackMixin):
             gas_resistance = safe_float(env_metrics.get("gasResistance"), 0.0, 1000000.0)
 
             node.telemetry = NodeTelemetry(
-                battery_level=battery,
-                voltage=voltage,
-                channel_utilization=ch_util,
-                air_util_tx=air_util,
+                battery_level=battery if battery is not None else prev.battery_level,
+                voltage=voltage if voltage is not None else prev.voltage,
+                channel_utilization=ch_util if ch_util is not None else prev.channel_utilization,
+                air_util_tx=air_util if air_util is not None else prev.air_util_tx,
+                uptime_seconds=uptime if uptime is not None else prev.uptime_seconds,
+                snr=prev.snr,
+                rssi=prev.rssi,
+                temperature=temperature if temperature is not None else prev.temperature,
+                humidity=humidity if humidity is not None else prev.humidity,
+                pressure=pressure if pressure is not None else prev.pressure,
+                gas_resistance=gas_resistance if gas_resistance is not None else prev.gas_resistance,
                 last_updated=datetime.now(timezone.utc),
-                temperature=temperature,
-                humidity=humidity,
-                pressure=pressure,
-                gas_resistance=gas_resistance,
             )
+            # Surface effective ch_util for the alert checks below, even if
+            # this packet didn't carry one (keeps original alert behavior).
+            ch_util = node.telemetry.channel_utilization
             node.last_heard = datetime.now(timezone.utc)
 
             self._check_battery_alert(node, sender_id)
@@ -1120,6 +1208,19 @@ class MQTTMeshtasticClient(CallbackMixin):
                     sender_id = node_num_to_id(result.sender) if result.sender else node_id
                     self._process_decoded_packet(result, sender_id, topic_info)
                     return
+
+                # Decryption failed — surface a rate-limited WARNING so a
+                # custom-PSK channel doesn't silently drop. Without this,
+                # the only sign of a wrong key was an empty Messages screen.
+                channel_name = topic_info.get("channel", "") or "unknown"
+                now = time.monotonic()
+                last = self._decrypt_warn_last.get(channel_name, 0.0)
+                if now - last >= 60.0:
+                    self._decrypt_warn_last[channel_name] = now
+                    logger.warning(
+                        "MQTT: decrypt failed on channel %r (likely custom PSK); suppressing for 60s",
+                        channel_name,
+                    )
 
             # Fallback: Extract metadata from topic and header
             if node_id and node_id.startswith("!"):

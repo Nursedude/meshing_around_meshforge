@@ -489,6 +489,10 @@ class Message:
     sender_name: str = ""
     recipient_id: str = ""  # Empty for broadcast
     channel: int = 0
+    # Human channel name (e.g. "LongFast", "ShortTurbo") when known.
+    # Topic-derived from MQTT, empty for serial/TCP messages where the
+    # channel name isn't carried at the per-packet level.
+    channel_name: str = ""
     text: str = ""
     message_type: MessageType = MessageType.TEXT
     timestamp: Optional[datetime] = None
@@ -520,6 +524,7 @@ class Message:
             "sender_name": self.sender_name,
             "recipient_id": self.recipient_id,
             "channel": self.channel,
+            "channel_name": self.channel_name,
             "text": self.text,
             "message_type": self.message_type.value,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,

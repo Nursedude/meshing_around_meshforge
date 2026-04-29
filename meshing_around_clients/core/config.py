@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .global_config import load_global_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -230,6 +232,20 @@ class MapsConfig:
 
 
 @dataclass
+class MapsExportConfig:
+    """File-based GeoJSON export for meshforge-maps.
+
+    meshforge-maps is pull-only (no POST ingest), so the bridge is a
+    GeoJSON file that the maps server's collector re-reads on its 5s
+    cycle. Off by default — only writes the file when enabled is true.
+    """
+
+    enabled: bool = False
+    path: str = "/var/lib/meshforge/nodes.geojson"
+    interval: int = 30  # seconds between writes
+
+
+@dataclass
 class StorageConfig:
     """Persistent storage configuration."""
 
@@ -270,7 +286,10 @@ class MQTTConfig:
     password: str = MQTT_PUBLIC_PASSWORD
     topic_root: str = "msh/US"
     channel: str = "LongFast"
-    channels: str = "LongFast"  # Comma-separated channel list, e.g. "LongFast,meshforge,2"
+    # Comma-separated channel list. Default covers every standard AQ== preset
+    # so the TUI surfaces traffic from any channel under the topic_root, not
+    # just LongFast. Per-deployment INI / profile / `*` wildcard still wins.
+    channels: str = "LongFast,MediumFast,MediumSlow,ShortFast,ShortSlow,ShortTurbo,LongModerate,LongSlow"
     node_id: str = ""  # Virtual node ID for sending
     client_id: str = ""  # MQTT client ID (auto-generated if empty)
     # Encryption key for decrypting channel messages (base64 encoded)
@@ -299,7 +318,10 @@ class MQTTConfig:
             password=str(data.get("password", MQTT_PUBLIC_PASSWORD)),
             topic_root=str(data.get("topic_root", "msh/US")),
             channel=str(data.get("channel", "LongFast")),
-            channels=str(data.get("channels", data.get("channel", "LongFast"))),
+            channels=str(data.get("channels", data.get(
+                "channel",
+                "LongFast,MediumFast,MediumSlow,ShortFast,ShortSlow,ShortTurbo,LongModerate,LongSlow",
+            ))),
             node_id=str(data.get("node_id", "")),
             client_id=str(data.get("client_id", "")),
             encryption_key=str(data.get("encryption_key", "")),
@@ -358,6 +380,7 @@ class Config:
         self.mqtt = MQTTConfig()
         self.storage = StorageConfig()
         self.maps = MapsConfig()
+        self.maps_export = MapsExportConfig()
         self.logging = LoggingConfig()
 
         # Bot connection info
@@ -371,8 +394,50 @@ class Config:
         # Config format tracking
         self.config_format = "meshforge"  # or "upstream"
 
+        # MeshForge ecosystem-wide shared identity layer.
+        # Reads ~/.config/meshforge/global.ini if present and seeds the
+        # dataclasses BEFORE per-app load() runs, so per-app INI values
+        # still take precedence. Layering: dataclass defaults < global.ini
+        # < per-app INI < runtime args.
+        self._apply_global_defaults()
+
         if self.config_path and self.config_path.exists():
             self.load()
+
+    def _apply_global_defaults(self) -> None:
+        """Seed dataclass fields from ~/.config/meshforge/global.ini.
+
+        Only writes when the global file actually carries a non-empty
+        value — so this is purely additive and missing-file-safe. Each
+        per-app INI subsequently overrides via fallback=self.<field> in
+        load().
+        """
+        gcfg = load_global_config()
+        if not gcfg.loaded:
+            return
+
+        # MQTT — every MeshForge app connects to the same broker in
+        # most deployments, so this is the highest-value shared section.
+        if gcfg.mqtt.broker:
+            self.mqtt.broker = gcfg.mqtt.broker
+        if gcfg.mqtt.port:
+            self.mqtt.port = gcfg.mqtt.port
+        if gcfg.mqtt.use_tls is not None:
+            self.mqtt.use_tls = gcfg.mqtt.use_tls
+        if gcfg.mqtt.username:
+            self.mqtt.username = gcfg.mqtt.username
+        if gcfg.mqtt.password:
+            self.mqtt.password = gcfg.mqtt.password
+        if gcfg.mqtt.topic_root:
+            self.mqtt.topic_root = gcfg.mqtt.topic_root
+
+        # Node identity — node_id is the only field with a current home in
+        # this app (mqtt.node_id). short/long names are surfaced through
+        # the upstream bot config; not wired here yet.
+        if gcfg.node.node_id:
+            self.mqtt.node_id = gcfg.node.node_id
+
+        logger.info("Applied MeshForge global config from %s", gcfg.source_path)
 
     @property
     def interface(self) -> InterfaceConfig:
@@ -565,11 +630,26 @@ class Config:
                 self.maps.host = self._parser.get("maps", "host", fallback="127.0.0.1")
                 self.maps.port = self._parser.getint("maps", "port", fallback=8808)
 
+            # Maps export — GeoJSON file drop for meshforge-maps to consume
+            if self._parser.has_section("maps_export"):
+                self.maps_export.enabled = self._parser.getboolean(
+                    "maps_export", "enabled", fallback=False
+                )
+                self.maps_export.path = self._parser.get(
+                    "maps_export", "path", fallback="/var/lib/meshforge/nodes.geojson"
+                )
+                self.maps_export.interval = _coerce_int(
+                    self._parser.get("maps_export", "interval", fallback="30"), 30
+                )
+
             # MQTT
+            # Fallbacks reference self.mqtt.<field> so values seeded by
+            # _apply_global_defaults() survive when a per-app INI omits
+            # the key. Layering: dataclass < global.ini < per-app INI.
             if self._parser.has_section("mqtt"):
                 self.mqtt.enabled = self._parser.getboolean("mqtt", "enabled", fallback=False)
-                self.mqtt.broker = self._parser.get("mqtt", "broker", fallback="mqtt.meshtastic.org")
-                self.mqtt.port = self._parser.getint("mqtt", "port", fallback=1883)
+                self.mqtt.broker = self._parser.get("mqtt", "broker", fallback=self.mqtt.broker)
+                self.mqtt.port = self._parser.getint("mqtt", "port", fallback=self.mqtt.port)
                 # Parse embedded port from broker (e.g. "host:1884")
                 if ":" in self.mqtt.broker:
                     _parts = self.mqtt.broker.rsplit(":", 1)
@@ -578,13 +658,13 @@ class Config:
                         self.mqtt.broker = _parts[0]
                     except ValueError:
                         pass  # Not a port number, keep as-is
-                self.mqtt.use_tls = self._parser.getboolean("mqtt", "use_tls", fallback=False)
-                self.mqtt.username = self._parser.get("mqtt", "username", fallback=MQTT_PUBLIC_USERNAME)
-                self.mqtt.password = self._parser.get("mqtt", "password", fallback=MQTT_PUBLIC_PASSWORD)
-                self.mqtt.topic_root = self._parser.get("mqtt", "topic_root", fallback="msh/US")
+                self.mqtt.use_tls = self._parser.getboolean("mqtt", "use_tls", fallback=self.mqtt.use_tls)
+                self.mqtt.username = self._parser.get("mqtt", "username", fallback=self.mqtt.username)
+                self.mqtt.password = self._parser.get("mqtt", "password", fallback=self.mqtt.password)
+                self.mqtt.topic_root = self._parser.get("mqtt", "topic_root", fallback=self.mqtt.topic_root)
                 self.mqtt.channel = self._parser.get("mqtt", "channel", fallback="LongFast")
                 self.mqtt.channels = self._parser.get("mqtt", "channels", fallback=self.mqtt.channel)
-                self.mqtt.node_id = self._parser.get("mqtt", "node_id", fallback="")
+                self.mqtt.node_id = self._parser.get("mqtt", "node_id", fallback=self.mqtt.node_id)
                 self.mqtt.client_id = self._parser.get("mqtt", "client_id", fallback="")
                 self.mqtt.encryption_key = self._parser.get("mqtt", "encryption_key", fallback="")
                 raw_qos = self._parser.getint("mqtt", "qos", fallback=1)
@@ -841,6 +921,13 @@ class Config:
             self._parser.set("maps", "enabled", str(self.maps.enabled))
             self._parser.set("maps", "host", self.maps.host)
             self._parser.set("maps", "port", str(self.maps.port))
+
+            # Maps export (GeoJSON drop for meshforge-maps)
+            if not self._parser.has_section("maps_export"):
+                self._parser.add_section("maps_export")
+            self._parser.set("maps_export", "enabled", str(self.maps_export.enabled))
+            self._parser.set("maps_export", "path", self.maps_export.path)
+            self._parser.set("maps_export", "interval", str(self.maps_export.interval))
 
             # MQTT
             if not self._parser.has_section("mqtt"):
