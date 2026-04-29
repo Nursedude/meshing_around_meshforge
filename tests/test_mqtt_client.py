@@ -1209,5 +1209,138 @@ class TestMQTTCredentialTLSWarning(unittest.TestCase):
         )
 
 
+@unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
+class TestMQTTMultiPSKDecrypt(unittest.TestCase):
+    """
+    Validates the multi-PSK fallback in _handle_encrypted_message.
+
+    The user-visible bug: with a custom (non-AQ==) encryption_key in
+    mesh_client.ini, every standard-preset (LongFast/MediumFast/...)
+    packet on the public broker silently failed to decrypt and showed
+    up only as a rate-limited WARNING.  After the fix, the candidate
+    list builder appends the channel-name preset and DEFAULT_CHANNEL_KEY
+    so AQ== traffic still decodes.
+    """
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.config.storage.enabled = False
+        self.config.alerts.enabled = False
+        self.config.chunk_reassembly_timeout = 0
+        self.config.mqtt.enabled = True
+        self.config.mqtt.node_id = "!a2e95ba4"
+        self.config.mqtt.broker = "localhost"
+        self.config.mqtt.channel = "LongFast"
+        self.config.mqtt.channels = "*"
+        self.config.mqtt.topic_root = "msh/US"
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_aq_traffic_decodes_under_custom_configured_key(self, mock_mqtt):
+        """
+        Configure a client with a custom 32-byte PSK, then feed it an
+        AQ==-encrypted LongFast envelope built by a separate AQ==-keyed
+        sender.  The candidate-list fallback must let it decode.
+        """
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        # 1. Sender is configured with the standard AQ== preset.
+        sender_config = Config(config_path="/nonexistent/path")
+        sender_config.storage.enabled = False
+        sender_config.alerts.enabled = False
+        sender_config.chunk_reassembly_timeout = 0
+        sender_config.mqtt.enabled = True
+        sender_config.mqtt.node_id = "!c0deba5e"
+        sender_config.mqtt.broker = "localhost"
+        sender_config.mqtt.channel = "LongFast"
+        sender_config.mqtt.channels = "*"
+        sender_config.mqtt.topic_root = "msh/US"
+        sender_config.mqtt.encryption_key = "AQ=="
+
+        sender = MQTTMeshtasticClient(sender_config)
+        envelope = sender._build_encrypted_envelope(
+            text="multi-psk hello",
+            channel_name="LongFast",
+            destination="^all",
+        )
+        self.assertIsNotNone(envelope)
+
+        # 2. Receiver is configured with a custom non-AQ== key (simulating
+        #    an operator who set encryption_key to a private channel PSK).
+        import base64 as _b64
+
+        self.config.mqtt.encryption_key = _b64.b64encode(b"\xee" * 32).decode()
+        receiver = MQTTMeshtasticClient(self.config)
+
+        captured: list = []
+        receiver.register_callback("on_message", lambda m: captured.append(m))
+
+        # 3. Feed the AQ==-encrypted LongFast envelope through the
+        #    encrypted-message handler with channel="LongFast" in topic_info.
+        receiver._handle_encrypted_message(
+            topic="msh/US/2/e/LongFast/!c0deba5e",
+            payload=envelope,
+            topic_info={"channel": "LongFast", "node_id": "!c0deba5e"},
+        )
+
+        # 4. The on_message callback should have fired with the decoded text.
+        self.assertEqual(len(captured), 1, "expected one decoded message")
+        self.assertEqual(captured[0].text, "multi-psk hello")
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_undecryptable_packet_fires_rate_limited_warning(self, mock_mqtt):
+        """
+        Genuinely-non-AQ== custom-PSK channels (e.g. "HI" with a Hawaii-
+        community PSK we don't have) should still produce the rate-limited
+        WARNING — that channel's traffic is correctly silenced after one
+        log line per minute.
+        """
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        # Sender on a PSK the receiver doesn't know.
+        sender_config = Config(config_path="/nonexistent/path")
+        sender_config.storage.enabled = False
+        sender_config.alerts.enabled = False
+        sender_config.chunk_reassembly_timeout = 0
+        sender_config.mqtt.enabled = True
+        sender_config.mqtt.node_id = "!c0deba5e"
+        sender_config.mqtt.broker = "localhost"
+        sender_config.mqtt.channel = "HI"
+        sender_config.mqtt.channels = "*"
+        sender_config.mqtt.topic_root = "msh/US"
+        import base64 as _b64
+
+        sender_config.mqtt.encryption_key = _b64.b64encode(b"\x55" * 32).decode()
+        sender = MQTTMeshtasticClient(sender_config)
+        envelope = sender._build_encrypted_envelope(
+            text="HI custom PSK", channel_name="HI", destination="^all"
+        )
+        self.assertIsNotNone(envelope)
+
+        # Receiver knows a different PSK — neither it nor AQ== will decrypt.
+        self.config.mqtt.encryption_key = _b64.b64encode(b"\x77" * 32).decode()
+        receiver = MQTTMeshtasticClient(self.config)
+
+        with self.assertLogs("meshing_around_clients.core.mqtt_client", level="WARNING") as log:
+            receiver._handle_encrypted_message(
+                topic="msh/US/2/e/HI/!c0deba5e",
+                payload=envelope,
+                topic_info={"channel": "HI", "node_id": "!c0deba5e"},
+            )
+        # WARNING fires; channel name + tried-count present in the message.
+        joined = "\n".join(log.output)
+        self.assertIn("'HI'", joined)
+        self.assertIn("tried", joined)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,8 @@ Supports:
 """
 
 import atexit
+import base64
+import binascii
 import hashlib
 import json
 import logging
@@ -68,7 +70,9 @@ except ImportError:
 # Try to import mesh crypto module
 try:
     from .mesh_crypto import (
+        CHANNEL_PRESETS,
         CRYPTO_AVAILABLE,
+        DEFAULT_CHANNEL_KEY,
         PROTOBUF_AVAILABLE,
         MeshPacketProcessor,
         node_num_to_id,
@@ -81,6 +85,8 @@ except Exception as _crypto_exc:
     MESH_CRYPTO_AVAILABLE = False
     CRYPTO_AVAILABLE = False
     PROTOBUF_AVAILABLE = False
+    CHANNEL_PRESETS = {}
+    DEFAULT_CHANNEL_KEY = b"\x01"
     logger.info(
         "Mesh crypto unavailable (%s: %s). "
         "Encrypted packet decoding disabled — install 'cryptography' and "
@@ -197,6 +203,19 @@ class MQTTMeshtasticClient(CallbackMixin):
         # Rate-limit decrypt-failure WARNINGs to one per topic per minute
         # (busy public broker would otherwise drown the operator).
         self._decrypt_warn_last: Dict[str, float] = {}
+
+        # Pre-decode the configured encryption_key once so per-packet
+        # candidate-list assembly stays cheap. Empty / invalid → None.
+        self._configured_psk_bytes: Optional[bytes] = None
+        if self.mqtt_config.encryption_key:
+            try:
+                raw = base64.b64decode(self.mqtt_config.encryption_key)
+                if raw:
+                    self._configured_psk_bytes = raw
+            except (binascii.Error, ValueError):
+                # Invalid base64 — set_key() in MeshCrypto will have already
+                # ignored it; the AQ== fallback still applies via candidates.
+                pass
 
     # ==================== Persistence Methods ====================
 
@@ -1193,15 +1212,41 @@ class MQTTMeshtasticClient(CallbackMixin):
 
         self._trigger_callbacks("on_node_update", sender_id, False)
 
+    def _build_decrypt_candidates(self, channel_name: str) -> List[bytes]:
+        """
+        Build a deduplicated list of raw PSK bytes to try when decrypting
+        an MQTT packet.  Order matters: the operator's configured key is
+        tried first (so a private-broker setup still prefers the local
+        PSK), then the channel-name preset (LongFast/etc → AQ==), then
+        AQ== as a final default.
+
+        Returns raw bytes (not base64).  Empty if crypto is unavailable.
+        """
+        candidates: List[bytes] = []
+        if self._configured_psk_bytes:
+            candidates.append(self._configured_psk_bytes)
+
+        if channel_name:
+            preset = CHANNEL_PRESETS.get(channel_name)
+            if preset:
+                candidates.append(preset)
+
+        if DEFAULT_CHANNEL_KEY:
+            candidates.append(DEFAULT_CHANNEL_KEY)
+
+        return candidates
+
     def _handle_encrypted_message(self, topic: str, payload: bytes, topic_info: Dict[str, Any] = None):
         """Handle encrypted Meshtastic message with full decryption support."""
         try:
             topic_info = topic_info or self._parse_topic(topic)
             node_id = topic_info.get("node_id", "")
+            channel_name = topic_info.get("channel", "") or "unknown"
 
             # Try to decrypt and decode using packet processor
             if self._packet_processor and CRYPTO_AVAILABLE:
-                result = self._packet_processor.process_encrypted_packet(payload)
+                candidates = self._build_decrypt_candidates(topic_info.get("channel", ""))
+                result = self._packet_processor.try_decrypt_with_keys(payload, candidates)
 
                 if result.success and result.decoded:
                     # Successfully decrypted - process the decoded content
@@ -1209,17 +1254,19 @@ class MQTTMeshtasticClient(CallbackMixin):
                     self._process_decoded_packet(result, sender_id, topic_info)
                     return
 
-                # Decryption failed — surface a rate-limited WARNING so a
-                # custom-PSK channel doesn't silently drop. Without this,
+                # All candidates failed — surface a rate-limited WARNING so
+                # a custom-PSK channel doesn't silently drop.  Without this,
                 # the only sign of a wrong key was an empty Messages screen.
-                channel_name = topic_info.get("channel", "") or "unknown"
+                tried = max(len(candidates), 1)
                 now = time.monotonic()
                 last = self._decrypt_warn_last.get(channel_name, 0.0)
                 if now - last >= 60.0:
                     self._decrypt_warn_last[channel_name] = now
                     logger.warning(
-                        "MQTT: decrypt failed on channel %r (likely custom PSK); suppressing for 60s",
+                        "MQTT: decrypt failed on channel %r (tried %d key%s; likely custom PSK); suppressing for 60s",
                         channel_name,
+                        tried,
+                        "" if tried == 1 else "s",
                     )
 
             # Fallback: Extract metadata from topic and header

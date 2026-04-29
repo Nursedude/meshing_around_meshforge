@@ -390,5 +390,88 @@ class TestMeshPacketProcessorExtended(unittest.TestCase):
         self.assertEqual(processor.crypto._key, DEFAULT_CHANNEL_KEY)
 
 
+class TestTryDecryptWithKeys(unittest.TestCase):
+    """Test the multi-PSK candidate-list decrypt fallback."""
+
+    def test_empty_candidate_list_falls_through_to_single_attempt(self):
+        """Empty candidate list — delegates to process_encrypted_packet."""
+        processor = MeshPacketProcessor()
+        # bad data, but the call must not raise
+        result = processor.try_decrypt_with_keys(b"\x00" * 10, [], packet_id=1, sender=1)
+        self.assertIsInstance(result, DecryptedPacket)
+
+    def test_dedup_skips_duplicate_keys(self):
+        """Duplicate / empty candidates are skipped without error."""
+        processor = MeshPacketProcessor()
+        candidates = [b"", DEFAULT_CHANNEL_KEY, DEFAULT_CHANNEL_KEY, b""]
+        result = processor.try_decrypt_with_keys(b"\x00" * 10, candidates, packet_id=1, sender=1)
+        self.assertIsInstance(result, DecryptedPacket)
+
+    @unittest.skipUnless(CRYPTO_AVAILABLE and PROTOBUF_AVAILABLE, "needs crypto+protobuf")
+    def test_succeeds_on_second_candidate_and_restores_key(self):
+        """
+        The actual fix-validation test: encrypt with PSK A, attempt decrypt with
+        [B, A] — the second candidate succeeds, and the processor's own key
+        state is restored to its pre-call value.
+        """
+        from meshtastic import mesh_pb2
+
+        # Build a minimal Data protobuf and encrypt with PSK-A (default AQ==).
+        data = mesh_pb2.Data()
+        data.portnum = 1  # TEXT_MESSAGE_APP
+        data.payload = b"hello multi-psk"
+        data_bytes = data.SerializeToString()
+
+        crypto_a = MeshCrypto()  # default AQ==
+        encrypted = crypto_a.encrypt(data_bytes, packet_id=0, sender=0)
+        self.assertNotEqual(encrypted, data_bytes)
+
+        # PSK-B = a custom 32-byte key the processor is configured with.
+        psk_b_raw = b"\xff" * 32
+        psk_b_b64 = base64.b64encode(psk_b_raw).decode()
+        processor = MeshPacketProcessor(psk_b_b64)
+
+        # Capture pre-call key state for the restore-check.
+        saved_key = processor.crypto._key
+        saved_derived = processor.crypto._derived_key
+        self.assertEqual(saved_key, psk_b_raw)
+
+        # Try [B, A] — first fails, second wins.
+        candidates = [psk_b_raw, DEFAULT_CHANNEL_KEY]
+        result = processor.try_decrypt_with_keys(encrypted, candidates, packet_id=0, sender=0)
+
+        self.assertTrue(result.success, msg=f"decrypt failed: {result.error}")
+        self.assertEqual(result.portnum, 1)
+        self.assertIsNotNone(result.decoded)
+
+        # Key restoration: subsequent calls must still use PSK-B.
+        self.assertEqual(processor.crypto._key, saved_key)
+        self.assertEqual(processor.crypto._derived_key, saved_derived)
+
+    @unittest.skipUnless(CRYPTO_AVAILABLE and PROTOBUF_AVAILABLE, "needs crypto+protobuf")
+    def test_all_candidates_fail_restores_key(self):
+        """When every candidate fails, the original key is still restored."""
+        from meshtastic import mesh_pb2
+
+        data = mesh_pb2.Data()
+        data.portnum = 1
+        data.payload = b"never-decoded"
+        encrypted = MeshCrypto().encrypt(data.SerializeToString(), 0, 0)
+
+        psk_orig = base64.b64encode(b"\xaa" * 32).decode()
+        processor = MeshPacketProcessor(psk_orig)
+        saved_key = processor.crypto._key
+        saved_derived = processor.crypto._derived_key
+
+        # All bogus candidates — none match the AQ== that encrypted the payload.
+        candidates = [b"\x11" * 32, b"\x22" * 32, b"\x33" * 32]
+        result = processor.try_decrypt_with_keys(encrypted, candidates, packet_id=0, sender=0)
+
+        self.assertFalse(result.success)
+        # Key state preserved despite all failures.
+        self.assertEqual(processor.crypto._key, saved_key)
+        self.assertEqual(processor.crypto._derived_key, saved_derived)
+
+
 if __name__ == "__main__":
     unittest.main()

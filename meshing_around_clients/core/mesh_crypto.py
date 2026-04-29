@@ -14,7 +14,7 @@ import hashlib
 import logging
 import struct
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -596,6 +596,61 @@ class MeshPacketProcessor:
     def set_channel_key(self, key: str) -> bool:
         """Set the channel encryption key."""
         return self.crypto.set_key(key)
+
+    def try_decrypt_with_keys(
+        self,
+        raw_data: bytes,
+        candidate_raw_keys: List[bytes],
+        packet_id: int = 0,
+        sender: int = 0,
+    ) -> DecryptedPacket:
+        """
+        Process an encrypted packet, trying multiple PSK candidates.
+
+        On a public broker (or anywhere that mixes traffic across
+        channels), one fixed PSK can't decrypt every packet — the
+        configured key handles the operator's own channel and AQ== covers
+        every standard preset.  Loop the candidates and return on the
+        first protobuf-validating decrypt.  The processor's own key is
+        restored before return whether any candidate succeeded or not.
+
+        Args:
+            raw_data: Raw packet bytes (envelope + ciphertext)
+            candidate_raw_keys: Raw PSK bytes (NOT base64) to try in
+                order.  Empty / duplicate / falsy entries are skipped.
+            packet_id, sender: passthrough to ``process_encrypted_packet``
+
+        Returns:
+            ``DecryptedPacket`` from the first successful candidate, or
+            the last failure result if none succeeded.
+        """
+        # Dedup by raw bytes, preserve order, drop falsy entries.
+        seen = set()
+        unique: List[bytes] = []
+        for raw in candidate_raw_keys:
+            if not raw or raw in seen:
+                continue
+            seen.add(raw)
+            unique.append(raw)
+
+        if not unique:
+            return self.process_encrypted_packet(raw_data, packet_id, sender)
+
+        saved_key = self.crypto._key
+        saved_derived = self.crypto._derived_key
+        last_result = DecryptedPacket(success=False, error="no candidates tried")
+        try:
+            for raw in unique:
+                self.crypto._key = raw
+                self.crypto._derived_key = self.crypto._derive_key(raw)
+                result = self.process_encrypted_packet(raw_data, packet_id, sender)
+                if result.success:
+                    return result
+                last_result = result
+            return last_result
+        finally:
+            self.crypto._key = saved_key
+            self.crypto._derived_key = saved_derived
 
     def process_encrypted_packet(self, raw_data: bytes, packet_id: int = 0, sender: int = 0) -> DecryptedPacket:
         """
