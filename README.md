@@ -11,6 +11,8 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 [![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
 
 > **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
+>
+> **Shared identity layer** — this repo hosts the canonical `~/.config/meshforge/global.ini` schema (see [`docs/global_config.md`](docs/global_config.md)). Maps and NOC read it as a fallback before their per-app configs, so MQTT broker, region preset, callsign, and home coordinates set once propagate across the ecosystem.
 
 > **EXTENSION MODULE** - This is a meshing_around_meshforge extension module for [meshing-around](https://github.com/SpudGunMan/meshing-around). APIs and features are under active development and may change without notice. Not intended for production use.
 
