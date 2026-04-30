@@ -155,6 +155,8 @@ class MQTTMeshtasticClient(CallbackMixin):
         self._stats = {
             "messages_received": 0,
             "messages_rejected": 0,
+            "text_messages": 0,
+            "decrypt_failures": 0,
             "nodes_discovered": 0,
             "nodes_pruned": 0,
             "reconnections": 0,
@@ -484,6 +486,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                     with self._stats_lock:
                         self._stats["messages_received"] = 0
                         self._stats["messages_rejected"] = 0
+                        self._stats["text_messages"] = 0
+                        self._stats["decrypt_failures"] = 0
                     self.connection_info.connected = True
                     self.connection_info.error_message = ""
                     self.connection_info.my_node_id = self.mqtt_config.node_id or "mqtt-client"
@@ -1262,6 +1266,8 @@ class MQTTMeshtasticClient(CallbackMixin):
                 # Default-INFO operators see nothing, matching the silent
                 # pre-c23625d behavior — the Messages screen is the source
                 # of truth for what actually decoded.
+                with self._stats_lock:
+                    self._stats["decrypt_failures"] += 1
                 now = time.monotonic()
                 last = self._decrypt_warn_last.get(channel_name, 0.0)
                 if now - last >= 60.0:
@@ -1370,6 +1376,8 @@ class MQTTMeshtasticClient(CallbackMixin):
         if msg_type == "text" or portnum == 1:
             text = decoded.get("text", "")
             if text:
+                with self._stats_lock:
+                    self._stats["text_messages"] += 1
                 self._handle_decoded_text(text, sender_id, msg_id, decoded, topic_info)
 
         elif msg_type == "position" or portnum == 3:

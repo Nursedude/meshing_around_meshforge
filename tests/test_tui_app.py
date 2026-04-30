@@ -491,6 +491,73 @@ class TestConnectionHealthInHeader(unittest.TestCase):
         self.assertIsNotNone(panel)
 
 
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestDashboardRxBreakdown(unittest.TestCase):
+    """
+    Dashboard "Rx Msgs" cell should show a per-portnum breakdown so the
+    operator can see where the raw RX count went (text vs position vs
+    telemetry vs decrypt-failed) without inferring it from logs.
+    """
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def _render_stats_panel(self):
+        from io import StringIO
+
+        from rich.console import Console
+
+        from meshing_around_clients.tui.app import DashboardScreen
+
+        screen = DashboardScreen(self.tui)
+        panel = screen._create_stats_panel()
+        buf = StringIO()
+        Console(file=buf, width=240, no_color=True, legacy_windows=False).print(panel)
+        return buf.getvalue()
+
+    def test_breakdown_renders_when_counters_nonzero(self):
+        """With non-zero stats counters, breakdown labels appear in the panel."""
+        self.tui.api.stats = {
+            "messages_received": 2989,
+            "messages_rejected": 5,
+            "text_messages": 42,
+            "decrypt_failures": 1017,
+            "telemetry_updates": 1100,
+            "position_updates": 830,
+        }
+        rendered = self._render_stats_panel()
+        self.assertIn("2989", rendered)
+        self.assertIn("text:42", rendered)
+        self.assertIn("pos:830", rendered)
+        self.assertIn("tel:1100", rendered)
+        self.assertIn("enc:1017", rendered)
+        self.assertIn("rej:5", rendered)
+
+    def test_breakdown_omits_zero_fields(self):
+        """A quiet mesh (only text RX) shouldn't render zero pos/tel/enc/rej."""
+        self.tui.api.stats = {
+            "messages_received": 7,
+            "messages_rejected": 0,
+            "text_messages": 7,
+            "decrypt_failures": 0,
+            "telemetry_updates": 0,
+            "position_updates": 0,
+        }
+        rendered = self._render_stats_panel()
+        self.assertIn("text:7", rendered)
+        self.assertNotIn("pos:", rendered)
+        self.assertNotIn("tel:", rendered)
+        self.assertNotIn("enc:", rendered)
+        self.assertNotIn("rej:", rendered)
+
+
 class TestPlainTextTUI(unittest.TestCase):
     """Test PlainTextTUI fallback mode (no Rich required)."""
 

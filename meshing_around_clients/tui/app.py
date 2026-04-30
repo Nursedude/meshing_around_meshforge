@@ -350,11 +350,28 @@ class DashboardScreen(Screen):
         if hasattr(self.app.api, "stats"):
             mqtt_stats = self.app.api.stats
             rx = mqtt_stats.get("messages_received", 0)
-            rej = mqtt_stats.get("messages_rejected", 0)
             if rx:
-                rx_str = str(rx)
+                # Break down where RX went so the gap between raw count
+                # and the Messages feed is visible at a glance.  Only
+                # non-zero fields render, to keep the line short on a
+                # quiet mesh.
+                text = mqtt_stats.get("text_messages", 0)
+                pos = mqtt_stats.get("position_updates", 0)
+                tel = mqtt_stats.get("telemetry_updates", 0)
+                enc = mqtt_stats.get("decrypt_failures", 0)
+                rej = mqtt_stats.get("messages_rejected", 0)
+                parts = []
+                if text:
+                    parts.append(f"text:{text}")
+                if pos:
+                    parts.append(f"pos:{pos}")
+                if tel:
+                    parts.append(f"tel:{tel}")
+                if enc:
+                    parts.append(f"enc:{enc}")
                 if rej:
-                    rx_str += f" ({rej} rej)"
+                    parts.append(f"rej:{rej}")
+                rx_str = str(rx) + (f"  {' '.join(parts)}" if parts else "")
 
         alert_count = len(network.unread_alerts)
         alert_str = f"[red bold]{alert_count} unread[/red bold]" if alert_count else "[dim green]none[/dim green]"

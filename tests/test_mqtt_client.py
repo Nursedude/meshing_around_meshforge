@@ -1347,5 +1347,110 @@ class TestMQTTMultiPSKDecrypt(unittest.TestCase):
             self.assertFalse(line.startswith("WARNING"), f"Unexpected WARNING: {line}")
 
 
+class TestMQTTRxBreakdownCounters(unittest.TestCase):
+    """
+    Validates the two new stats counters that drive the dashboard
+    "Rx Msgs" breakdown cell.  text_messages bumps once per surfaced
+    text packet; decrypt_failures bumps once per all-candidates-failed
+    encrypted packet.  Both feed the user's understanding of "where did
+    the raw RX count go".
+    """
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.config.storage.enabled = False
+        self.config.alerts.enabled = False
+        self.config.chunk_reassembly_timeout = 0
+        self.config.mqtt.enabled = True
+        self.config.mqtt.node_id = "!a2e95ba4"
+        self.config.mqtt.broker = "localhost"
+        self.config.mqtt.channel = "LongFast"
+        self.config.mqtt.channels = "*"
+        self.config.mqtt.topic_root = "msh/US"
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_text_messages_counter_bumps_on_decoded_text(self, mock_mqtt):
+        """A successfully-decoded text packet bumps stats['text_messages']."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        sender_config = Config(config_path="/nonexistent/path")
+        sender_config.storage.enabled = False
+        sender_config.alerts.enabled = False
+        sender_config.chunk_reassembly_timeout = 0
+        sender_config.mqtt.enabled = True
+        sender_config.mqtt.node_id = "!c0deba5e"
+        sender_config.mqtt.broker = "localhost"
+        sender_config.mqtt.channel = "LongFast"
+        sender_config.mqtt.channels = "*"
+        sender_config.mqtt.topic_root = "msh/US"
+        sender_config.mqtt.encryption_key = "AQ=="
+
+        sender = MQTTMeshtasticClient(sender_config)
+        envelope = sender._build_encrypted_envelope(
+            text="counter test", channel_name="LongFast", destination="^all"
+        )
+        self.assertIsNotNone(envelope)
+
+        receiver = MQTTMeshtasticClient(self.config)
+        self.assertEqual(receiver.stats.get("text_messages", 0), 0)
+
+        receiver._handle_encrypted_message(
+            topic="msh/US/2/e/LongFast/!c0deba5e",
+            payload=envelope,
+            topic_info={"channel": "LongFast", "node_id": "!c0deba5e"},
+        )
+
+        self.assertEqual(receiver.stats["text_messages"], 1)
+        self.assertEqual(receiver.stats["decrypt_failures"], 0)
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_decrypt_failures_counter_bumps_on_unknown_psk(self, mock_mqtt):
+        """An undecryptable packet bumps stats['decrypt_failures']."""
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        try:
+            from meshtastic.protobuf import mqtt_pb2  # noqa: F401
+        except ImportError:
+            self.skipTest("meshtastic library not installed")
+
+        import base64 as _b64
+
+        sender_config = Config(config_path="/nonexistent/path")
+        sender_config.storage.enabled = False
+        sender_config.alerts.enabled = False
+        sender_config.chunk_reassembly_timeout = 0
+        sender_config.mqtt.enabled = True
+        sender_config.mqtt.node_id = "!c0deba5e"
+        sender_config.mqtt.broker = "localhost"
+        sender_config.mqtt.channel = "HI"
+        sender_config.mqtt.channels = "*"
+        sender_config.mqtt.topic_root = "msh/US"
+        sender_config.mqtt.encryption_key = _b64.b64encode(b"\x55" * 32).decode()
+
+        sender = MQTTMeshtasticClient(sender_config)
+        envelope = sender._build_encrypted_envelope(
+            text="HI custom PSK", channel_name="HI", destination="^all"
+        )
+        self.assertIsNotNone(envelope)
+
+        self.config.mqtt.encryption_key = _b64.b64encode(b"\x77" * 32).decode()
+        receiver = MQTTMeshtasticClient(self.config)
+        self.assertEqual(receiver.stats.get("decrypt_failures", 0), 0)
+
+        receiver._handle_encrypted_message(
+            topic="msh/US/2/e/HI/!c0deba5e",
+            payload=envelope,
+            topic_info={"channel": "HI", "node_id": "!c0deba5e"},
+        )
+
+        self.assertEqual(receiver.stats["decrypt_failures"], 1)
+        self.assertEqual(receiver.stats["text_messages"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
