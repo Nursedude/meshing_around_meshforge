@@ -16,7 +16,6 @@ from meshing_around_clients.core.global_config import (
     load_global_config,
 )
 
-
 # ---------------------------------------------------------------------------
 # Path resolution (MF001 — sudo-aware)
 # ---------------------------------------------------------------------------
@@ -179,10 +178,14 @@ def test_config_applies_global_defaults(tmp_path, monkeypatch):
         topic_root = msh/SHARED
     """))
 
-    monkeypatch.setattr(config_mod, "load_global_config", lambda: __import__(
-        "meshing_around_clients.core.global_config",
-        fromlist=["load_global_config"],
-    ).load_global_config(target))
+    monkeypatch.setattr(
+        config_mod,
+        "load_global_config",
+        lambda: __import__(
+            "meshing_around_clients.core.global_config",
+            fromlist=["load_global_config"],
+        ).load_global_config(target),
+    )
 
     # Per-app INI is empty (no [mqtt] section) → global values propagate
     per_app = tmp_path / "mesh_client.ini"
@@ -204,10 +207,14 @@ def test_config_per_app_overrides_global(tmp_path, monkeypatch):
         broker = global-broker.example
         port = 8883
     """))
-    monkeypatch.setattr(config_mod, "load_global_config", lambda: __import__(
-        "meshing_around_clients.core.global_config",
-        fromlist=["load_global_config"],
-    ).load_global_config(target))
+    monkeypatch.setattr(
+        config_mod,
+        "load_global_config",
+        lambda: __import__(
+            "meshing_around_clients.core.global_config",
+            fromlist=["load_global_config"],
+        ).load_global_config(target),
+    )
 
     per_app = tmp_path / "mesh_client.ini"
     per_app.write_text(textwrap.dedent("""\
@@ -225,10 +232,14 @@ def test_config_with_no_global_uses_dataclass_defaults(tmp_path, monkeypatch):
     """Missing global.ini → behavior identical to pre-global-config."""
     from meshing_around_clients.core import config as config_mod
 
-    monkeypatch.setattr(config_mod, "load_global_config", lambda: __import__(
-        "meshing_around_clients.core.global_config",
-        fromlist=["load_global_config"],
-    ).load_global_config(tmp_path / "absent.ini"))
+    monkeypatch.setattr(
+        config_mod,
+        "load_global_config",
+        lambda: __import__(
+            "meshing_around_clients.core.global_config",
+            fromlist=["load_global_config"],
+        ).load_global_config(tmp_path / "absent.ini"),
+    )
 
     per_app = tmp_path / "mesh_client.ini"
     per_app.write_text("")

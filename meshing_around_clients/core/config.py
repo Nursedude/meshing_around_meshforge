@@ -318,10 +318,15 @@ class MQTTConfig:
             password=str(data.get("password", MQTT_PUBLIC_PASSWORD)),
             topic_root=str(data.get("topic_root", "msh/US")),
             channel=str(data.get("channel", "LongFast")),
-            channels=str(data.get("channels", data.get(
-                "channel",
-                "LongFast,MediumFast,MediumSlow,ShortFast,ShortSlow,ShortTurbo,LongModerate,LongSlow",
-            ))),
+            channels=str(
+                data.get(
+                    "channels",
+                    data.get(
+                        "channel",
+                        "LongFast,MediumFast,MediumSlow,ShortFast,ShortSlow,ShortTurbo,LongModerate,LongSlow",
+                    ),
+                )
+            ),
             node_id=str(data.get("node_id", "")),
             client_id=str(data.get("client_id", "")),
             encryption_key=str(data.get("encryption_key", "")),
@@ -632,15 +637,11 @@ class Config:
 
             # Maps export — GeoJSON file drop for meshforge-maps to consume
             if self._parser.has_section("maps_export"):
-                self.maps_export.enabled = self._parser.getboolean(
-                    "maps_export", "enabled", fallback=False
-                )
+                self.maps_export.enabled = self._parser.getboolean("maps_export", "enabled", fallback=False)
                 self.maps_export.path = self._parser.get(
                     "maps_export", "path", fallback="/var/lib/meshforge/nodes.geojson"
                 )
-                self.maps_export.interval = _coerce_int(
-                    self._parser.get("maps_export", "interval", fallback="30"), 30
-                )
+                self.maps_export.interval = _coerce_int(self._parser.get("maps_export", "interval", fallback="30"), 30)
 
             # MQTT
             # Fallbacks reference self.mqtt.<field> so values seeded by

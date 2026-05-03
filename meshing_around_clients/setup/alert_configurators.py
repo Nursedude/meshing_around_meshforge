@@ -83,7 +83,7 @@ def use_prompter(prompter: Prompter) -> "Iterator[None]":
     try:
         yield
     finally:
-        (get_input, get_yes_no, print_section, print_success, print_warning) = orig
+        get_input, get_yes_no, print_section, print_success, print_warning = orig
 
 
 def _in_range(lo: int, hi: int) -> Callable[[int], bool]:
@@ -510,14 +510,10 @@ def configure_ipaws_alerts(config: configparser.ConfigParser) -> None:
         fips = get_input("FIPS codes (comma-separated)")
         config["ipawsAlert"]["fips_codes"] = fips
 
-    channel = get_input(
-        "Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7"
-    )
+    channel = get_input("Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["ipawsAlert"]["alert_channel"] = str(channel)
 
-    cooldown = get_input(
-        "Repeat cooldown (seconds)", "300", int, validator=_positive, error_message="Must be positive"
-    )
+    cooldown = get_input("Repeat cooldown (seconds)", "300", int, validator=_positive, error_message="Must be positive")
     config["ipawsAlert"]["cooldown_seconds"] = str(cooldown)
 
     print_success("IPAWS alerts configured")
@@ -543,14 +539,10 @@ def configure_volcano_alerts(config: configparser.ConfigParser) -> None:
     config["volcanoAlert"]["latitude"] = str(lat)
     config["volcanoAlert"]["longitude"] = str(lon)
 
-    radius = get_input(
-        "Alert radius (km)", "500", int, validator=_positive, error_message="Must be positive"
-    )
+    radius = get_input("Alert radius (km)", "500", int, validator=_positive, error_message="Must be positive")
     config["volcanoAlert"]["radius_km"] = str(radius)
 
-    channel = get_input(
-        "Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7"
-    )
+    channel = get_input("Alert channel (0-7)", "2", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["volcanoAlert"]["alert_channel"] = str(channel)
 
     print_success("Volcano alerts configured")
@@ -569,9 +561,7 @@ def configure_snr_alerts(config: configparser.ConfigParser) -> None:
 
     config["snrAlert"]["enabled"] = "True"
 
-    threshold = get_input(
-        "SNR threshold (dB) — alert when node falls below", "-5", int
-    )
+    threshold = get_input("SNR threshold (dB) — alert when node falls below", "-5", int)
     config["snrAlert"]["threshold_db"] = str(threshold)
 
     if get_yes_no("Monitor all nodes? (No = specific nodes)", True):
@@ -580,14 +570,10 @@ def configure_snr_alerts(config: configparser.ConfigParser) -> None:
         nodes = get_input("Node numbers to monitor (comma-separated)")
         config["snrAlert"]["monitor_nodes"] = nodes
 
-    channel = get_input(
-        "Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7"
-    )
+    channel = get_input("Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["snrAlert"]["alert_channel"] = str(channel)
 
-    cooldown = get_input(
-        "Repeat cooldown (seconds)", "600", int, validator=_positive, error_message="Must be positive"
-    )
+    cooldown = get_input("Repeat cooldown (seconds)", "600", int, validator=_positive, error_message="Must be positive")
     config["snrAlert"]["cooldown_seconds"] = str(cooldown)
 
     print_success("SNR alerts configured")
@@ -615,14 +601,10 @@ def configure_custom_alerts(config: configparser.ConfigParser) -> None:
     if get_yes_no("Treat pattern as regex?", False):
         config["customAlert"]["pattern_is_regex"] = "True"
 
-    channel = get_input(
-        "Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7"
-    )
+    channel = get_input("Alert channel (0-7)", "0", int, validator=_valid_channel, error_message="Channel must be 0-7")
     config["customAlert"]["alert_channel"] = str(channel)
 
-    severity = get_input(
-        "Severity (1-5, 5=critical)", "3", int, validator=_in_range(1, 5), error_message="Must be 1-5"
-    )
+    severity = get_input("Severity (1-5, 5=critical)", "3", int, validator=_in_range(1, 5), error_message="Must be 1-5")
     config["customAlert"]["severity"] = str(severity)
 
     print_success("Custom alerts configured")

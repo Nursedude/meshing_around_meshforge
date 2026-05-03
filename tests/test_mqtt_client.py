@@ -1323,9 +1323,7 @@ class TestMQTTMultiPSKDecrypt(unittest.TestCase):
 
         sender_config.mqtt.encryption_key = _b64.b64encode(b"\x55" * 32).decode()
         sender = MQTTMeshtasticClient(sender_config)
-        envelope = sender._build_encrypted_envelope(
-            text="HI custom PSK", channel_name="HI", destination="^all"
-        )
+        envelope = sender._build_encrypted_envelope(text="HI custom PSK", channel_name="HI", destination="^all")
         self.assertIsNotNone(envelope)
 
         # Receiver knows a different PSK — neither it nor AQ== will decrypt.
@@ -1391,9 +1389,7 @@ class TestMQTTRxBreakdownCounters(unittest.TestCase):
         sender_config.mqtt.encryption_key = "AQ=="
 
         sender = MQTTMeshtasticClient(sender_config)
-        envelope = sender._build_encrypted_envelope(
-            text="counter test", channel_name="LongFast", destination="^all"
-        )
+        envelope = sender._build_encrypted_envelope(text="counter test", channel_name="LongFast", destination="^all")
         self.assertIsNotNone(envelope)
 
         receiver = MQTTMeshtasticClient(self.config)
@@ -1433,9 +1429,7 @@ class TestMQTTRxBreakdownCounters(unittest.TestCase):
         sender_config.mqtt.encryption_key = _b64.b64encode(b"\x55" * 32).decode()
 
         sender = MQTTMeshtasticClient(sender_config)
-        envelope = sender._build_encrypted_envelope(
-            text="HI custom PSK", channel_name="HI", destination="^all"
-        )
+        envelope = sender._build_encrypted_envelope(text="HI custom PSK", channel_name="HI", destination="^all")
         self.assertIsNotNone(envelope)
 
         self.config.mqtt.encryption_key = _b64.b64encode(b"\x77" * 32).decode()
