@@ -13,6 +13,7 @@ extend-ignore = W503,E203
 per-file-ignores =
     # Complex methods: route registration, deserialization, packet processing
     meshing_around_clients/web/app.py:C901
+    meshing_around_clients/tui/app.py:C901
     meshing_around_clients/core/models.py:C901
     meshing_around_clients/core/mqtt_client.py:C901
     # Entry points: complex main() functions
