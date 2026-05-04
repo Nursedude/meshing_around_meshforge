@@ -72,9 +72,20 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
             raise unittest.SkipTest("MQTT broker mqtt.meshtastic.org not reachable")
 
     def setUp(self):
+        # Each test gets an isolated state file directory so tests don't
+        # cross-pollinate via the default ~/.config path.  CI runs pytest
+        # twice on 3.9 / 3.11 (once verbose, once with coverage) and
+        # without isolation the second invocation loads nodes the first
+        # invocation injected — making "new node" assertions fail.
+        import shutil
+        import tempfile
+
+        self._state_dir = tempfile.mkdtemp(prefix="mqtt_failover_test_")
+        self.addCleanup(shutil.rmtree, self._state_dir, ignore_errors=True)
         self.config = Config(config_path="/nonexistent/path")
         self.config.alerts.enabled = True
         self.config.alerts.emergency_keywords = ["help", "sos"]
+        self.config.storage.state_file = f"{self._state_dir}/network_state.json"
 
     def _make_client(self):
         from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
