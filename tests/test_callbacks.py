@@ -2,11 +2,13 @@
 Unit tests for meshing_around_clients.core.callbacks
 """
 
+import os
 import sys
 import threading
 import time
 import unittest
 import unittest.mock
+from datetime import datetime, timezone
 
 sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 
@@ -424,6 +426,170 @@ class TestPlayAlertSound(unittest.TestCase):
         # All players fail with OSError
         mock_which.return_value = "/usr/bin/paplay"
         self.assertFalse(play_alert_sound("/some/file.oga"))
+
+
+class TestAsyncCallbackDispatch(unittest.TestCase):
+    """Test the worker-thread async dispatch (Fix 2)."""
+
+    def setUp(self):
+        self.host = _TestHost()
+        self.host._start_callback_worker()
+
+    def tearDown(self):
+        self.host._stop_callback_worker(timeout=1.0)
+
+    def test_message_event_dispatches_via_worker(self):
+        received = []
+        self.host.register_callback("on_message", lambda m: received.append(m))
+        self.host._trigger_callbacks("on_message", "hello")
+        # The worker is on a different thread; explicit drain.
+        self.assertTrue(self.host._drain_callbacks(timeout=1.0))
+        self.assertEqual(received, ["hello"])
+
+    def test_lifecycle_events_remain_synchronous(self):
+        """on_connect / on_disconnect must fire before _trigger_callbacks returns."""
+        received = []
+        self.host.register_callback("on_connect", lambda *a: received.append("c"))
+        self.host.register_callback("on_disconnect", lambda *a: received.append("d"))
+        # No drain — these should already be done.
+        self.host._trigger_callbacks("on_connect")
+        self.host._trigger_callbacks("on_disconnect")
+        self.assertEqual(received, ["c", "d"])
+
+    def test_queue_full_increments_drops(self):
+        """Overflow must increment drops counter without raising."""
+        # Block the worker so the queue can fill.
+        gate = threading.Event()
+        self.host.register_callback("on_message", lambda *a: gate.wait(timeout=2.0))
+        # Send one message that the worker will pick up and block on.
+        self.host._trigger_callbacks("on_message", 0)
+        # Spam until the queue fills past maxsize and we start dropping.
+        for i in range(1000):
+            self.host._trigger_callbacks("on_message", i)
+        self.assertGreater(self.host.callback_queue_drops(), 0)
+        # Unblock and let everything finish.
+        gate.set()
+        self.host._drain_callbacks(timeout=2.0)
+
+    def test_stop_worker_drains_pending_events(self):
+        """Sentinel posted on stop, but events queued before should still run."""
+        received = []
+        self.host.register_callback("on_message", lambda m: received.append(m))
+        for i in range(20):
+            self.host._trigger_callbacks("on_message", i)
+        self.host._stop_callback_worker(timeout=2.0)
+        # All 20 enqueued before stop should have been processed.
+        self.assertEqual(received, list(range(20)))
+
+    def test_sync_fallback_when_worker_not_running(self):
+        """Without a worker, _trigger_callbacks must dispatch synchronously."""
+        host = _TestHost()  # no _start_callback_worker
+        received = []
+        host.register_callback("on_message", lambda m: received.append(m))
+        host._trigger_callbacks("on_message", "sync")
+        self.assertEqual(received, ["sync"])
+
+    def test_start_worker_is_idempotent(self):
+        first_worker = self.host._cb_worker
+        self.host._start_callback_worker()
+        self.assertIs(self.host._cb_worker, first_worker)
+
+    def test_stats_helpers_reflect_state(self):
+        self.assertEqual(self.host.callback_queue_drops(), 0)
+        self.assertEqual(self.host.callback_queue_depth(), 0)
+
+
+class TestAlertLogRotation(unittest.TestCase):
+    """Test the RotatingFileHandler-backed alert log (Fix 3a)."""
+
+    def setUp(self):
+        import tempfile
+
+        from meshing_around_clients.core import callbacks as cb_mod
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        self.cb_mod = cb_mod
+        self.tmpdir = tempfile.mkdtemp(prefix="alert_log_test_")
+        self.log_path = os.path.join(self.tmpdir, "alerts.log")
+        self.host = _TestHost()
+        self.alert = Alert(
+            id="t1",
+            alert_type=AlertType.BATTERY,
+            title="Low Battery",
+            message="x" * 200,
+            severity=2,
+            source_node="!nodeA",
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    def tearDown(self):
+        import shutil
+
+        if self.host._alert_log_handler is not None:
+            self.host._alert_log_handler.close()
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_writes_one_line_per_alert(self):
+        self.host._log_alert_to_file(self.alert, self.log_path)
+        self.host._log_alert_to_file(self.alert, self.log_path)
+        with open(self.log_path) as f:
+            lines = f.readlines()
+        self.assertEqual(len(lines), 2)
+
+    def test_rotation_creates_backup_file(self):
+        # Force rotation by patching the size threshold low.
+        with unittest.mock.patch.object(self.cb_mod, "_ALERT_LOG_MAX_BYTES", 256):
+            for _ in range(20):
+                self.host._log_alert_to_file(self.alert, self.log_path)
+        # At least one backup should exist after multiple rotations.
+        backups = [p for p in os.listdir(self.tmpdir) if p.startswith("alerts.log.")]
+        self.assertGreater(len(backups), 0)
+
+    def test_handler_is_cached(self):
+        self.host._log_alert_to_file(self.alert, self.log_path)
+        first = self.host._alert_log_handler
+        self.host._log_alert_to_file(self.alert, self.log_path)
+        self.assertIs(self.host._alert_log_handler, first)
+
+    def test_oversize_message_is_truncated(self):
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        big = Alert(
+            id="t-big",
+            alert_type=AlertType.BATTERY,
+            title="Huge",
+            message="x" * 5000,
+            severity=2,
+            source_node="!nodeA",
+            timestamp=datetime.now(timezone.utc),
+        )
+        self.host._log_alert_to_file(big, self.log_path)
+        with open(self.log_path) as f:
+            line = f.readline()
+        # Cap is 1024 bytes including the trailing "..." replacement.
+        # The whole log line includes ts/type/sev/title prefixes too,
+        # but the message portion itself must not exceed the cap.
+        self.assertIn("...", line)
+        self.assertLess(len(line), 1024 + 200)  # cap + reasonable prefix budget
+
+    def test_stop_callback_worker_closes_alert_handler(self):
+        # Write one alert to populate the handler, then stop the worker
+        # and assert the cached handler is dropped (forcing a flush).
+        self.host._log_alert_to_file(self.alert, self.log_path)
+        self.assertIsNotNone(self.host._alert_log_handler)
+        self.host._start_callback_worker()
+        self.host._stop_callback_worker(timeout=1.0)
+        self.assertIsNone(self.host._alert_log_handler)
+        # Re-logging after shutdown reopens the handler — verifies close()
+        # didn't leave the path in an unusable state.
+        self.host._log_alert_to_file(self.alert, self.log_path)
+        self.assertIsNotNone(self.host._alert_log_handler)
+
+    def test_close_alert_log_handler_idempotent(self):
+        # Safe to call when no handler exists.
+        self.host._close_alert_log_handler()
+        self.host._close_alert_log_handler()
+        self.assertIsNone(self.host._alert_log_handler)
 
 
 if __name__ == "__main__":

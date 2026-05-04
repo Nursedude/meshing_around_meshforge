@@ -9,8 +9,10 @@ to validate data from mesh network packets.
 """
 
 import logging
+import logging.handlers
 import math
 import os
+import queue
 import threading
 import time
 from datetime import datetime, timezone
@@ -28,8 +30,29 @@ _CALLBACK_EVENTS = (
     "on_telemetry",
     "on_command",
 )
+# Lifecycle events fire at most a few times per session; dispatch them
+# synchronously so callers (and tests) can rely on "after connect()
+# returns, the on_connect callback has already run."  Only the high-
+# frequency message-path events go through the worker queue.
+_SYNCHRONOUS_EVENTS = frozenset({"on_connect", "on_disconnect"})
 _DEFAULT_COOLDOWN_SECONDS = 300
 _MAX_COOLDOWN_ENTRIES = 1000
+
+# Async callback dispatch — paho's network thread enqueues here so it
+# never blocks on TUI rendering or file I/O.  The worker is opt-in via
+# ``_start_callback_worker()``; until then ``_trigger_callbacks`` stays
+# synchronous (tests and shutdown paths rely on this).
+_CALLBACK_QUEUE_MAX = 500
+_DROP_LOG_INTERVAL_SEC = 1.0
+_WORKER_POLL_TIMEOUT_SEC = 0.5
+
+# Alert log rotation — matches the RotatingFileHandler shape used for
+# mesh_client.log so operators see a familiar pattern on disk.
+_ALERT_LOG_MAX_BYTES = 10 * 1024 * 1024
+_ALERT_LOG_BACKUPS = 3
+# Cap on alert.message bytes when written to the log line.  Prevents a
+# single malformed/oversized alert from burning the rotation budget.
+_ALERT_LOG_MESSAGE_CAP = 1024
 
 
 def safe_float(value: Any, min_val: float, max_val: float) -> Optional[float]:
@@ -145,6 +168,107 @@ class CallbackMixin:
         self._alert_cooldown_seconds: int = _DEFAULT_COOLDOWN_SECONDS
         self._cooldown_lock = threading.Lock()
 
+        # Async dispatch state.  Worker is started by the connecting class
+        # (MQTTMeshtasticClient.connect / MeshtasticAPI.connect).  Until
+        # then _trigger_callbacks dispatches synchronously, so unit tests
+        # and lifecycle paths see the existing behavior.
+        self._cb_queue: "queue.Queue[Optional[Tuple[str, tuple, dict]]]" = queue.Queue(maxsize=_CALLBACK_QUEUE_MAX)
+        self._cb_drops: int = 0
+        self._cb_drops_lock = threading.Lock()
+        self._cb_last_drop_log: float = 0.0
+        self._cb_worker: Optional[threading.Thread] = None
+        self._cb_worker_running = threading.Event()
+
+        # Cached alert log handler (lazy-created on first write).
+        self._alert_log_handler: Optional[logging.handlers.RotatingFileHandler] = None
+        self._alert_log_path: Optional[str] = None
+        self._alert_log_lock = threading.Lock()
+
+    def _start_callback_worker(self) -> None:
+        """Switch _trigger_callbacks from sync to async dispatch.
+
+        Idempotent.  Spawns a daemon worker that drains _cb_queue in FIFO
+        order so paho's network thread can return immediately after
+        enqueue.
+        """
+        if self._cb_worker is not None and self._cb_worker.is_alive():
+            return
+        self._cb_worker_running.set()
+        self._cb_worker = threading.Thread(
+            target=self._callback_worker_loop,
+            name="callback-dispatch",
+            daemon=True,
+        )
+        self._cb_worker.start()
+
+    def _stop_callback_worker(self, timeout: float = 2.0) -> None:
+        """Drain pending callbacks and stop the worker thread.
+
+        Posts a sentinel so any events queued *before* shutdown still run,
+        preserving on_disconnect ordering.  Safe to call when no worker
+        is running.
+        """
+        if self._cb_worker is None:
+            return
+        self._cb_worker_running.clear()
+        try:
+            self._cb_queue.put(None, timeout=0.1)
+        except queue.Full:
+            pass
+        try:
+            self._cb_worker.join(timeout=timeout)
+        except RuntimeError:
+            pass
+        self._cb_worker = None
+        self._close_alert_log_handler()
+
+    def _close_alert_log_handler(self) -> None:
+        """Flush + close the cached alert log handler, if any.
+
+        Called from ``_stop_callback_worker`` so an orderly disconnect()
+        guarantees buffered alert writes hit disk.  Idempotent.
+        """
+        with self._alert_log_lock:
+            if self._alert_log_handler is None:
+                return
+            try:
+                self._alert_log_handler.close()
+            except OSError as e:
+                logger.debug("Alert log handler close failed: %s", e)
+            self._alert_log_handler = None
+            self._alert_log_path = None
+
+    def _callback_worker_loop(self) -> None:
+        while self._cb_worker_running.is_set() or not self._cb_queue.empty():
+            try:
+                item = self._cb_queue.get(timeout=_WORKER_POLL_TIMEOUT_SEC)
+            except queue.Empty:
+                continue
+            try:
+                if item is None:
+                    return
+                event, args, kwargs = item
+                self._dispatch_callbacks_sync(event, *args, **kwargs)
+            finally:
+                try:
+                    self._cb_queue.task_done()
+                except ValueError:
+                    pass
+
+    def _dispatch_callbacks_sync(self, event: str, *args: Any, **kwargs: Any) -> None:
+        for cb in self._callbacks.get(event, []):
+            try:
+                cb(*args, **kwargs)
+            except (TypeError, ValueError, AttributeError) as e:
+                logger.warning("Callback error for %s (%s): %s", event, type(e).__name__, e)
+
+    def callback_queue_depth(self) -> int:
+        return self._cb_queue.qsize()
+
+    def callback_queue_drops(self) -> int:
+        with self._cb_drops_lock:
+            return self._cb_drops
+
     def _ensure_node(self, node_id: str, node_num: int = 0, **kwargs: Any) -> Tuple[Any, bool]:
         """Get existing node or create a new one with timestamps.
 
@@ -196,12 +320,51 @@ class CallbackMixin:
                 self._callbacks[e].clear()
 
     def _trigger_callbacks(self, event: str, *args: Any, **kwargs: Any) -> None:
-        """Trigger all callbacks for an event."""
-        for cb in self._callbacks.get(event, []):
+        """Trigger all callbacks for an event.
+
+        Lifecycle events (on_connect, on_disconnect) dispatch synchronously
+        so callers can rely on ordering against connect()/disconnect().
+        High-frequency message-path events go through the worker queue
+        when one is running, so paho's network thread returns immediately.
+
+        Without a worker, fall through to synchronous dispatch — preserves
+        the legacy behavior tests and direct callers depend on.
+        """
+        if event in _SYNCHRONOUS_EVENTS:
+            self._dispatch_callbacks_sync(event, *args, **kwargs)
+            return
+        worker = self._cb_worker
+        if worker is not None and worker.is_alive():
             try:
-                cb(*args, **kwargs)
-            except (TypeError, ValueError, AttributeError) as e:
-                logger.warning("Callback error for %s (%s): %s", event, type(e).__name__, e)
+                self._cb_queue.put_nowait((event, args, kwargs))
+                return
+            except queue.Full:
+                with self._cb_drops_lock:
+                    self._cb_drops += 1
+                    drops = self._cb_drops
+                    now = time.monotonic()
+                    if now - self._cb_last_drop_log > _DROP_LOG_INTERVAL_SEC:
+                        self._cb_last_drop_log = now
+                        logger.debug(
+                            "Callback queue full (event=%s, total drops=%d) — TUI consumer stalled?",
+                            event,
+                            drops,
+                        )
+                return
+        self._dispatch_callbacks_sync(event, *args, **kwargs)
+
+    def _drain_callbacks(self, timeout: float = 1.0) -> bool:
+        """Wait for the callback worker to process pending events.
+
+        Returns True if drained within ``timeout``, False on timeout.
+        Useful in tests to synchronize against the async dispatch path.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if self._cb_queue.empty():
+                return True
+            time.sleep(0.01)
+        return self._cb_queue.empty()
 
     def _dispatch_alert_actions(self, alert: Any) -> None:
         """Run configured alert actions: logging, sound, file output.
@@ -238,17 +401,65 @@ class CallbackMixin:
                 self._log_alert_to_file(alert, log_file)
 
     def _log_alert_to_file(self, alert: Any, log_file: str) -> None:
-        """Append a single alert entry to the configured log file."""
+        """Append a single alert entry to the configured log file.
+
+        Uses a cached RotatingFileHandler (10 MiB × 3 backups) so a long-
+        running TUI on a Pi 2W doesn't grow alerts.log without bound.
+        """
         try:
             log_path = os.path.join(os.getcwd(), log_file)
-            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            handler = self._get_alert_log_handler(log_path)
+            if handler is None:
+                return
             ts = alert.timestamp.isoformat() if alert.timestamp else datetime.now(timezone.utc).isoformat()
             alert_type = alert.alert_type.value if hasattr(alert.alert_type, "value") else str(alert.alert_type)
-            line = f"{ts} | {alert_type} | sev={alert.severity} | {alert.title} | {alert.message}\n"
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(line)
+            msg = alert.message or ""
+            if len(msg) > _ALERT_LOG_MESSAGE_CAP:
+                msg = msg[: _ALERT_LOG_MESSAGE_CAP - 3] + "..."
+            line = f"{ts} | {alert_type} | sev={alert.severity} | {alert.title} | {msg}"
+            record = logging.LogRecord(
+                name="mesh.alerts",
+                level=logging.WARNING,
+                pathname=__file__,
+                lineno=0,
+                msg=line,
+                args=(),
+                exc_info=None,
+            )
+            with self._alert_log_lock:
+                handler.emit(record)
         except OSError as e:
             logger.error("Failed to write alert log to %s: %s", log_file, e)
+
+    def _get_alert_log_handler(self, log_path: str) -> Optional[logging.handlers.RotatingFileHandler]:
+        """Return a cached RotatingFileHandler for the alert log path."""
+        with self._alert_log_lock:
+            if self._alert_log_handler is not None and self._alert_log_path == log_path:
+                return self._alert_log_handler
+            # Path changed (or first call) — close any old handler and open fresh.
+            if self._alert_log_handler is not None:
+                try:
+                    self._alert_log_handler.close()
+                except OSError:
+                    pass
+                self._alert_log_handler = None
+            try:
+                parent = os.path.dirname(log_path)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                handler = logging.handlers.RotatingFileHandler(
+                    log_path,
+                    maxBytes=_ALERT_LOG_MAX_BYTES,
+                    backupCount=_ALERT_LOG_BACKUPS,
+                    encoding="utf-8",
+                )
+                handler.setFormatter(logging.Formatter("%(message)s"))
+                self._alert_log_handler = handler
+                self._alert_log_path = log_path
+                return handler
+            except OSError as e:
+                logger.error("Failed to open alert log %s: %s", log_path, e)
+                return None
 
     def _is_alert_cooled_down(self, node_id: str, alert_type: str) -> bool:
         """Check if alert should be suppressed (still in cooldown).

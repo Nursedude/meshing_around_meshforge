@@ -30,6 +30,9 @@ _HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9._-]+(:\d{1,5})?$")
 # the same sender+channel within a configurable time window.
 # Short messages (<40 bytes) pass through instantly — keeps TUI snappy on Pi.
 _CHUNK_BYTE_THRESHOLD = 40
+# Cap on simultaneous senders we track so a public broker with thousands
+# of nodes can't grow _buffers before the per-key timer fires.
+_CHUNK_MAX_SENDERS = 200
 
 
 class _ChunkBuffer:
@@ -55,6 +58,20 @@ class _ChunkBuffer:
     def enabled(self) -> bool:
         return self._timeout > 0
 
+    def _evict_oldest_unlocked(self) -> None:
+        """Drop the buffer whose first chunk arrived earliest. Caller holds _lock."""
+        if not self._buffers:
+            return
+        oldest_key = min(
+            self._buffers,
+            key=lambda k: self._buffers[k][0][1] if self._buffers[k] else 0.0,
+        )
+        timer = self._timers.pop(oldest_key, None)
+        if timer is not None:
+            timer.cancel()
+        self._buffers.pop(oldest_key, None)
+        logger.debug("ChunkBuffer evicted oldest sender %s (cap %d)", oldest_key, _CHUNK_MAX_SENDERS)
+
     def add(self, sender_id: str, channel: int, text: str, packet: dict) -> bool:
         """Buffer a text fragment.  Returns True if buffered, False to pass through."""
         if not self.enabled:
@@ -67,7 +84,10 @@ class _ChunkBuffer:
                 self._reset_timer(key)
                 return True
             elif len(text.encode("utf-8")) >= _CHUNK_BYTE_THRESHOLD:
-                # Long enough to be a bot chunk — start buffering
+                # Long enough to be a bot chunk — start buffering.  Evict
+                # the oldest sender first if we're at the cap.
+                if len(self._buffers) >= _CHUNK_MAX_SENDERS:
+                    self._evict_oldest_unlocked()
                 self._buffers[key] = [(text, time.monotonic(), packet)]
                 self._reset_timer(key)
                 return True
@@ -984,6 +1004,9 @@ class MeshtasticAPI(CallbackMixin):
                 # Load initial node database
                 self._load_node_database()
 
+                # Start callback worker first so message-thread dispatch
+                # never blocks on TUI rendering.
+                self._start_callback_worker()
                 self._start_worker_thread()
 
                 # Start auto-save thread
@@ -1104,7 +1127,10 @@ class MeshtasticAPI(CallbackMixin):
         self.interface = None
         self.connection_info.connected = False
         self.network.connection_status = "disconnected"
+        # Fire on_disconnect, then drain the worker so the event reaches
+        # subscribers before the queue stops consuming.
         self._trigger_callbacks("on_disconnect")
+        self._stop_callback_worker()
 
     def _load_node_database(self) -> None:
         """Load the node database from the connected device."""
@@ -1956,6 +1982,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
         )
 
         self._running.set()
+        self._start_callback_worker()
         self._trigger_callbacks("on_connect", self.connection_info)
 
         # Start background demo traffic
@@ -1973,6 +2000,7 @@ class MockMeshtasticAPI(MeshtasticAPI):
         self.connection_info.connected = False
         self.network.connection_status = "disconnected"
         self._trigger_callbacks("on_disconnect")
+        self._stop_callback_worker()
 
     def _demo_traffic_loop(self) -> None:
         """Background loop that simulates incoming mesh traffic."""
