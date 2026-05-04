@@ -14,6 +14,8 @@ sys.path.insert(0, str(__file__).rsplit("/tests/", 1)[0])
 from meshing_around_clients.core.models import (
     Alert,
     AlertType,
+    Channel,
+    ChannelRole,
     MeshNetwork,
     MeshRoute,
     Message,
@@ -639,6 +641,9 @@ class TestSaveToFileEdgeCases(unittest.TestCase):
         """save_to_file to an inaccessible path should return False."""
         network = MeshNetwork()
         network.my_node_id = "!savetest"
+        # Force a real I/O attempt — the dirty-flag throttle would otherwise
+        # short-circuit a clean network before it ever touches the filesystem.
+        network.mark_dirty()
         # /proc is read-only on Linux
         result = network.save_to_file("/proc/meshforge_test_state.json")
         self.assertFalse(result)
@@ -813,6 +818,162 @@ class TestMeshNetworkAdvanced(unittest.TestCase):
         removed = self.network.cleanup_stale_nodes(stale_hours=72, max_nodes=5)
         self.assertGreater(removed, 0)
         self.assertLessEqual(len(self.network.nodes), 5)
+
+
+class TestMeshNetworkDirtyFlag(unittest.TestCase):
+    """Test the _dirty flag throttle on save_to_file (Fix 3b)."""
+
+    def setUp(self):
+        import tempfile
+
+        self.tmpdir = tempfile.mkdtemp(prefix="dirty_flag_test_")
+        self.path = self.tmpdir + "/state.json"
+        self.network = MeshNetwork()
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_fresh_network_is_clean(self):
+        self.assertFalse(self.network.is_dirty())
+
+    def test_clean_network_skips_disk_write(self):
+        # Save returns True but file should not be created.
+        result = self.network.save_to_file(self.path)
+        self.assertTrue(result)
+        import os
+
+        self.assertFalse(os.path.exists(self.path))
+
+    def test_add_message_marks_dirty(self):
+        self.network.add_message(
+            Message(
+                id="m1",
+                sender_id="!a",
+                recipient_id="!b",
+                channel=0,
+                text="hi",
+                message_type=MessageType.TEXT,
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+        self.assertTrue(self.network.is_dirty())
+
+    def test_add_node_marks_dirty(self):
+        self.network.add_node(Node(node_id="!a", node_num=1))
+        self.assertTrue(self.network.is_dirty())
+
+    def test_add_alert_marks_dirty(self):
+        self.network.add_alert(
+            Alert(
+                id="a1",
+                alert_type=AlertType.BATTERY,
+                title="Low",
+                message="m",
+                severity=2,
+            )
+        )
+        self.assertTrue(self.network.is_dirty())
+
+    def test_update_route_marks_dirty(self):
+        self.network.update_route(
+            "!dest",
+            MeshRoute(
+                destination_id="!dest",
+                hops=[RouteHop(node_id="!a", snr=5.0, timestamp=datetime.now(timezone.utc))],
+                discovered=datetime.now(timezone.utc),
+                last_used=datetime.now(timezone.utc),
+            ),
+        )
+        self.assertTrue(self.network.is_dirty())
+
+    def test_save_clears_dirty_flag(self):
+        self.network.add_node(Node(node_id="!a", node_num=1))
+        self.assertTrue(self.network.is_dirty())
+        self.network.save_to_file(self.path)
+        self.assertFalse(self.network.is_dirty())
+
+    def test_force_save_writes_clean_network(self):
+        result = self.network.save_to_file(self.path, force=True)
+        self.assertTrue(result)
+        import os
+
+        self.assertTrue(os.path.exists(self.path))
+
+    def test_mark_dirty_helper_flips_flag(self):
+        self.assertFalse(self.network.is_dirty())
+        self.network.mark_dirty()
+        self.assertTrue(self.network.is_dirty())
+
+    def test_set_channel_marks_dirty(self):
+        # set_channel persists to network_state.json via to_dict; without
+        # _dirty=True the auto-save loop would skip writing the change.
+        self.network.set_channel(Channel(index=1, role=ChannelRole.SECONDARY, name="alt"))
+        self.assertTrue(self.network.is_dirty())
+
+    def test_update_link_quality_marks_dirty(self):
+        self.network.add_node(Node(node_id="!a", node_num=1))
+        self.network.save_to_file(self.path)  # clear dirty
+        self.assertFalse(self.network.is_dirty())
+        self.network.update_link_quality("!a", snr=5.0, rssi=-90, hop_count=1)
+        self.assertTrue(self.network.is_dirty())
+
+    def test_update_link_quality_unknown_node_stays_clean(self):
+        # Unknown node short-circuits without mutating — must not flip dirty.
+        self.network.update_link_quality("!missing", snr=5.0, rssi=-90)
+        self.assertFalse(self.network.is_dirty())
+
+    def test_update_neighbor_relationship_marks_dirty(self):
+        self.network.add_node(Node(node_id="!a", node_num=1))
+        self.network.add_node(Node(node_id="!b", node_num=2))
+        self.network.save_to_file(self.path)  # clear dirty
+        self.assertFalse(self.network.is_dirty())
+        self.network.update_neighbor_relationship("!a", "!b")
+        self.assertTrue(self.network.is_dirty())
+
+    def test_update_neighbor_relationship_idempotent_stays_clean(self):
+        # Second identical call mutates nothing — flag must not re-set.
+        self.network.add_node(Node(node_id="!a", node_num=1))
+        self.network.add_node(Node(node_id="!b", node_num=2))
+        self.network.update_neighbor_relationship("!a", "!b")
+        self.network.save_to_file(self.path)
+        self.assertFalse(self.network.is_dirty())
+        self.network.update_neighbor_relationship("!a", "!b")
+        self.assertFalse(self.network.is_dirty())
+
+    def test_cleanup_stale_nodes_marks_dirty_when_pruning(self):
+        old = Node(node_id="!old", node_num=1)
+        old.last_heard = datetime.now(timezone.utc) - timedelta(hours=99)
+        self.network.add_node(old)
+        self.network.save_to_file(self.path)  # clear dirty
+        self.assertFalse(self.network.is_dirty())
+        removed = self.network.cleanup_stale_nodes(stale_hours=1)
+        self.assertGreaterEqual(removed, 1)
+        self.assertTrue(self.network.is_dirty())
+
+    def test_cleanup_stale_nodes_no_removal_stays_clean(self):
+        fresh = Node(node_id="!fresh", node_num=1)
+        fresh.last_heard = datetime.now(timezone.utc)
+        self.network.add_node(fresh)
+        self.network.save_to_file(self.path)
+        self.assertFalse(self.network.is_dirty())
+        removed = self.network.cleanup_stale_nodes(stale_hours=24)
+        self.assertEqual(removed, 0)
+        self.assertFalse(self.network.is_dirty())
+
+    def test_failed_save_keeps_dirty_flag(self):
+        # If the disk write fails, the next auto-save tick must still
+        # try — otherwise a transient OSError silently drops the
+        # mutation forever.
+        self.network.add_node(Node(node_id="!x", node_num=9))
+        self.assertTrue(self.network.is_dirty())
+        result = self.network.save_to_file("/proc/meshforge_test_no_write.json")
+        self.assertFalse(result)
+        self.assertTrue(
+            self.network.is_dirty(),
+            "Failed save must leave _dirty=True so the next save attempt fires",
+        )
 
 
 if __name__ == "__main__":

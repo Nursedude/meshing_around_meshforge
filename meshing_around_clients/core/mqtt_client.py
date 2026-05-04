@@ -298,9 +298,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             if not parent.exists():
                 parent.mkdir(parents=True, exist_ok=True)
             if not _os.access(str(parent), _os.W_OK):
-                logger.warning(
-                    "Maps export disabled — no write access to %s", parent
-                )
+                logger.warning("Maps export disabled — no write access to %s", parent)
                 return
         except (OSError, PermissionError) as e:
             logger.warning("Maps export disabled — cannot prepare %s: %s", path_str, e)
@@ -315,9 +313,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                 except (OSError, ValueError) as e:
                     logger.debug("Maps export write failed: %s", e)
 
-        self._maps_export_thread = threading.Thread(
-            target=export_loop, daemon=True, name="mqtt-maps-export"
-        )
+        self._maps_export_thread = threading.Thread(target=export_loop, daemon=True, name="mqtt-maps-export")
         self._maps_export_thread.start()
         logger.info("Maps export enabled: %s every %ds", path_str, interval)
 
@@ -345,9 +341,36 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     @property
     def stats(self) -> Dict[str, Any]:
-        """Get subscriber statistics (thread-safe)."""
+        """Get subscriber statistics (thread-safe).
+
+        Adds derived health fields the TUI uses to show "is the MQTT
+        path healthy?" without the operator having to open a debug log:
+          - ``last_message_age_sec``  — how long since the last RX
+          - ``rx_rate_msgs_per_sec``  — lifetime average since connect
+          - ``uptime_sec``            — connection lifetime
+          - ``callback_queue_depth``  — pending events for the worker
+          - ``callback_queue_drops``  — events dropped under back-pressure
+        """
         with self._stats_lock:
-            return dict(self._stats)
+            snapshot = dict(self._stats)
+            last_msg_time = self._last_message_time
+            connection_start = self._connection_start
+            received = snapshot.get("messages_received", 0)
+        now = datetime.now(timezone.utc)
+        if last_msg_time is not None:
+            snapshot["last_message_age_sec"] = max(0.0, (now - last_msg_time).total_seconds())
+        else:
+            snapshot["last_message_age_sec"] = None
+        if connection_start is not None:
+            uptime = max(0.0, (now - connection_start).total_seconds())
+            snapshot["uptime_sec"] = uptime
+            snapshot["rx_rate_msgs_per_sec"] = (received / uptime) if uptime > 0 else 0.0
+        else:
+            snapshot["uptime_sec"] = 0.0
+            snapshot["rx_rate_msgs_per_sec"] = 0.0
+        snapshot["callback_queue_depth"] = self.callback_queue_depth()
+        snapshot["callback_queue_drops"] = self.callback_queue_drops()
+        return snapshot
 
     # Input validation: uses shared safe_float() / safe_int() from callbacks module.
     # Alert cooldown: uses base CallbackMixin._is_alert_cooled_down().
@@ -491,6 +514,9 @@ class MQTTMeshtasticClient(CallbackMixin):
                     self.connection_info.connected = True
                     self.connection_info.error_message = ""
                     self.connection_info.my_node_id = self.mqtt_config.node_id or "mqtt-client"
+                    # Start callback worker BEFORE network loop dispatches
+                    # so paho's first message doesn't block on TUI render.
+                    self._start_callback_worker()
                     # Start background threads
                     self._start_cleanup_thread()
                     self._start_auto_save()
@@ -588,7 +614,10 @@ class MQTTMeshtasticClient(CallbackMixin):
                 pass  # Already disconnected or broken pipe
         self.network.connection_status = "disconnected"
         self.connection_info.connected = False
+        # Fire on_disconnect, then drain the worker so the event reaches
+        # subscribers before the queue stops consuming.
         self._trigger_callbacks("on_disconnect")
+        self._stop_callback_worker()
 
     def _on_connect(self, client, userdata, flags, rc):
         """Handle MQTT connection."""

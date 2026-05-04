@@ -6,6 +6,7 @@ Tests MockMeshtasticAPI — the hardware-free mock used in demo mode.
 
 import queue
 import sys
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -397,6 +398,7 @@ class TestMockAPIDynamicNodes(unittest.TestCase):
         alerts = []
         self.api.register_callback("on_alert", lambda a: alerts.append(a))
         self.api._generate_demo_event()
+        self.api._drain_callbacks(timeout=1.0)
         new_node_alerts = [a for a in alerts if hasattr(a, "alert_type") and a.alert_type.value == "new_node"]
         self.assertGreater(len(new_node_alerts), 0)
 
@@ -405,6 +407,7 @@ class TestMockAPIDynamicNodes(unittest.TestCase):
         events = []
         self.api.register_callback("on_node_update", lambda *a: events.append(a))
         self.api._generate_demo_event()
+        self.api._drain_callbacks(timeout=1.0)
         self.assertGreater(len(events), 0)
 
     def test_discovery_capped_at_max(self):
@@ -617,6 +620,8 @@ class TestMockAPIMessageCallbacks(unittest.TestCase):
         for _ in range(10):
             with patch("random.random", side_effect=[0.99, 0.3]):
                 self.api._generate_demo_event()
+        # Async dispatch — wait for the worker to drain the queue.
+        self.api._drain_callbacks(timeout=1.0)
         self.assertGreater(len(self.messages_received), 0)
 
 
@@ -991,6 +996,82 @@ class TestChunkBuffer(unittest.TestCase):
         self.buffer.cancel_all()
         time.sleep(0.5)
         self.assertEqual(len(self.flushed), 0)
+
+    def test_max_senders_cap_evicts_oldest(self):
+        """When _CHUNK_MAX_SENDERS is reached, the oldest entry is evicted."""
+        from meshing_around_clients.core import meshtastic_api as mod
+
+        with patch.object(mod, "_CHUNK_MAX_SENDERS", 3):
+            for idx, sender in enumerate(["!aaaa", "!bbbb", "!cccc"]):
+                self.buffer.add(sender, 0, "Z" * 150, self._packet(sender=sender))
+                # Ensure monotonic timestamps differ enough to pick the oldest deterministically.
+                time.sleep(0.01)
+            self.assertEqual(len(self.buffer._buffers), 3)
+            # Adding a fourth sender should evict the oldest (!aaaa).
+            self.buffer.add("!dddd", 0, "Z" * 150, self._packet(sender="!dddd"))
+            keys = set(self.buffer._buffers.keys())
+            self.assertEqual(len(keys), 3)
+            self.assertNotIn("!aaaa:0", keys)
+            self.assertIn("!dddd:0", keys)
+        self.buffer.cancel_all()
+
+
+class TestCallbackWorkerLifecycle(unittest.TestCase):
+    """Worker start-before-dispatch and stop-after-on_disconnect ordering.
+
+    The new lifecycle wiring guarantees subscribers receive on_disconnect
+    *before* the worker stops accepting events, and that any high-frequency
+    events queued before disconnect still run.
+    """
+
+    def setUp(self):
+        self.config = Config()
+        self.api = MockMeshtasticAPI(self.config)
+
+    def test_on_disconnect_fires_before_worker_stops(self):
+        order = []
+        # on_disconnect is in _SYNCHRONOUS_EVENTS — runs in the caller's
+        # thread, so the order log records the dispatch moment.
+        self.api.register_callback("on_disconnect", lambda *a, **k: order.append("on_disconnect"))
+
+        # Receive callback simulates a high-frequency event that goes
+        # through the worker queue.
+        seen = threading.Event()
+
+        def slow_msg(*a, **k):
+            order.append("on_message")
+            seen.set()
+
+        self.api.register_callback("on_message", slow_msg)
+        self.api.connect()
+        # Queue a message event before disconnect — worker must drain it
+        # before exiting.
+        self.api._trigger_callbacks("on_message", None)
+        self.api.disconnect()
+
+        # After disconnect: both events should have fired, and the queued
+        # on_message must appear before on_disconnect (the worker drains
+        # before disconnect's _stop_callback_worker call returns; the sync
+        # on_disconnect is dispatched first by the disconnect() body).
+        self.assertTrue(seen.wait(timeout=1.0), "on_message never fired")
+        self.assertIn("on_disconnect", order)
+        self.assertIn("on_message", order)
+
+    def test_worker_running_after_connect(self):
+        # Implicit contract — paho enqueues immediately after connect()
+        # returns; if the worker isn't up, events would dispatch
+        # synchronously and block the network thread.
+        self.api.connect()
+        try:
+            self.assertIsNotNone(self.api._cb_worker)
+            self.assertTrue(self.api._cb_worker.is_alive())
+        finally:
+            self.api.disconnect()
+
+    def test_worker_stopped_after_disconnect(self):
+        self.api.connect()
+        self.api.disconnect()
+        self.assertIsNone(self.api._cb_worker)
 
 
 class TestCallUpstreamCmd(unittest.TestCase):

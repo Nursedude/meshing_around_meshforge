@@ -557,6 +557,46 @@ class TestDashboardRxBreakdown(unittest.TestCase):
         self.assertNotIn("enc:", rendered)
         self.assertNotIn("rej:", rendered)
 
+    def test_health_fields_render_when_set(self):
+        """rate / age / queue depth + drops should appear when non-zero."""
+        self.tui.api.stats = {
+            "messages_received": 600,
+            "text_messages": 100,
+            "rx_rate_msgs_per_sec": 10.0,
+            "last_message_age_sec": 4.7,
+            "callback_queue_depth": 42,
+            "callback_queue_drops": 3,
+        }
+        rendered = self._render_stats_panel()
+        self.assertIn("10.0/s", rendered)
+        self.assertIn("age:4s", rendered)
+        self.assertIn("q:42", rendered)
+        self.assertIn("drops:3", rendered)
+
+
+class TestPromptModeFlush(unittest.TestCase):
+    """Pressing [r] then typing wx must not register as 'rwx' (Fix 1)."""
+
+    def test_prompt_mode_flushes_stdin(self):
+        """_prompt_mode must call termios.tcflush after restoring cooked mode."""
+        import termios
+        from unittest.mock import MagicMock, patch
+
+        from meshing_around_clients.tui.app import MeshingAroundTUI
+
+        config = Config()
+        tui = MeshingAroundTUI(config=config, demo_mode=True)
+        tui._old_terminal_settings = ["dummy"]
+        tui._live = MagicMock()
+
+        with patch.object(termios, "tcsetattr") as mock_set, patch.object(termios, "tcflush") as mock_flush:
+            with tui._prompt_mode():
+                pass
+            mock_set.assert_called()
+            mock_flush.assert_called_once()
+            args, _ = mock_flush.call_args
+            self.assertEqual(args[1], termios.TCIFLUSH)
+
 
 class TestPlainTextTUI(unittest.TestCase):
     """Test PlainTextTUI fallback mode (no Rich required)."""
@@ -1053,8 +1093,8 @@ class TestConfigScreenInlineEditor(unittest.TestCase):
 
     def test_find_config_returns_upstream_path_when_exists(self):
         """_find_config() delegates to Config.find_upstream_config()."""
-        from unittest.mock import MagicMock
         from pathlib import Path as _P
+        from unittest.mock import MagicMock
 
         fake = _P("/tmp/fake-bot-config.ini")
         self.tui.config.find_upstream_config = MagicMock(return_value=fake)  # type: ignore[assignment]
@@ -1445,6 +1485,7 @@ class TestCommandPaletteKeyBinding(unittest.TestCase):
     def test_palette_index_selection_sends_selected_command(self):
         """Picking '1' from the palette sends the first catalog entry's command."""
         from unittest.mock import MagicMock, patch
+
         from meshing_around_clients.core.meshtastic_api import MeshtasticAPI
 
         catalog = MeshtasticAPI.get_command_catalog(self.config)

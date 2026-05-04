@@ -606,11 +606,24 @@ class MeshNetwork:
 
     def __post_init__(self):
         self._lock = threading.Lock()
+        # Dirty flag — when False, save_to_file is a no-op.  Lets the 60s
+        # auto-save loop skip disk I/O on quiet networks (no traffic = no
+        # state change = no need to rewrite ~/.config/.../network_state.json).
+        self._dirty: bool = False
         # Initialize default channels
         if not self.channels:
             for i in range(self.channel_count):
                 role = ChannelRole.PRIMARY if i == 0 else ChannelRole.DISABLED
                 self.channels[i] = Channel(index=i, role=role)
+
+    def mark_dirty(self) -> None:
+        """Mark network state as needing persistence on next save."""
+        with self._lock:
+            self._dirty = True
+
+    def is_dirty(self) -> bool:
+        with self._lock:
+            return self._dirty
 
     @property
     def online_nodes(self) -> List[Node]:
@@ -659,6 +672,7 @@ class MeshNetwork:
             # Auto-prune when node count exceeds limit to prevent unbounded growth
             if len(self.nodes) > MAX_NODES:
                 self._prune_oldest_nodes_unlocked(MAX_NODES)
+            self._dirty = True
 
     def _prune_oldest_nodes_unlocked(self, target: int) -> None:
         """Remove oldest nodes to bring count to target. Caller must hold _lock."""
@@ -679,11 +693,13 @@ class MeshNetwork:
             if ch is not None:
                 ch.message_count += 1
                 ch.last_activity = datetime.now(timezone.utc)
+            self._dirty = True
 
     def add_alert(self, alert: Alert) -> None:
         with self._lock:
             self.alerts.append(alert)
             # deque(maxlen=ALERT_HISTORY_MAX) handles bounding automatically
+            self._dirty = True
 
     def get_messages_for_channel(self, channel: int) -> List[Message]:
         with self._lock:
@@ -698,6 +714,7 @@ class MeshNetwork:
         """Set or update a channel configuration."""
         with self._lock:
             self.channels[channel.index] = channel
+            self._dirty = True
 
     def get_active_channels(self) -> List[Channel]:
         """Get all non-disabled channels."""
@@ -739,6 +756,7 @@ class MeshNetwork:
     def update_neighbor_relationship(self, reporter_id: str, heard_id: str) -> None:
         """Update neighbor relationships based on who heard whom."""
         with self._lock:
+            mutated = False
             # Reporter heard the heard_id node
             if reporter_id in self.nodes:
                 if heard_id not in self.nodes[reporter_id].neighbors:
@@ -746,12 +764,16 @@ class MeshNetwork:
                     # Bound neighbors list
                     if len(self.nodes[reporter_id].neighbors) > MAX_NEIGHBORS_PER_NODE:
                         self.nodes[reporter_id].neighbors = self.nodes[reporter_id].neighbors[-MAX_NEIGHBORS_PER_NODE:]
+                    mutated = True
             # heard_id was heard by reporter
             if heard_id in self.nodes:
                 if reporter_id not in self.nodes[heard_id].heard_by:
                     self.nodes[heard_id].heard_by.append(reporter_id)
                     if len(self.nodes[heard_id].heard_by) > MAX_NEIGHBORS_PER_NODE:
                         self.nodes[heard_id].heard_by = self.nodes[heard_id].heard_by[-MAX_NEIGHBORS_PER_NODE:]
+                    mutated = True
+            if mutated:
+                self._dirty = True
 
     def update_route(self, destination_id: str, route: MeshRoute) -> None:
         """Update or add a route to a destination."""
@@ -769,12 +791,14 @@ class MeshNetwork:
                 existing = [r for r in self.nodes[destination_id].routes if r.destination_id != destination_id]
                 existing.append(route)
                 self.nodes[destination_id].routes = existing[-5:]  # Keep last 5 routes
+            self._dirty = True
 
     def update_link_quality(self, node_id: str, snr: float, rssi: int, hop_count: int = 0) -> None:
         """Update link quality metrics for a node."""
         with self._lock:
             if node_id in self.nodes:
                 self.nodes[node_id].link_quality.update(snr, rssi, hop_count)
+                self._dirty = True
 
     def cleanup_stale_nodes(self, stale_hours: int = STALE_NODE_HOURS, max_nodes: int = MAX_NODES) -> int:
         """Remove nodes not seen within stale_hours, or prune to max_nodes.
@@ -800,6 +824,9 @@ class MeshNetwork:
                 for nid, _ in sorted_nodes[:to_remove]:
                     del self.nodes[nid]
                     removed += 1
+
+            if removed:
+                self._dirty = True
 
         return removed
 
@@ -1101,19 +1128,28 @@ class MeshNetwork:
         except json.JSONDecodeError:
             return cls()  # Return empty network on invalid JSON
 
-    def save_to_file(self, path: Union[str, Path]) -> bool:
+    def save_to_file(self, path: Union[str, Path], force: bool = False) -> bool:
         """Save network state to file atomically.
 
         Uses temp file + rename to prevent corruption on crash.
         From meshforge's atomic write pattern.
 
+        Skips the disk write entirely when no mutations have occurred
+        since the last save (the auto-save loop fires every 60s and on a
+        quiet network there is no point rewriting an identical file).
+        Pass ``force=True`` to write unconditionally.
+
         Args:
             path: Path to save state file
+            force: Bypass the dirty-flag check and write unconditionally
 
         Returns:
-            True if saved successfully, False otherwise
+            True if saved (or skipped because clean), False on I/O error
         """
         import tempfile
+
+        if not force and not self.is_dirty():
+            return True
 
         path = Path(path)
         try:
@@ -1127,15 +1163,20 @@ class MeshNetwork:
                 os.chmod(tmp_path, 0o600)
                 # Atomic rename (on same filesystem)
                 os.replace(tmp_path, str(path))
+                with self._lock:
+                    self._dirty = False
                 return True
-            except OSError:
+            except OSError as write_err:
+                # _dirty stays True so the next auto-save tick retries.
+                logger.warning("Failed to save network state to %s: %s", path, write_err)
                 # Clean up temp file on failure
                 try:
                     os.unlink(tmp_path)
                 except OSError as cleanup_err:
                     logger.warning("Failed to clean up temp file %s: %s", tmp_path, cleanup_err)
                 return False
-        except OSError:
+        except OSError as outer_err:
+            logger.warning("Failed to prepare save path %s: %s", path, outer_err)
             return False
 
     @classmethod

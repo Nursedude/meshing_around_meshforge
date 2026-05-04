@@ -360,7 +360,18 @@ class DashboardScreen(Screen):
                 tel = mqtt_stats.get("telemetry_updates", 0)
                 enc = mqtt_stats.get("decrypt_failures", 0)
                 rej = mqtt_stats.get("messages_rejected", 0)
+                # New health fields — surface queue depth/drops + age so
+                # operators can tell whether a slowdown is broker-side
+                # (no RX) or consumer-side (queue filling, drops).
+                rate = mqtt_stats.get("rx_rate_msgs_per_sec", 0.0) or 0.0
+                age = mqtt_stats.get("last_message_age_sec")
+                qdepth = mqtt_stats.get("callback_queue_depth", 0) or 0
+                qdrops = mqtt_stats.get("callback_queue_drops", 0) or 0
                 parts = []
+                if rate >= 0.05:
+                    parts.append(f"{rate:.1f}/s")
+                if age is not None and age >= 1.0:
+                    parts.append(f"age:{int(age)}s")
                 if text:
                     parts.append(f"text:{text}")
                 if pos:
@@ -371,6 +382,10 @@ class DashboardScreen(Screen):
                     parts.append(f"enc:{enc}")
                 if rej:
                     parts.append(f"rej:{rej}")
+                if qdepth:
+                    parts.append(f"q:{qdepth}")
+                if qdrops:
+                    parts.append(f"[red]drops:{qdrops}[/red]")
                 rx_str = str(rx) + (f"  {' '.join(parts)}" if parts else "")
 
         alert_count = len(network.unread_alerts)
@@ -379,7 +394,7 @@ class DashboardScreen(Screen):
             "Health",
             Text(f"{health_status.upper()} ({health_score}%)", style=health_style),
             "Rx Msgs",
-            rx_str,
+            Text.from_markup(rx_str),
             "Alerts",
             Text.from_markup(alert_str),
         )
@@ -664,12 +679,8 @@ class NodesScreen(Screen):
             table.add_column("Temp", justify="right")
             table.add_column("Hum", justify="right")
             # Optional sensors — only added when at least one node on the page reports them
-            has_pressure = any(
-                n.telemetry and n.telemetry.pressure is not None for n in page_nodes
-            )
-            has_gas = any(
-                n.telemetry and n.telemetry.gas_resistance is not None for n in page_nodes
-            )
+            has_pressure = any(n.telemetry and n.telemetry.pressure is not None for n in page_nodes)
+            has_gas = any(n.telemetry and n.telemetry.gas_resistance is not None for n in page_nodes)
             if has_pressure:
                 table.add_column("hPa", justify="right")
             if has_gas:
@@ -3262,6 +3273,15 @@ class MeshingAroundTUI:
             except (termios.error, OSError) as e:
                 logger.debug("Failed to restore terminal settings: %s", e)
 
+            # Drop any keystrokes queued during the cbreak→cooked swap (e.g.
+            # the `r` that triggered this prompt, or characters typed while
+            # Live tore down).  Without this, on a slow Pi the leading char
+            # leaks into Prompt.ask() — user sees "rwx" after typing "wx".
+            try:
+                termios.tcflush(sys.stdin, termios.TCIFLUSH)
+            except (termios.error, OSError) as e:
+                logger.debug("Failed to flush stdin buffer: %s", e)
+
         try:
             yield
         finally:
@@ -3298,9 +3318,7 @@ class MeshingAroundTUI:
                 time.sleep(2)
                 return
 
-            self.console.print(
-                f"[bold green]Connected[/bold green] — default bot channel is ch{default_ch}\n"
-            )
+            self.console.print(f"[bold green]Connected[/bold green] — default bot channel is ch{default_ch}\n")
             if prefill_cmd is None:
                 self.console.print(MeshtasticAPI.get_command_list(self.config))
                 self.console.print()
@@ -3319,9 +3337,7 @@ class MeshingAroundTUI:
                     if not 0 <= chosen_ch <= 7:
                         raise ValueError
                 except ValueError:
-                    self.console.print(
-                        f"[yellow]Invalid channel '{ch_raw}', using default ch{default_ch}[/yellow]"
-                    )
+                    self.console.print(f"[yellow]Invalid channel '{ch_raw}', using default ch{default_ch}[/yellow]")
                     chosen_ch = default_ch
 
                 if self.api.send_message(cmd, "^all", chosen_ch):
@@ -3346,9 +3362,7 @@ class MeshingAroundTUI:
 
         with self._prompt_mode():
             self.console.clear()
-            self.console.print(
-                Panel("[bold cyan]Bot Command Palette[/bold cyan]", border_style="cyan")
-            )
+            self.console.print(Panel("[bold cyan]Bot Command Palette[/bold cyan]", border_style="cyan"))
 
             if not self.api.is_connected:
                 self.console.print("[red]Not connected — connect first[/red]")
@@ -3369,9 +3383,7 @@ class MeshingAroundTUI:
             self.console.print()
 
             try:
-                pick = Prompt.ask(
-                    f"Pick a command [1-{len(catalog)}] or type a name", default=""
-                ).strip()
+                pick = Prompt.ask(f"Pick a command [1-{len(catalog)}] or type a name", default="").strip()
                 if not pick:
                     return
                 # Number selection
@@ -3380,9 +3392,7 @@ class MeshingAroundTUI:
                     if 1 <= idx <= len(catalog):
                         cmd = catalog[idx - 1][0]
                     else:
-                        self.console.print(
-                            f"[yellow]Index {idx} out of range 1..{len(catalog)}[/yellow]"
-                        )
+                        self.console.print(f"[yellow]Index {idx} out of range 1..{len(catalog)}[/yellow]")
                         time.sleep(1)
                         return
                 else:
