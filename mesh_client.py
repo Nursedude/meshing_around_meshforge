@@ -1989,7 +1989,7 @@ def configure_wifi_radio(config: ConfigParser) -> None:
             f"Device MQTT: {broker_addr}\n"
             f"mesh_client virtual node_id: {virtual_node_id}\n\n"
             f"The virtual node_id is mesh_client's own identity for MQTT\n"
-            f"publishes — it must NOT match any real radio's hardware ID,\n"
+            f"publishes - it must NOT match any real radio's hardware ID,\n"
             f"otherwise the radio filters its own publishes as loopback.\n\n"
             f"Verify with:\n"
             f"  mosquitto_sub -t '{topic_root}/#' -v -C 1\n\n"
@@ -2052,7 +2052,7 @@ def _launcher_rename_radio(config: ConfigParser) -> None:
         # from this config.  BA5E case: mesh_client uses MQTT but the
         # G2 WiFi Radio sits on a separate TCP IP we need to prompt for.
         host = inputbox(
-            f"interface.type={iface_type or 'unset'} — no direct radio path.\n"
+            f"interface.type={iface_type or 'unset'} - no direct radio path.\n"
             "Enter the radio's TCP host (e.g. 192.168.1.50):",
             default="",
         )
@@ -2093,7 +2093,7 @@ def _launcher_rename_radio(config: ConfigParser) -> None:
     except subprocess.TimeoutExpired:
         msgbox(
             "meshtastic command timed out after 60s.\n"
-            "Radio may still be applying the rename — check with\n"
+            "Radio may still be applying the rename - check with\n"
             "  meshtastic --info\n"
             "after another 30 seconds.",
             title="Timeout",

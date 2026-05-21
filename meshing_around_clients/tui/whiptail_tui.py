@@ -583,7 +583,7 @@ class WhiptailTUI:
         except subprocess.TimeoutExpired:
             msgbox(
                 "meshtastic command timed out after 60s.\n"
-                "Radio may still be applying the rename — check with\n"
+                "Radio may still be applying the rename - check with\n"
                 "  meshtastic --info\n"
                 "after another 30 seconds.",
                 title="Timeout",
