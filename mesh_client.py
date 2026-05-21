@@ -2646,18 +2646,25 @@ Examples:
     log(f"Terminal detection: stdin.isatty={is_interactive}", "INFO")
 
     if is_interactive:
-        # Pi Zero 2W auto-default: when no explicit mode flag is set,
+        # Pi Zero auto-default: when no explicit mode flag is set,
         # skip the launcher and go straight to the whiptail (raspi-config
         # style) TUI.  The Rich TUI's full-screen Live renderer is too
-        # heavy for 1 GHz / 512 MB, and whiptail is what the platform
+        # heavy for 1 GHz single-core (Zero W) or 1 GHz quad-core ARMv7
+        # (Zero 2W) at 512 MB, and whiptail is what the platform
         # expects.  Other Pi models / x86 still get the launcher menu.
+        #
+        # Note: is_pi_zero() matches BOTH the Pi Zero W (original,
+        # ARMv6 BCM2835) and the Pi Zero 2W (ARMv7 BCM2710A1).  The
+        # original 2W-only check missed the older Zero W deployments
+        # where the constraint is tighter, not looser.  Caught on BA5E
+        # (wh6gxzTRDEV) which is a Zero W Rev 1.1, not a 2W.
         if not has_mode_flag:
             try:
-                from meshing_around_clients.setup.pi_utils import is_pi_zero_2w
+                from meshing_around_clients.setup.pi_utils import get_pi_model, is_pi_zero
 
-                if is_pi_zero_2w():
+                if is_pi_zero():
                     log(
-                        "Pi Zero 2W detected — defaulting to whiptail " "(use --tui to force Rich)",
+                        f"{get_pi_model()} detected — defaulting to " "whiptail (use --tui to force Rich)",
                         "INFO",
                     )
                     config.set("features", "mode", "tui")
