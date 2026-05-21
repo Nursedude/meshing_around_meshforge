@@ -2646,6 +2646,31 @@ Examples:
     log(f"Terminal detection: stdin.isatty={is_interactive}", "INFO")
 
     if is_interactive:
+        # Pi Zero 2W auto-default: when no explicit mode flag is set,
+        # skip the launcher and go straight to the whiptail (raspi-config
+        # style) TUI.  The Rich TUI's full-screen Live renderer is too
+        # heavy for 1 GHz / 512 MB, and whiptail is what the platform
+        # expects.  Other Pi models / x86 still get the launcher menu.
+        if not has_mode_flag:
+            try:
+                from meshing_around_clients.setup.pi_utils import is_pi_zero_2w
+
+                if is_pi_zero_2w():
+                    log(
+                        "Pi Zero 2W detected — defaulting to whiptail " "(use --tui to force Rich)",
+                        "INFO",
+                    )
+                    config.set("features", "mode", "tui")
+                    config.set("features", "force_whiptail", "true")
+                    try:
+                        success = run_application(config)
+                        sys.exit(0 if success else 1)
+                    except KeyboardInterrupt:
+                        log("Interrupted by user", "INFO")
+                        sys.exit(0)
+            except ImportError:
+                pass
+
         # Always show the launcher menu for interactive terminals.
         # CLI flags (--tui, --demo) pre-set config defaults but
         # the menu still appears so users can change their mind.

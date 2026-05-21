@@ -6,13 +6,15 @@ lower resource usage.
 """
 
 import logging
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
 
 from meshing_around_clients.core import Config, MeshtasticAPI
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI
 from meshing_around_clients.core.models import Node
-from meshing_around_clients.setup.whiptail import infobox, menu, msgbox
+from meshing_around_clients.setup.whiptail import infobox, inputbox, menu, msgbox, yesno
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,8 @@ class WhiptailTUI:
             ("messages", f"Messages ({len(messages)})"),
             ("alerts", f"Alerts ({len(alerts)})"),
             ("topology", "Topology"),
+            ("config", "Bot Config (edit /opt/meshing-around/config.ini)"),
+            ("radio", "Radio Settings (rename longName / shortName)"),
             ("e", "Exit"),
         ]
         return menu("Mesh Monitor", items, default="dashboard")
@@ -98,6 +102,8 @@ class WhiptailTUI:
             "messages": self._show_messages,
             "alerts": self._show_alerts,
             "topology": self._show_topology,
+            "config": self._show_bot_config,
+            "radio": self._show_radio_settings,
         }
         handler = handlers.get(screen)
         if handler:
@@ -335,3 +341,272 @@ class WhiptailTUI:
             width=76,
             scrolltext=True,
         )
+
+    # ------------------------------------------------------------------
+    # Bot Config editor (raspi-config style — nested menus)
+    # ------------------------------------------------------------------
+
+    def _find_bot_config(self) -> Optional[Path]:
+        """Locate the meshing-around bot's config.ini."""
+        if self.config and hasattr(self.config, "find_upstream_config"):
+            try:
+                found = self.config.find_upstream_config()
+                if found:
+                    return found
+            except (OSError, AttributeError) as e:
+                logger.debug("find_upstream_config failed: %s", e)
+        primary = Path("/opt/meshing-around/config.ini")
+        try:
+            if primary.exists():
+                return primary
+        except OSError:
+            pass
+        return None
+
+    def _show_bot_config(self) -> None:
+        """Edit the bot's config.ini section by section.
+
+        Nested raspi-config style: sections menu -> keys menu -> input
+        prompt -> save with .ini.bak backup.  This is the
+        rename-the-bot entry point: [general] bot_name is the field
+        the BA5E owner wants.
+        """
+        import configparser
+
+        path = self._find_bot_config()
+        if not path:
+            msgbox(
+                "Bot config.ini not found.\n"
+                "Install meshing-around or create a symlink:\n"
+                "  sudo ln -s /path/to/config.ini "
+                "/opt/meshing-around/config.ini",
+                title="Bot Config",
+            )
+            return
+
+        parser = configparser.ConfigParser()
+        try:
+            parser.read(str(path))
+        except (configparser.Error, OSError) as e:
+            msgbox(f"Failed to read {path}:\n{e}", title="Bot Config")
+            return
+
+        if not parser.sections():
+            msgbox(f"{path} has no sections.", title="Bot Config")
+            return
+
+        while True:
+            section_items: List[tuple] = [(s, s) for s in parser.sections()]
+            section_items.append(("e", "[ Back to main menu ]"))
+            section = menu(f"Bot Config ({path.name})", section_items)
+            if section is None or section == "e":
+                return
+
+            self._edit_config_section(parser, path, section)
+
+    def _edit_config_section(
+        self,
+        parser,  # configparser.ConfigParser — annotation omitted to avoid
+        # forward-ref to a function-local import.
+        path: Path,
+        section: str,
+    ) -> None:
+        """Inner loop: pick a key in `section`, edit, save with .bak backup."""
+        import shutil
+
+        while True:
+            keys = parser.options(section)
+            kv_items: List[tuple] = []
+            for key in keys:
+                value = parser.get(section, key)
+                # whiptail menu rows are one line — truncate long values.
+                shown = value if len(value) <= 40 else value[:37] + "..."
+                kv_items.append((key, f"{key} = {shown}"))
+            kv_items.append(("e", "[ Back ]"))
+
+            key = menu(f"[{section}]", kv_items)
+            if key is None or key == "e":
+                return
+
+            current = parser.get(section, key)
+            new = inputbox(f"{section}.{key} =", default=current)
+            if new is None:
+                continue  # user cancelled the edit, stay in section menu
+            if new == current:
+                continue
+
+            parser.set(section, key, new)
+
+            # Save with .ini.bak backup (feedback_config_protection.md).
+            try:
+                if path.exists():
+                    bak = path.with_suffix(".ini.bak")
+                    shutil.copy2(str(path), str(bak))
+                with open(path, "w") as f:
+                    parser.write(f)
+            except OSError as e:
+                msgbox(f"Save failed:\n{e}", title="Error")
+                # Roll back the in-memory change so we don't show stale state
+                parser.set(section, key, current)
+                continue
+
+            msgbox(
+                f"Saved {section}.{key}.\n"
+                "Restart bot for changes to take effect:\n"
+                "  sudo systemctl restart mesh_bot.service",
+                title="Saved",
+            )
+
+    # ------------------------------------------------------------------
+    # Radio Settings (meshtastic --set-owner)
+    # ------------------------------------------------------------------
+
+    def _show_radio_settings(self) -> None:
+        """Radio Settings menu — currently only rename."""
+        items = [
+            ("rename", "Rename radio (longName / shortName)"),
+            ("e", "[ Back ]"),
+        ]
+        choice = menu("Radio Settings", items)
+        if choice == "rename":
+            self._radio_rename()
+
+    def _resolve_radio_connection_args(self) -> Optional[List[str]]:
+        """Pick the right --port/--host args for `meshtastic` CLI.
+
+        Returns None if the user cancels or the connection mode is
+        unrenamable through this code path.
+        """
+        iface_type = (self.config.interface.type or "").lower() if self.config else ""
+
+        if iface_type == "serial":
+            port = self.config.interface.port if self.config else ""
+            if not port:
+                msgbox(
+                    "Serial interface configured but no port set.\n" "Set [interface] port in mesh_client.ini first.",
+                    title="Radio Rename",
+                )
+                return None
+            return ["--port", port]
+
+        if iface_type == "tcp":
+            host = self.config.interface.hostname if self.config else ""
+            if not host:
+                msgbox(
+                    "TCP interface configured but no hostname set.\n"
+                    "Set [interface] hostname in mesh_client.ini first.",
+                    title="Radio Rename",
+                )
+                return None
+            return ["--host", host]
+
+        # MQTT (and anything else): mesh_client is not on a direct path to
+        # the radio, so we cannot use the existing config.  Prompt for
+        # the radio's IP separately.  On BA5E this is the G2 WiFi Radio
+        # address that the bot is also wired into.
+        host = inputbox(
+            "Mesh client is on MQTT (no direct radio path).\n" "Enter the radio's TCP host (e.g. 192.168.1.50):",
+            default="",
+        )
+        if not host:
+            return None
+        return ["--host", host]
+
+    def _meshtastic_cli_path(self) -> str:
+        """Prefer the project's venv meshtastic CLI, fall back to PATH."""
+        repo_root = Path(__file__).resolve().parents[2]
+        venv_cli = repo_root / ".venv" / "bin" / "meshtastic"
+        if venv_cli.exists():
+            return str(venv_cli)
+        return "meshtastic"
+
+    def _radio_rename(self) -> None:
+        """Prompt for new long/short names and exec `meshtastic --set-owner`.
+
+        This is the OTHER half of the BA5E rename — the bot config edit
+        changes the bot's internal identity; this changes what the rest
+        of the mesh sees.  Both edits land separately.
+        """
+        conn_args = self._resolve_radio_connection_args()
+        if conn_args is None:
+            return
+
+        long_name = inputbox(
+            "New longName (max 39 chars):",
+            default="",
+        )
+        if not long_name:
+            return
+        long_name = long_name[:39]
+
+        # Default shortName: first 4 chars of longName, uppercased
+        default_short = long_name[:4].upper()
+        short_name = inputbox(
+            "New shortName (max 4 chars):",
+            default=default_short,
+        )
+        if not short_name:
+            return
+        short_name = short_name[:4]
+
+        if not yesno(
+            f"Set radio name to:\n"
+            f"  long:  {long_name}\n"
+            f"  short: {short_name}\n\n"
+            f"Connection: {' '.join(conn_args)}\n\n"
+            "Proceed?",
+            default_yes=False,
+        ):
+            return
+
+        cmd = [
+            self._meshtastic_cli_path(),
+            *conn_args,
+            "--set-owner",
+            long_name,
+            "--set-owner-short",
+            short_name,
+        ]
+
+        infobox(
+            "Setting radio name...\n" "This takes 10-20 seconds while the radio reboots.",
+            title="Radio Rename",
+        )
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            msgbox(
+                "meshtastic command timed out after 60s.\n"
+                "Radio may still be applying the rename — check with\n"
+                "  meshtastic --info\n"
+                "after another 30 seconds.",
+                title="Timeout",
+            )
+            return
+        except (OSError, FileNotFoundError) as e:
+            msgbox(
+                f"Cannot run meshtastic CLI:\n{e}\n\n" "Install with: pip install meshtastic",
+                title="Error",
+            )
+            return
+
+        if result.returncode == 0:
+            msgbox(
+                f"Radio renamed.\n\n"
+                f"long:  {long_name}\n"
+                f"short: {short_name}\n\n"
+                "The radio will reboot to apply the change.",
+                title="Success",
+            )
+        else:
+            err = (result.stderr or result.stdout or "Unknown error")[:300]
+            msgbox(
+                f"Rename failed (exit {result.returncode}):\n\n{err}",
+                title="Error",
+            )
