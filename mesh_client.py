@@ -2013,6 +2013,99 @@ def configure_wifi_radio(config: ConfigParser) -> None:
                 pass
 
 
+def _launcher_rename_bot(config: ConfigParser) -> None:
+    """Whiptail-dialog handler for changing mesh_client's bot name.
+
+    The "bot name" the operator sees on the mesh is the last 4 hex
+    chars of [mqtt] node_id in mesh_client.ini.  Default is
+    !c0deba5e -- the 'c0de' prefix is the anti-loopback marker (see
+    project_trexdev_wifi_radio.md: virtual node_id must NOT match
+    any real radio's hardware ID or the firmware filters it as
+    self-loopback) and 'ba5e' is the bot's visible identifier.
+
+    Only the last 4 hex chars are user-editable here; the c0de
+    prefix is locked.  Operators who need full node_id control can
+    use the "Edit mesh_client.ini" launcher entry.
+    """
+    from meshing_around_clients.setup.whiptail import inputbox, msgbox, yesno
+
+    current = config.get("mqtt", "node_id", fallback="!c0deba5e")
+    cur_hex = current.lstrip("!")
+
+    # Default to c0de prefix; preserve whatever's there if it's well-formed
+    if len(cur_hex) == 8 and all(c in "0123456789abcdefABCDEF" for c in cur_hex):
+        prefix = cur_hex[:4].lower()
+        suffix = cur_hex[4:].lower()
+    else:
+        prefix = "c0de"
+        suffix = "ba5e"
+
+    new_suffix = inputbox(
+        f"Current bot name: {suffix}  (full node_id: {current})\n\n"
+        f"The first 4 hex chars are the anti-loopback prefix and\n"
+        f"are locked.  Change only the last 4 hex chars (a-f, 0-9).\n"
+        f"Examples: dead, beef, cafe, face, feed, fade, b0de, c0c0.\n\n"
+        f"New bot name (4 hex chars):",
+        default=suffix,
+    )
+    if not new_suffix:
+        return
+
+    new_suffix = new_suffix.lower().strip()
+    if len(new_suffix) != 4 or not all(c in "0123456789abcdef" for c in new_suffix):
+        msgbox(
+            f"Invalid bot name: '{new_suffix}'\n\n"
+            "Must be exactly 4 hex characters (a-f, 0-9).\n"
+            "Other chars like h, i, l, o, n are not hex.",
+            title="Invalid Bot Name",
+        )
+        return
+
+    new_node_id = f"!{prefix}{new_suffix}"
+
+    if new_node_id == current:
+        msgbox(
+            f"Bot name unchanged ({suffix}).\nNothing to save.",
+            title="No Change",
+        )
+        return
+
+    if not yesno(
+        f"Change bot name:\n"
+        f"  old: {current}  ({suffix})\n"
+        f"  new: {new_node_id}  ({new_suffix})\n\n"
+        "This writes mesh_client.ini (with .ini.bak backup).\n"
+        "You will need to restart the mesh-client service\n"
+        "for the change to take effect:\n"
+        "  sudo systemctl restart mesh-client.service\n\n"
+        "Proceed?",
+        default_yes=False,
+    ):
+        return
+
+    config.set("mqtt", "node_id", new_node_id)
+    try:
+        save_config(config)
+    except OSError as e:
+        msgbox(
+            f"Save failed:\n{e}\n\nOld value preserved on disk.",
+            title="Error",
+        )
+        # Roll back in-memory change so we don't lie about state
+        config.set("mqtt", "node_id", current)
+        return
+
+    msgbox(
+        f"Bot renamed.\n\n"
+        f"old:     {suffix}  ({current})\n"
+        f"new:     {new_suffix}  ({new_node_id})\n\n"
+        "Restart the service for the change to take effect:\n"
+        "  sudo systemctl restart mesh-client.service\n\n"
+        "Backup saved at mesh_client.ini.bak",
+        title="Bot Renamed",
+    )
+
+
 def _launcher_rename_radio(config: ConfigParser) -> None:
     """Whiptail-dialog handler for the launcher's 'Rename Radio' entry.
 
@@ -2135,7 +2228,8 @@ def launcher_menu(config: ConfigParser) -> bool:
         ("mqtt", "MQTT Monitor"),
         ("mqtt-local", "MQTT Local Broker (no auth)"),
         ("wifi-radio", "Configure WiFi Radio Link"),
-        ("rename-radio", "Rename Radio (longName / shortName)"),
+        ("rename-bot", "Change Bot Name (this mesh_client's node_id)"),
+        ("rename-radio", "Rename Radio Hardware (Meshtastic longName)"),
         ("demo", "Demo Mode"),
         ("profile", "Switch Regional Profile"),
         ("ini", "Edit mesh_client.ini"),
@@ -2218,6 +2312,9 @@ def launcher_menu(config: ConfigParser) -> bool:
                 config.set("mqtt", "channel", channel)
         elif choice == "wifi-radio":
             configure_wifi_radio(config)
+            continue
+        elif choice == "rename-bot":
+            _launcher_rename_bot(config)
             continue
         elif choice == "rename-radio":
             _launcher_rename_radio(config)
