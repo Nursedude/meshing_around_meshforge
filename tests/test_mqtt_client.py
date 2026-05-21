@@ -1468,16 +1468,29 @@ class TestMQTTEmergencyKeywordCooldown(unittest.TestCase):
         client = MQTTMeshtasticClient(self.config)
         client._alert_cooldown_seconds = 60  # ensure suppression window covers the test
 
-        for _ in range(3):
+        # Each packet needs a unique id AND unique content — otherwise
+        # _handle_json_message dedupes via is_duplicate_message() (SHA of
+        # sender+payload) before the emergency check runs, which would
+        # mask the cooldown behaviour we're trying to test.  Verified
+        # on wh6gxzTRDEV: identical-content packets are dropped upstream.
+        for i in range(3):
             json_data = {
                 "from": 0xAABBCCDD,
                 "to": "^all",
                 "channel": 0,
                 "type": "text",
-                "payload": {"text": "MAYDAY MAYDAY"},
+                "id": 1000 + i,
+                "payload": {"text": f"MAYDAY MAYDAY #{i}"},
             }
             client._handle_json_message("msh/US/LongFast/json", json.dumps(json_data).encode())
 
+        # All 3 messages should land (proving dedup didn't fire);
+        # exactly one of them should produce an emergency alert.
+        self.assertEqual(
+            len(client.network.messages),
+            3,
+            "Test bug: messages were deduped upstream of the cooldown check",
+        )
         emergency_alerts = [a for a in client.network.alerts if a.alert_type == AlertType.EMERGENCY]
         self.assertEqual(
             len(emergency_alerts),
