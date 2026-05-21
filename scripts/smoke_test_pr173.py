@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Smoke test for PR #173 — exercises the two HIGH fixes against the
+"""Smoke test for PR #173 -- exercises the two HIGH fixes against the
 installed code on the target host (intended for wh6gxzTRDEV / BA5E).
 
 Scenarios:
-  1. MQTT emergency-keyword cooldown — three rapid "MAYDAY" messages
+  1. MQTT emergency-keyword cooldown -- three rapid "MAYDAY" messages
      from the same sender_id must produce exactly one Alert.
   2. MessagesScreen renders user-controlled text containing Rich
      markup without parsing it (literal brackets preserved).
@@ -64,21 +64,33 @@ def scenario_1_mqtt_cooldown() -> bool:
     client = MQTTMeshtasticClient(cfg)
     client._alert_cooldown_seconds = 60
 
-    for _ in range(3):
+    # Each packet needs a unique id AND unique content - otherwise
+    # _handle_json_message dedupes via is_duplicate_message() (SHA of
+    # sender+payload) before the emergency check runs, masking the
+    # cooldown behaviour we want to test.  Discovered on wh6gxzTRDEV.
+    for i in range(3):
         payload = {
             "from": 0xAABBCCDD,
             "to": "^all",
             "channel": 0,
             "type": "text",
-            "payload": {"text": "MAYDAY MAYDAY"},
+            "id": 1000 + i,
+            "payload": {"text": f"MAYDAY MAYDAY #{i}"},
         }
         client._handle_json_message("msh/US/LongFast/json", json.dumps(payload).encode())
 
+    if len(client.network.messages) != 3:
+        _fail(
+            f"messages were deduped upstream of cooldown: got {len(client.network.messages)}/3 "
+            "- test cannot prove the fix"
+        )
+        return False
+
     alerts = [a for a in client.network.alerts if a.alert_type == AlertType.EMERGENCY]
     if len(alerts) == 1:
-        _pass(f"3 MAYDAYs -> {len(alerts)} alert under 60s cooldown")
+        _pass(f"3 distinct MAYDAYs -> {len(alerts)} alert under 60s cooldown")
         return True
-    _fail(f"expected 1 emergency alert, got {len(alerts)}")
+    _fail(f"expected 1 emergency alert under cooldown, got {len(alerts)}")
     return False
 
 
@@ -231,7 +243,7 @@ def scenario_4_malformed_markup() -> bool:
 
 
 def main() -> int:
-    print(f"Smoke test for PR #173 — repo: {REPO_ROOT}")
+    print(f"Smoke test for PR #173 -- repo: {REPO_ROOT}")
     try:
         import meshing_around_clients  # noqa: F401
     except ImportError as e:
