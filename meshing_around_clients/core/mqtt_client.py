@@ -1640,6 +1640,13 @@ class MQTTMeshtasticClient(CallbackMixin):
         text_lower = message.text.lower()
         for keyword in self.config.alerts.emergency_keywords:
             if keyword.lower() in text_lower:
+                # Suppress repeats from the same sender within the
+                # configured cooldown window.  Mirrors the serial/TCP
+                # path in meshtastic_api.py and the battery/congestion
+                # paths above — without this, "MAYDAY MAYDAY MAYDAY"
+                # on a public MQTT broker fires one Alert per message.
+                if self._is_alert_cooled_down(message.sender_id, "emergency"):
+                    break
                 alert = Alert(
                     id=str(uuid.uuid4()),
                     alert_type=AlertType.EMERGENCY,

@@ -1446,5 +1446,45 @@ class TestMQTTRxBreakdownCounters(unittest.TestCase):
         self.assertEqual(receiver.stats["text_messages"], 0)
 
 
+@unittest.skipUnless(__import__("importlib.util").util.find_spec("paho"), "paho-mqtt not installed")
+class TestMQTTEmergencyKeywordCooldown(unittest.TestCase):
+    """The MQTT emergency-keyword path now honors _is_alert_cooled_down,
+    matching the serial/TCP path in meshtastic_api.py.  Without this,
+    a sender spamming 'MAYDAY' on a public broker (BA5E case) fires one
+    Alert per message instead of one per cooldown window.
+    """
+
+    def setUp(self):
+        self.config = Config(config_path="/nonexistent/path")
+        self.config.storage.enabled = False
+        self.config.alerts.enabled = True
+        self.config.alerts.emergency_keywords = ["mayday", "sos"]
+        self.config.chunk_reassembly_timeout = 0
+
+    @patch("meshing_around_clients.core.mqtt_client.mqtt")
+    def test_rapid_emergency_keywords_suppressed_by_cooldown(self, _mock_mqtt):
+        from meshing_around_clients.core.mqtt_client import MQTTMeshtasticClient
+
+        client = MQTTMeshtasticClient(self.config)
+        client._alert_cooldown_seconds = 60  # ensure suppression window covers the test
+
+        for _ in range(3):
+            json_data = {
+                "from": 0xAABBCCDD,
+                "to": "^all",
+                "channel": 0,
+                "type": "text",
+                "payload": {"text": "MAYDAY MAYDAY"},
+            }
+            client._handle_json_message("msh/US/LongFast/json", json.dumps(json_data).encode())
+
+        emergency_alerts = [a for a in client.network.alerts if a.alert_type == AlertType.EMERGENCY]
+        self.assertEqual(
+            len(emergency_alerts),
+            1,
+            f"Expected 1 alert under cooldown, got {len(emergency_alerts)}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
