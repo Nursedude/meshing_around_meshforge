@@ -392,5 +392,108 @@ class TestDefaultConfigTemplate(unittest.TestCase):
         self.assertTrue(template.exists(), f"Template not found at {template}")
 
 
+class TestHeadlessFlag(unittest.TestCase):
+    """--headless integration tests.
+
+    The pre-fix systemd unit on wh6gxzTRDEV (BA5E) flap-looped 223 times
+    in 2 hours because the TUI exited immediately on stdin.isatty() under
+    systemd.  --headless gives the daemon path an explicit CLI entrypoint
+    that handles SIGTERM cleanly and emits a heartbeat log.
+    """
+
+    def test_help_lists_headless_flag(self):
+        """--headless must appear in `--help` output (otherwise systemd
+        unit authors can't discover the right flag)."""
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(Path(mesh_client.SCRIPT_DIR) / "mesh_client.py"), "--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        self.assertEqual(result.returncode, 0, f"--help failed: {result.stderr}")
+        self.assertIn("--headless", result.stdout)
+        self.assertIn("systemd", result.stdout)
+
+    def test_headless_runs_without_tty_and_exits_on_sigterm(self):
+        """Spawn `mesh_client.py --headless --demo` with no controlling
+        terminal (stdin redirected from /dev/null), wait for the
+        connected log, then SIGTERM and assert the process exits
+        cleanly within a few seconds.
+
+        This is the regression test for the BA5E flap loop: the
+        pre-fix code path would `Error: No terminal detected ... TUI
+        requires an interactive terminal` and exit before any work.
+        With --headless that path is bypassed.
+        """
+        import signal
+        import subprocess
+        import time
+
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        proc = subprocess.Popen(
+            [
+                sys.executable,
+                str(Path(mesh_client.SCRIPT_DIR) / "mesh_client.py"),
+                "--headless",
+                "--demo",
+                "--no-venv",
+            ],
+            stdin=subprocess.DEVNULL,  # no TTY, no controlling terminal
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+            start_new_session=True,  # detach from this process group so SIGINT here doesn't leak
+        )
+        try:
+            # Wait for the "Connected" log line — proves the headless
+            # branch was actually taken and the API initialized.
+            deadline = time.monotonic() + 30.0
+            connected = False
+            output_buf = []
+            while time.monotonic() < deadline:
+                line = proc.stdout.readline()
+                if not line:
+                    if proc.poll() is not None:
+                        break
+                    continue
+                output_buf.append(line)
+                if "Connected." in line:
+                    connected = True
+                    break
+            self.assertTrue(
+                connected,
+                "headless mode never reached 'Connected.'; output was:\n" + "".join(output_buf),
+            )
+
+            # Send SIGTERM (what systemctl stop sends) and confirm clean exit.
+            proc.send_signal(signal.SIGTERM)
+            try:
+                returncode = proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                self.fail("headless process did not exit within 10s of SIGTERM")
+
+            # Drain remaining output for the assertion message.
+            tail = proc.stdout.read() if proc.stdout else ""
+            self.assertEqual(
+                returncode,
+                0,
+                f"headless exit code {returncode} (expected 0). Tail:\n{''.join(output_buf)}{tail}",
+            )
+            self.assertIn(
+                "Received SIGTERM",
+                "".join(output_buf) + tail,
+                "SIGTERM handler did not log shutdown",
+            )
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=5)
+
+
 if __name__ == "__main__":
     unittest.main()

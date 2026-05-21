@@ -307,7 +307,10 @@ setup_systemd_service() {
         # Create service file - use envsubst for safe variable substitution
         SERVICE_USER="$USER"
         SERVICE_WORKDIR="$SCRIPT_DIR"
-        SERVICE_EXEC="\"$SCRIPT_DIR/.venv/bin/python\" \"$SCRIPT_DIR/mesh_client.py\""
+        # --headless is REQUIRED under systemd.  Without it, mesh_client.py
+        # tries to launch the TUI which fails immediately on stdin.isatty()
+        # and produces a Restart=always flap loop.
+        SERVICE_EXEC="\"$SCRIPT_DIR/.venv/bin/python\" \"$SCRIPT_DIR/mesh_client.py\" --headless"
         sudo tee "$SERVICE_FILE" > /dev/null <<SVCEOF
 [Unit]
 Description=Meshing-Around Mesh Client
