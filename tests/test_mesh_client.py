@@ -495,5 +495,103 @@ class TestHeadlessFlag(unittest.TestCase):
                 proc.wait(timeout=5)
 
 
+class TestLauncherRenameRadio(unittest.TestCase):
+    """_launcher_rename_radio is the launcher-menu entry that fixes
+    the gap PR #178 left: the rename ability has to be reachable from
+    the operator's existing raspi-config-style launcher, NOT only via
+    a separate UI.
+    """
+
+    def setUp(self):
+        # Minimal ConfigParser fixture
+        from configparser import ConfigParser
+
+        self.config = ConfigParser()
+        self.config["interface"] = {"type": "tcp", "hostname": "10.250.203.50", "port": ""}
+
+    @patch("mesh_client.subprocess.run")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_tcp_interface_runs_meshtastic_set_owner(self, mock_input, mock_yesno, _mock_msg, mock_run):
+        """[interface] type=tcp + hostname=X -> meshtastic --host X --set-owner ..."""
+        import subprocess as _sp
+
+        mock_input.side_effect = ["MeshtasticHILO", "HILO"]
+        mock_yesno.return_value = True
+        mock_run.return_value = _sp.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        mesh_client._launcher_rename_radio(self.config)
+
+        self.assertEqual(mock_run.call_count, 1)
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("--host", cmd)
+        self.assertIn("10.250.203.50", cmd)
+        self.assertIn("--set-owner", cmd)
+        self.assertIn("MeshtasticHILO", cmd)
+        self.assertIn("--set-owner-short", cmd)
+        self.assertIn("HILO", cmd)
+
+    @patch("mesh_client.subprocess.run")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_mqtt_interface_prompts_for_radio_host(self, mock_input, mock_yesno, _mock_msg, mock_run):
+        """BA5E case: mesh_client interface=mqtt, no direct radio path —
+        the handler must prompt for the radio's TCP host separately."""
+        import subprocess as _sp
+
+        self.config["interface"]["type"] = "mqtt"
+        # inputs: 1) radio host, 2) longName, 3) shortName
+        mock_input.side_effect = ["192.168.1.50", "MeshtasticHILO", "HILO"]
+        mock_yesno.return_value = True
+        mock_run.return_value = _sp.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        mesh_client._launcher_rename_radio(self.config)
+
+        cmd = mock_run.call_args[0][0]
+        self.assertIn("--host", cmd)
+        self.assertIn("192.168.1.50", cmd)
+
+    @patch("mesh_client.subprocess.run")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_cancel_at_confirm_does_not_invoke_meshtastic(self, mock_input, mock_yesno, _mock_msg, mock_run):
+        """If the user answers No at the confirm prompt, no subprocess fires."""
+        mock_input.side_effect = ["MyNode", "MYNO"]
+        mock_yesno.return_value = False
+
+        mesh_client._launcher_rename_radio(self.config)
+
+        mock_run.assert_not_called()
+
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_serial_interface_missing_port_shows_hint(self, _mock_input, mock_msg):
+        """Serial mode with no port set must NOT prompt for names —
+        it should hint at the missing config and return."""
+        self.config["interface"]["type"] = "serial"
+        self.config["interface"]["port"] = ""
+
+        mesh_client._launcher_rename_radio(self.config)
+
+        mock_msg.assert_called_once()
+        body = mock_msg.call_args[0][0]
+        self.assertIn("no port set", body.lower())
+
+
+class TestLauncherMenuRenameRadioEntry(unittest.TestCase):
+    """The launcher menu's items list must include the rename-radio entry
+    so the operator can find it from the menu they already know.
+    """
+
+    def test_rename_radio_entry_present(self):
+        """grep the file for the menu tuple — cheaper than driving the menu."""
+        src = (mesh_client.SCRIPT_DIR / "mesh_client.py").read_text()
+        self.assertIn('("rename-radio"', src, "missing rename-radio menu entry")
+        self.assertIn("Rename Radio", src)
+
+
 if __name__ == "__main__":
     unittest.main()
