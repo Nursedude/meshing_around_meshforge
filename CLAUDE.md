@@ -322,6 +322,21 @@ reviewing new code.  All caught and fixed during the sweep audits (PRs
     indistinguishable from "file doesn't exist."  Always log at WARNING
     with path + exception class.
 
+11. **MQTT-path tests masked by upstream packet dedup.**
+    `_handle_json_message` computes a packet hash from `sender_id +
+    payload` and drops duplicates via `is_duplicate_message()` (60 s
+    window) **before** `_check_emergency_keywords`, `_handle_command`,
+    or any other downstream handler runs.  A test that loops sending
+    the same payload three times exercises only the dedup path, not
+    the handler — so it passes on both patched and unpatched code.
+    Caught when running `scripts/smoke_test_pr173.py` on BA5E against
+    the unpatched baseline (PR #174).  When writing tests against
+    `_handle_json_message`, give each packet a unique `id` field AND
+    unique payload content, and assert `len(client.network.messages)
+    == N` as a precondition before checking handler-side state.
+    Serial/TCP paths (`MeshtasticAPI._handle_text_message`) do NOT
+    have this dedup — only the MQTT path does.
+
 ## Version History
 
 - **0.6.0** (2026-04-16) — Stability + security hardening sweep
