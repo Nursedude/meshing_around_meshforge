@@ -1515,5 +1515,143 @@ class TestCommandPaletteKeyBinding(unittest.TestCase):
         mock_send.assert_called_once_with("ping", "^all", 4)
 
 
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestMessagesScreenMarkupEscape(unittest.TestCase):
+    """SEC-16: MessagesScreen renders user-controlled str cells through
+    Table.add_row, which parses Rich markup by default.  A hostile node
+    sending '[bold red]X[/]' could inject styling or crash the panel
+    with MarkupError.  Verify text/sender/recipient are escaped.
+    """
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import MeshingAroundTUI, MessagesScreen
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = MessagesScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def _render_to_string(self, panel) -> str:
+        from io import StringIO
+
+        from rich.console import Console
+
+        buf = StringIO()
+        Console(file=buf, force_terminal=False, width=200).print(panel)
+        return buf.getvalue()
+
+    def test_markup_in_message_text_is_escaped(self):
+        msg = Message(
+            id="evil-msg",
+            sender_id="!aabb1234",
+            sender_name="hostile",
+            text="[bold red]EVIL[/bold red]",
+            recipient_id=None,
+            message_type=MessageType.TEXT,
+        )
+        self.tui.api.network.add_message(msg)
+
+        rendered = self._render_to_string(self.screen.render())
+        # If markup were parsed, the tags would be consumed and only "EVIL"
+        # would appear.  Escaped output keeps the literal brackets.
+        self.assertIn("[bold red]", rendered)
+        self.assertIn("EVIL", rendered)
+
+    def test_markup_in_sender_name_is_escaped(self):
+        msg = Message(
+            id="evil-sender",
+            sender_id="!aabb5678",
+            sender_name="[blink]name[/blink]",
+            text="hi",
+            recipient_id=None,
+            message_type=MessageType.TEXT,
+        )
+        self.tui.api.network.add_message(msg)
+
+        rendered = self._render_to_string(self.screen.render())
+        self.assertIn("[blink]", rendered)
+
+    def test_malformed_markup_does_not_raise(self):
+        # A bare "[/]" closer with no matching open tag raises MarkupError
+        # if parsed.  Escaping must prevent that.
+        msg = Message(
+            id="malformed",
+            sender_id="!aabbcdef",
+            sender_name="x",
+            text="oops [/] [unterminated",
+            recipient_id=None,
+            message_type=MessageType.TEXT,
+        )
+        self.tui.api.network.add_message(msg)
+
+        # Should not raise
+        panel = self.screen.render()
+        rendered = self._render_to_string(panel)
+        self.assertIn("oops", rendered)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestAlertsScreenMarkupEscape(unittest.TestCase):
+    """SEC-16: AlertsScreen's table cells for title/message originate from
+    user message text on the emergency-keyword path.  Must be escaped.
+    """
+
+    def setUp(self):
+        from meshing_around_clients.tui.app import AlertsScreen, MeshingAroundTUI
+
+        self.config = Config()
+        self.tui = MeshingAroundTUI(config=self.config, demo_mode=True)
+        self.tui.api.connect()
+        self.screen = AlertsScreen(self.tui)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def _render_to_string(self, panel) -> str:
+        from io import StringIO
+
+        from rich.console import Console
+
+        buf = StringIO()
+        Console(file=buf, force_terminal=False, width=200).print(panel)
+        return buf.getvalue()
+
+    def test_markup_in_alert_title_and_message_is_escaped(self):
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        alert = Alert(
+            id="evil-alert",
+            alert_type=AlertType.EMERGENCY,
+            title="[bold red]EVIL[/]",
+            message="[link=http://x]Click[/link]",
+            severity=4,
+        )
+        self.tui.api.network.add_alert(alert)
+
+        rendered = self._render_to_string(self.screen.render())
+        self.assertIn("[bold red]", rendered)
+        self.assertIn("[link=", rendered)
+
+    def test_malformed_markup_in_alert_does_not_raise(self):
+        from meshing_around_clients.core.models import Alert, AlertType
+
+        alert = Alert(
+            id="malformed-alert",
+            alert_type=AlertType.EMERGENCY,
+            title="[/]",
+            message="[no-close",
+            severity=4,
+        )
+        self.tui.api.network.add_alert(alert)
+
+        # Should not raise
+        panel = self.screen.render()
+        rendered = self._render_to_string(panel)
+        self.assertIsInstance(rendered, str)
+
+
 if __name__ == "__main__":
     unittest.main()

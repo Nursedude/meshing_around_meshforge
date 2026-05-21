@@ -858,6 +858,16 @@ class MessagesScreen(Screen):
             else:
                 ch_display = str(msg.channel)
 
+            # SEC-16: Sanitize user-controlled text so a node sending
+            # "[bold red]X[/]" can't inject Rich markup or crash this
+            # panel with malformed tags.  Table renders str cells via
+            # Text.from_markup, so plain strings must be escaped here.
+            if RICH_AVAILABLE:
+                from_str = rich_escape(from_str)
+                to_str = rich_escape(to_str)
+                text = rich_escape(text)
+                ch_display = rich_escape(ch_display)
+
             table.add_row(msg.time_formatted, ch_display, direction, from_str, to_str, text, snr_str)
 
         filter_text = f"Channel {self.channel_filter}" if self.channel_filter is not None else "All channels"
@@ -970,12 +980,21 @@ class AlertsScreen(Screen):
 
             ack = "[green]Yes[/green]" if alert.acknowledged else "[red]No[/red]"
 
+            # SEC-16: alert.title / alert.message echo user-controlled
+            # message text on the emergency-keyword path; escape before
+            # passing to Table cells (which parse markup on str inputs).
+            title_cell = alert.title[:25]
+            message_cell = alert.message[:40]
+            if RICH_AVAILABLE:
+                title_cell = rich_escape(title_cell)
+                message_cell = rich_escape(message_cell)
+
             table.add_row(
                 alert.timestamp.strftime("%H:%M:%S") if alert.timestamp else "-",
                 f"[{sev_color}]{sev_icon}[/{sev_color}]",
                 alert.alert_type.value,
-                alert.title[:25],
-                alert.message[:40],
+                title_cell,
+                message_cell,
                 ack,
             )
 
