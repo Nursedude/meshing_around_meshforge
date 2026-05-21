@@ -593,5 +593,115 @@ class TestLauncherMenuRenameRadioEntry(unittest.TestCase):
         self.assertIn("Rename Radio", src)
 
 
+class TestLauncherRenameBot(unittest.TestCase):
+    """_launcher_rename_bot changes [mqtt] node_id in mesh_client.ini.
+
+    Bot identity on the mesh = the last 4 hex chars of node_id.
+    Default !c0deba5e -> "BA5E".  Operator wants to change those 4
+    chars without having to hand-edit the ini.  The c0de prefix is
+    the anti-loopback marker and is locked.
+    """
+
+    def setUp(self):
+        from configparser import ConfigParser
+
+        self.config = ConfigParser()
+        self.config["mqtt"] = {"node_id": "!c0deba5e"}
+
+    @patch("mesh_client.save_config")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_valid_hex_change_saves(self, mock_input, mock_yesno, mock_msg, mock_save):
+        """Operator types 'dead' -> node_id becomes !c0dedead, save fires."""
+        mock_input.return_value = "dead"
+        mock_yesno.return_value = True
+
+        mesh_client._launcher_rename_bot(self.config)
+
+        self.assertEqual(self.config.get("mqtt", "node_id"), "!c0dedead")
+        mock_save.assert_called_once_with(self.config)
+
+    @patch("mesh_client.save_config")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_non_hex_input_rejected(self, mock_input, mock_yesno, mock_msg, mock_save):
+        """'hilo' contains h, i, l, o — not hex chars — must reject + not save."""
+        mock_input.return_value = "hilo"
+
+        mesh_client._launcher_rename_bot(self.config)
+
+        # node_id unchanged
+        self.assertEqual(self.config.get("mqtt", "node_id"), "!c0deba5e")
+        mock_save.assert_not_called()
+        # User was shown an "Invalid" message
+        mock_msg.assert_called_once()
+        title = mock_msg.call_args.kwargs.get("title", "")
+        self.assertIn("Invalid", title)
+
+    @patch("mesh_client.save_config")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_wrong_length_rejected(self, mock_input, mock_yesno, mock_msg, mock_save):
+        """3-char and 5-char inputs both rejected."""
+        for bad in ("dea", "deadd"):
+            mock_input.return_value = bad
+            mesh_client._launcher_rename_bot(self.config)
+        self.assertEqual(self.config.get("mqtt", "node_id"), "!c0deba5e")
+        mock_save.assert_not_called()
+
+    @patch("mesh_client.save_config")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_cancel_at_confirm_does_not_save(self, mock_input, mock_yesno, mock_msg, mock_save):
+        """Valid hex typed, but user says No at the confirm yesno -> no save."""
+        mock_input.return_value = "dead"
+        mock_yesno.return_value = False
+
+        mesh_client._launcher_rename_bot(self.config)
+
+        self.assertEqual(self.config.get("mqtt", "node_id"), "!c0deba5e")
+        mock_save.assert_not_called()
+
+    @patch("mesh_client.save_config")
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_unchanged_input_does_not_save(self, mock_input, mock_yesno, mock_msg, mock_save):
+        """Typing the current name back == no-op; never reaches confirm."""
+        mock_input.return_value = "ba5e"
+
+        mesh_client._launcher_rename_bot(self.config)
+
+        mock_save.assert_not_called()
+        mock_yesno.assert_not_called()
+        mock_msg.assert_called_once()
+        title = mock_msg.call_args.kwargs.get("title", "")
+        self.assertEqual(title, "No Change")
+
+    @patch("mesh_client.save_config", side_effect=OSError("disk full"))
+    @patch("meshing_around_clients.setup.whiptail.msgbox")
+    @patch("meshing_around_clients.setup.whiptail.yesno")
+    @patch("meshing_around_clients.setup.whiptail.inputbox")
+    def test_save_failure_rolls_back(self, mock_input, mock_yesno, mock_msg, _mock_save):
+        """If save_config raises, the in-memory node_id is restored."""
+        mock_input.return_value = "dead"
+        mock_yesno.return_value = True
+
+        mesh_client._launcher_rename_bot(self.config)
+
+        # Rolled back
+        self.assertEqual(self.config.get("mqtt", "node_id"), "!c0deba5e")
+
+    def test_rename_bot_entry_present_in_menu(self):
+        """The launcher items list must include the rename-bot entry."""
+        src = (mesh_client.SCRIPT_DIR / "mesh_client.py").read_text()
+        self.assertIn('("rename-bot"', src, "missing rename-bot menu entry")
+        self.assertIn("Change Bot Name", src)
+
+
 if __name__ == "__main__":
     unittest.main()
