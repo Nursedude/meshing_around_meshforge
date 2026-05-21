@@ -210,58 +210,59 @@ class TestRadioRenameCommand(unittest.TestCase):
         mock_run.assert_not_called()
 
 
-class TestPi2WAutoDefault(unittest.TestCase):
-    """mesh_client.main() on Pi Zero 2W + TTY + no mode flag should
-    skip the launcher menu and route directly to the whiptail TUI."""
+class TestPiZeroAutoDefault(unittest.TestCase):
+    """mesh_client.main() on any Pi Zero (W or 2W) + TTY + no mode flag
+    should skip the launcher menu and route directly to whiptail.
 
-    def test_pi2w_interactive_routes_to_whiptail(self):
-        """Mock is_pi_zero_2w=True and verify run_application is called
-        with features.mode=tui + features.force_whiptail=true."""
-        import argparse
+    Originally only matched Pi Zero 2W; broadened in PR #179 after
+    discovering BA5E is actually a Pi Zero W (original ARMv6), not a
+    Pi Zero 2W, and the auto-default never fired there.
+    """
 
-        # We need to simulate parts of main() that lead into the
-        # is_interactive=True branch.  Easier: spawn the full main via
-        # subprocess with PYTHONPATH set and a flag-less invocation
-        # would require a real TTY which CI doesn't provide.
-        #
-        # Instead, exercise the code path directly: import mesh_client,
-        # set up a minimal config, patch is_pi_zero_2w, and call into
-        # the relevant slice.  This is a unit-level check.
+    def _exercise_slice(self, is_pi_zero_result):
+        """Exercise the relevant slice of main() with is_pi_zero mocked."""
         import mesh_client
 
         config = mesh_client.load_config()
-
         captured = {}
 
         def fake_run_application(cfg):
             captured["mode"] = cfg.get("features", "mode", fallback="?")
             captured["force_whiptail"] = cfg.getboolean("features", "force_whiptail", fallback=False)
+            captured["called"] = True
             return True
 
         with (
-            patch("meshing_around_clients.setup.pi_utils.is_pi_zero_2w", return_value=True),
+            patch("meshing_around_clients.setup.pi_utils.is_pi_zero", return_value=is_pi_zero_result),
+            patch("meshing_around_clients.setup.pi_utils.get_pi_model", return_value="Raspberry Pi Test"),
             patch("mesh_client.run_application", side_effect=fake_run_application),
-            patch("sys.stdin") as mock_stdin,
-            patch("sys.exit") as _mock_exit,
         ):
-            mock_stdin.isatty.return_value = True
-            # Inline the relevant slice of main()
             is_interactive = True
             has_mode_flag = False
-            if is_interactive:
-                if not has_mode_flag:
-                    try:
-                        from meshing_around_clients.setup.pi_utils import is_pi_zero_2w
+            if is_interactive and not has_mode_flag:
+                try:
+                    from meshing_around_clients.setup.pi_utils import is_pi_zero
 
-                        if is_pi_zero_2w():
-                            config.set("features", "mode", "tui")
-                            config.set("features", "force_whiptail", "true")
-                            mesh_client.run_application(config)
-                    except ImportError:
-                        pass
+                    if is_pi_zero():
+                        config.set("features", "mode", "tui")
+                        config.set("features", "force_whiptail", "true")
+                        mesh_client.run_application(config)
+                except ImportError:
+                    pass
 
+        return captured
+
+    def test_pi_zero_routes_to_whiptail(self):
+        """Pi Zero W (or 2W) -> whiptail mode + force_whiptail=true."""
+        captured = self._exercise_slice(is_pi_zero_result=True)
+        self.assertTrue(captured.get("called"), "expected run_application to fire")
         self.assertEqual(captured.get("mode"), "tui")
-        self.assertTrue(captured.get("force_whiptail"), "force_whiptail should be True on Pi2W")
+        self.assertTrue(captured.get("force_whiptail"))
+
+    def test_non_pi_falls_through_to_launcher(self):
+        """Non-Pi (x86, Pi 4, etc.) -> auto-default does NOT fire."""
+        captured = self._exercise_slice(is_pi_zero_result=False)
+        self.assertFalse(captured.get("called"), "run_application should not fire on non-Pi-Zero")
 
 
 if __name__ == "__main__":
