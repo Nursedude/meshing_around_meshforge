@@ -2013,6 +2013,115 @@ def configure_wifi_radio(config: ConfigParser) -> None:
                 pass
 
 
+def _launcher_rename_radio(config: ConfigParser) -> None:
+    """Whiptail-dialog handler for the launcher's 'Rename Radio' entry.
+
+    Exec's ``meshtastic --set-owner <long> --set-owner-short <short>``
+    against the radio reachable per ``[interface]`` config.  For MQTT
+    interfaces (no direct radio path), prompts for the radio's TCP
+    host separately.
+
+    Lives inline in the launcher rather than the WhiptailTUI screens
+    so the rename ability is reachable from the operator's existing
+    raspi-config-style menu without forcing a different UI.
+    """
+    from meshing_around_clients.setup.whiptail import inputbox, msgbox, yesno
+
+    iface_type = config.get("interface", "type", fallback="").lower()
+
+    if iface_type == "serial":
+        port = config.get("interface", "port", fallback="")
+        if not port:
+            msgbox(
+                "Serial interface configured but no port set.\n" "Set [interface] port in mesh_client.ini first.",
+                title="Rename Radio",
+            )
+            return
+        conn_args = ["--port", port]
+    elif iface_type == "tcp":
+        host = config.get("interface", "hostname", fallback="")
+        if not host:
+            msgbox(
+                "TCP interface configured but no hostname set.\n" "Set [interface] hostname in mesh_client.ini first.",
+                title="Rename Radio",
+            )
+            return
+        conn_args = ["--host", host]
+    else:
+        # MQTT (or anything else): we don't have a direct radio path
+        # from this config.  BA5E case: mesh_client uses MQTT but the
+        # G2 WiFi Radio sits on a separate TCP IP we need to prompt for.
+        host = inputbox(
+            f"interface.type={iface_type or 'unset'} — no direct radio path.\n"
+            "Enter the radio's TCP host (e.g. 192.168.1.50):",
+            default="",
+        )
+        if not host:
+            return
+        conn_args = ["--host", host]
+
+    long_name = inputbox("New longName (max 39 chars):", default="")
+    if not long_name:
+        return
+    long_name = long_name[:39]
+
+    default_short = long_name[:4].upper()
+    short_name = inputbox("New shortName (max 4 chars):", default=default_short)
+    if not short_name:
+        return
+    short_name = short_name[:4]
+
+    if not yesno(
+        f"Set radio name to:\n"
+        f"  long:  {long_name}\n"
+        f"  short: {short_name}\n\n"
+        f"Connection: {' '.join(conn_args)}\n\n"
+        "Proceed?",
+        default_yes=False,
+    ):
+        return
+
+    # Prefer the venv's meshtastic CLI, fall back to PATH
+    venv_cli = SCRIPT_DIR / ".venv" / "bin" / "meshtastic"
+    cli = str(venv_cli) if venv_cli.exists() else "meshtastic"
+
+    cmd = [cli, *conn_args, "--set-owner", long_name, "--set-owner-short", short_name]
+    log(f"Running: {' '.join(cmd)}", "INFO")
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        msgbox(
+            "meshtastic command timed out after 60s.\n"
+            "Radio may still be applying the rename — check with\n"
+            "  meshtastic --info\n"
+            "after another 30 seconds.",
+            title="Timeout",
+        )
+        return
+    except (OSError, FileNotFoundError) as e:
+        msgbox(
+            f"Cannot run meshtastic CLI:\n{e}\n\n" "Install with: pip install meshtastic",
+            title="Error",
+        )
+        return
+
+    if result.returncode == 0:
+        msgbox(
+            f"Radio renamed.\n\n"
+            f"long:  {long_name}\n"
+            f"short: {short_name}\n\n"
+            "The radio will reboot to apply the change.",
+            title="Success",
+        )
+    else:
+        err = (result.stderr or result.stdout or "Unknown error")[:300]
+        msgbox(
+            f"Rename failed (exit {result.returncode}):\n\n{err}",
+            title="Error",
+        )
+
+
 def launcher_menu(config: ConfigParser) -> bool:
     """Interactive launcher menu - shown when no mode flag is passed.
 
@@ -2026,6 +2135,7 @@ def launcher_menu(config: ConfigParser) -> bool:
         ("mqtt", "MQTT Monitor"),
         ("mqtt-local", "MQTT Local Broker (no auth)"),
         ("wifi-radio", "Configure WiFi Radio Link"),
+        ("rename-radio", "Rename Radio (longName / shortName)"),
         ("demo", "Demo Mode"),
         ("profile", "Switch Regional Profile"),
         ("ini", "Edit mesh_client.ini"),
@@ -2108,6 +2218,9 @@ def launcher_menu(config: ConfigParser) -> bool:
                 config.set("mqtt", "channel", channel)
         elif choice == "wifi-radio":
             configure_wifi_radio(config)
+            continue
+        elif choice == "rename-radio":
+            _launcher_rename_radio(config)
             continue
         elif choice == "demo":
             config.set("advanced", "demo_mode", "true")
@@ -2646,41 +2759,17 @@ Examples:
     log(f"Terminal detection: stdin.isatty={is_interactive}", "INFO")
 
     if is_interactive:
-        # Pi Zero auto-default: when no explicit mode flag is set,
-        # skip the launcher and go straight to the whiptail (raspi-config
-        # style) TUI.  The Rich TUI's full-screen Live renderer is too
-        # heavy for 1 GHz single-core (Zero W) or 1 GHz quad-core ARMv7
-        # (Zero 2W) at 512 MB, and whiptail is what the platform
-        # expects.  Other Pi models / x86 still get the launcher menu.
-        #
-        # Note: is_pi_zero() matches BOTH the Pi Zero W (original,
-        # ARMv6 BCM2835) and the Pi Zero 2W (ARMv7 BCM2710A1).  The
-        # original 2W-only check missed the older Zero W deployments
-        # where the constraint is tighter, not looser.  Caught on BA5E
-        # (wh6gxzTRDEV) which is a Zero W Rev 1.1, not a 2W.
-        if not has_mode_flag:
-            try:
-                from meshing_around_clients.setup.pi_utils import get_pi_model, is_pi_zero
-
-                if is_pi_zero():
-                    log(
-                        f"{get_pi_model()} detected — defaulting to " "whiptail (use --tui to force Rich)",
-                        "INFO",
-                    )
-                    config.set("features", "mode", "tui")
-                    config.set("features", "force_whiptail", "true")
-                    try:
-                        success = run_application(config)
-                        sys.exit(0 if success else 1)
-                    except KeyboardInterrupt:
-                        log("Interrupted by user", "INFO")
-                        sys.exit(0)
-            except ImportError:
-                pass
-
         # Always show the launcher menu for interactive terminals.
         # CLI flags (--tui, --demo) pre-set config defaults but
         # the menu still appears so users can change their mind.
+        #
+        # PR #178/#179 added a Pi-Zero auto-default that skipped this
+        # launcher and dropped operators into WhiptailTUI's main menu
+        # instead — a different menu missing the familiar Switch
+        # Profile / Edit ini / Logs / Setup / Update entries.  PR #180
+        # reverted that surprise; Rename Radio is now an entry in this
+        # launcher menu instead, so the rename ability is reachable
+        # from the operator's known UI rather than via a UI swap.
         log("Loading launcher menu...", "INFO")
         try:
             success = launcher_menu(config)
