@@ -340,6 +340,9 @@ graph LR
         TUI["tui — TUI Client"]
         MQTT["mqtt — MQTT Monitor"]
         MQTTL["mqtt-local — Local Broker"]
+        WIFI["wifi-radio — Configure WiFi Radio Link"]
+        RBOT["rename-bot — Change Bot Name"]
+        RRADIO["rename-radio — Rename Radio Hardware"]
         DEMO["demo — Demo Mode"]
         PROFILE["profile — Regional Profile"]
         INI["ini — Edit mesh_client.ini"]
@@ -353,6 +356,9 @@ graph LR
     style TUI fill:#27ae60,color:#fff
     style MQTT fill:#27ae60,color:#fff
     style MQTTL fill:#27ae60,color:#fff
+    style WIFI fill:#3498db,color:#fff
+    style RBOT fill:#3498db,color:#fff
+    style RRADIO fill:#3498db,color:#fff
     style DEMO fill:#9b59b6,color:#fff
     style PROFILE fill:#3498db,color:#fff
     style INI fill:#f39c12,color:#fff
@@ -367,14 +373,33 @@ This is the recommended way to start meshing_around_meshforge — select your mo
 
 **Install Everything** performs a full standalone install: installs all Python dependencies, generates a default config file, and creates log directories. After install, choose your connection mode (MQTT, Serial, TCP, etc.) at runtime via the TUI.
 
+### Renaming the bot vs. the radio
+
+There are two distinct identities and the launcher has a separate entry for each:
+
+| Entry | Changes | Where it writes |
+|---|---|---|
+| **Change Bot Name** | This mesh_client's `node_id` (last 4 hex chars — the "BA5E" / "FACE" / etc. that other operators see on the mesh) | `mesh_client.ini` `[mqtt] node_id`, with `.ini.bak` backup |
+| **Rename Radio Hardware** | The Meshtastic radio's `longName` / `shortName` (the radio firmware's owner identity) | The radio itself, via `meshtastic --set-owner` |
+
+The bot name is 4 hex characters only (`a-f`, `0-9`) — so names like `dead`, `beef`, `cafe`, `face`, `feed` work, but anything containing `h`, `i`, `l`, `o`, `n`, etc. is rejected. The locked `c0de` prefix is the anti-loopback marker that keeps the radio from filtering our own publishes as self-loopback.
+
+After either rename, restart the systemd service for the change to take effect:
+
+```bash
+sudo systemctl restart mesh-client.service
+```
+
 ### Common Run Modes
 
 ```bash
-python3 mesh_client.py             # Interactive launcher menu
+python3 mesh_client.py             # Interactive launcher menu (the default)
+python3 mesh_client.py --headless  # Daemon mode (no TUI) — what systemd runs
 python3 mesh_client.py --demo      # Simulated data, no hardware
 python3 mesh_client.py --setup     # Interactive setup wizard (with profile picker)
 python3 mesh_client.py --profile hawaii  # Apply regional profile
-python3 mesh_client.py --tui       # Force TUI mode
+python3 mesh_client.py --tui       # Force Rich TUI mode
+python3 mesh_client.py --whiptail  # Force whiptail TUI mode (raspi-config style)
 ```
 
 ## Connection Modes
