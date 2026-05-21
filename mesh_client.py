@@ -2357,8 +2357,7 @@ def run_application(config: ConfigParser):
             # a stuck one.
             _root = _hl_logging.getLogger()
             if not any(
-                isinstance(h, _hl_logging.StreamHandler)
-                and getattr(h, "stream", None) in (sys.stderr, sys.stdout)
+                isinstance(h, _hl_logging.StreamHandler) and getattr(h, "stream", None) in (sys.stderr, sys.stdout)
                 for h in _root.handlers
             ):
                 _stderr_handler = _hl_logging.StreamHandler(sys.stderr)
