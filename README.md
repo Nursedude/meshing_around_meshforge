@@ -748,6 +748,20 @@ sudo systemctl status mesh-client    # Check status
 sudo journalctl -u mesh-client -f    # View logs
 ```
 
+The unit runs `python3 mesh_client.py --headless`, which:
+
+- runs the API + callback loop without launching the TUI (the TUI
+  needs a real terminal and would exit immediately under systemd),
+- handles `SIGTERM` (sent by `systemctl stop`) for a clean shutdown,
+- emits a heartbeat log line every 60 s so you can confirm liveness
+  with `journalctl -u mesh-client | grep heartbeat`.
+
+If you have a pre-existing service file that omits `--headless`,
+edit it to add the flag, then `sudo systemctl daemon-reload &&
+sudo systemctl restart mesh-client`. Without `--headless`, older
+deployments enter a `Restart=always` flap loop where each cycle
+exits in ~10 s on the no-TTY check.
+
 ## Project Structure
 
 ```

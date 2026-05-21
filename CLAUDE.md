@@ -51,6 +51,10 @@ python3 mesh_client.py --upgrade-config
 # Force TUI mode
 python3 mesh_client.py --tui
 
+# Daemon mode (API + callbacks, no TUI) — use for systemd / cron
+# Handles SIGTERM cleanly; emits a heartbeat log every 60 s.
+python3 mesh_client.py --headless
+
 # Configure the meshing-around bot
 python3 configure_bot.py
 
@@ -336,6 +340,25 @@ reviewing new code.  All caught and fixed during the sweep audits (PRs
     == N` as a precondition before checking handler-side state.
     Serial/TCP paths (`MeshtasticAPI._handle_text_message`) do NOT
     have this dedup — only the MQTT path does.
+
+12. **TUI under systemd → silent flap loop.**  The TUI in
+    `meshing_around_clients/tui/app.py:3143` exits on
+    `not sys.stdin.isatty()` because Rich's `Live` needs a real
+    terminal.  Under systemd with `Restart=always`, that exit
+    triggers a restart every ~10 s — `systemctl is-active` flickers
+    "active" briefly per cycle, so the unit looks healthy at a
+    glance while burning Pi CPU and producing zero useful work.
+    BA5E (wh6gxzTRDEV) flap-looped 223 times in 2 hours before this
+    was caught (PR #177).  The fix has two parts:
+    (a) `mesh_client.py --headless` is the right ExecStart for
+        systemd — runs the API + callback loop, handles SIGTERM,
+        emits a heartbeat log every 60 s.
+    (b) The no-TTY auto-default in `main()` now routes to
+        `headless` instead of `tui` so a stale unit file without
+        the flag still gets a working daemon instead of a flap.
+    When adding a new mode in the future: if it can't run without
+    a TTY, it must NOT be reachable via the no-TTY auto-default
+    branch — only via an explicit CLI flag.
 
 ## Version History
 

@@ -2339,7 +2339,37 @@ def run_application(config: ConfigParser):
             tui.run_interactive()
 
         elif mode == "headless":
-            # Just run the API and keep alive
+            # Headless / daemon mode — runs the API and callback loop
+            # without launching the TUI.  Designed for systemd: handles
+            # SIGTERM cleanly (systemctl stop) and emits a periodic
+            # heartbeat so operators can confirm liveness via journalctl.
+            import logging as _hl_logging
+            import signal
+            import threading
+
+            # setup_logging() only adds a console handler under a TTY
+            # (to avoid double-output behind the TUI's Rich Console).
+            # In headless mode there's no TUI, but there IS a parent —
+            # systemd / cron / a test runner — that captures stderr.
+            # Without this handler, the journal stays silent except for
+            # the bootstrap `print()` calls from before setup_logging
+            # ran, so operators can't tell a healthy daemon apart from
+            # a stuck one.
+            _root = _hl_logging.getLogger()
+            if not any(
+                isinstance(h, _hl_logging.StreamHandler) and getattr(h, "stream", None) in (sys.stderr, sys.stdout)
+                for h in _root.handlers
+            ):
+                _stderr_handler = _hl_logging.StreamHandler(sys.stderr)
+                _stderr_handler.setLevel(_root.level or _hl_logging.INFO)
+                _stderr_handler.setFormatter(
+                    _hl_logging.Formatter(
+                        "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S",
+                    )
+                )
+                _root.addHandler(_stderr_handler)
+
             log("Running in headless mode (API only)", "INFO")
             if demo_mode:
                 api = MockMeshtasticAPI(app_config)
@@ -2351,15 +2381,36 @@ def run_application(config: ConfigParser):
                 api = MeshtasticAPI(app_config)
 
             api.connect()
-            log("Connected. Press Ctrl+C to exit.", "OK")
+            log("Connected. Send SIGTERM (systemctl stop) or Ctrl+C to exit.", "OK")
 
+            shutdown_event = threading.Event()
+
+            def _shutdown_handler(signum, _frame):
+                sig_name = signal.Signals(signum).name
+                log(f"Received {sig_name} — shutting down...", "INFO")
+                shutdown_event.set()
+
+            signal.signal(signal.SIGTERM, _shutdown_handler)
+            signal.signal(signal.SIGINT, _shutdown_handler)
+
+            heartbeat_interval = 60  # seconds
             try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                pass
+                while not shutdown_event.wait(timeout=heartbeat_interval):
+                    try:
+                        node_count = len(api.network.nodes)
+                        msg_count = api.network.total_messages
+                        connected = api.is_connected
+                        log(
+                            f"heartbeat: connected={connected} nodes={node_count} messages={msg_count}",
+                            "INFO",
+                        )
+                    except (AttributeError, RuntimeError):
+                        # Benign access race during startup/shutdown — heartbeat
+                        # is best-effort, never fail the loop on it.
+                        pass
             finally:
                 api.disconnect()
+                log("Headless mode stopped", "INFO")
 
     except ImportError as e:
         log(f"Missing dependency for {mode} mode: {e}", "ERROR")
@@ -2389,6 +2440,7 @@ def main():
 Examples:
   python3 mesh_client.py              # Auto-detect and run
   python3 mesh_client.py --tui        # Force TUI mode
+  python3 mesh_client.py --headless   # Daemon mode (API only, for systemd/cron)
   python3 mesh_client.py --setup      # Interactive setup
   python3 mesh_client.py --demo       # Demo mode (no hardware)
   python3 mesh_client.py --check      # Check dependencies only
@@ -2403,6 +2455,15 @@ Examples:
     parser.add_argument("--tui", action="store_true", help="Force TUI mode")
     parser.add_argument("--whiptail", action="store_true", help="Force whiptail TUI mode (Pi-style)")
     parser.add_argument("--demo", action="store_true", help="Run in demo mode")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help=(
+            "Run as a daemon (API + callbacks, no TUI). Use for "
+            "systemd/cron — handles SIGTERM cleanly and emits a "
+            "periodic heartbeat log."
+        ),
+    )
     parser.add_argument("--no-venv", action="store_true", help="Don't use virtual environment")
     parser.add_argument("--install-deps", action="store_true", help="Install dependencies and exit")
     parser.add_argument("--import-config", metavar="PATH", help="Import config from upstream meshing-around config.ini")
@@ -2558,7 +2619,7 @@ Examples:
         sys.exit(0)
 
     # Apply command line overrides
-    has_mode_flag = args.tui or args.whiptail or args.demo
+    has_mode_flag = args.tui or args.whiptail or args.demo or args.headless
 
     if args.demo:
         config.set("advanced", "demo_mode", "true")
@@ -2568,6 +2629,9 @@ Examples:
 
     if args.whiptail:
         config.set("features", "force_whiptail", "true")
+
+    if args.headless:
+        config.set("features", "mode", "headless")
 
     # Run system checks
     if not check_system():
@@ -2593,24 +2657,18 @@ Examples:
             log("Interrupted by user", "INFO")
             sys.exit(0)
     else:
-        # Non-interactive (piped, cron, systemd) — launch directly
+        # Non-interactive (piped, cron, systemd) — launch directly.
+        # The previous default routed to TUI mode here, which fails
+        # under systemd because the TUI requires a real terminal —
+        # producing a Restart=always flap loop.  Default to headless
+        # instead so the API + callback loop runs as a true daemon.
         if not has_mode_flag:
-            # On Pi Zero 2W, auto-default to MQTT/TUI mode (recommended
-            # for resource-constrained boards without a display).
-            try:
-                from meshing_around_clients.setup.pi_utils import is_pi_zero_2w
-
-                if is_pi_zero_2w():
-                    log("Pi Zero 2W detected — defaulting to MQTT/TUI mode", "INFO")
-                    config.set("features", "mode", "tui")
-                    config.set("interface", "type", "mqtt")
-                    config.set("mqtt", "enabled", "true")
-                    has_mode_flag = True
-            except ImportError:
-                pass
-
-            if not has_mode_flag:
-                log("No TTY detected — skipping launcher menu (use --tui or --demo)", "WARN")
+            log(
+                "No TTY detected — defaulting to --headless (use --tui or --demo to override)",
+                "INFO",
+            )
+            config.set("features", "mode", "headless")
+            has_mode_flag = True
 
         try:
             success = run_application(config)
