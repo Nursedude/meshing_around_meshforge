@@ -915,6 +915,14 @@ def update_meshing_around(meshing_path: Optional[Path] = None) -> Tuple[bool, Op
         print_error(f"Git pull failed: {stderr}")
         return False, meshing_path
 
+    # Re-apply MeshForge source patches that a git pull would have clobbered (idempotent).
+    patch_script = Path(__file__).resolve().parent / "scripts" / "apply_meshforge_patches.py"
+    if patch_script.exists():
+        run_command([sys.executable, str(patch_script), str(meshing_path)],
+                    desc="Re-applying MeshForge patches (wx bridge fixes)", capture=False)
+    else:
+        print_warning("MeshForge patch script not found; bridge fixes not re-applied")
+
     return True, meshing_path
 
 
