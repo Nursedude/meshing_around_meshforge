@@ -66,6 +66,98 @@ _SYS_REPLACEMENTS = [
     ),
 ]
 
+# ---- modules/system.py: byte-aware chunking (patch 3) -------------------------
+# messageChunker sized chunks in CHARACTERS (MESSAGE_CHUNK_SIZE). Meshtastic's
+# on-air text payload is capped (~237 bytes) and the python lib raises
+# "Data payload too big" above it; that exception aborts send_message's send
+# loop and DROPS every remaining chunk. Emoji are 3-4 UTF-8 bytes each, so an
+# emoji-dense reply (e.g. the `leaderboard` command) could produce a chunk that
+# fit the char budget but blew the byte budget. We route both messageChunker
+# return paths through a byte-safety post-pass that re-splits any over-budget
+# chunk on word then codepoint boundaries (never mid-emoji). ASCII output is
+# unaffected (1 char == 1 byte). Idempotent and additive — the internal
+# char-based pre-splitting is left untouched; the post-pass only enforces the
+# byte bound on whatever it produced.
+_BYTE_SAFE_MARKER = "def _meshforge_byte_safe"
+
+_BYTE_SAFE_ANCHOR = "def messageChunker(message):\n"
+
+_BYTE_SAFE_HELPER = (
+    "def _meshforge_byte_safe(chunks, max_bytes=None):\n"
+    "    # MeshForge: guarantee no emitted chunk exceeds the Meshtastic byte\n"
+    "    # budget. messageChunker sized chunks in characters; emoji (3-4 bytes\n"
+    "    # each) overflowed the ~237-byte payload limit, making sendText raise\n"
+    "    # \"Data payload too big\" and abort send_message's loop (dropping the\n"
+    "    # rest of a multi-part reply). Re-split on UTF-8 byte boundaries:\n"
+    "    # newline, then word, then a codepoint-safe hard split. ASCII is\n"
+    "    # unaffected. Idempotent: chunks already within budget pass through.\n"
+    "    if max_bytes is None:\n"
+    "        max_bytes = MESSAGE_CHUNK_SIZE\n"
+    "    was_str = isinstance(chunks, str)\n"
+    "    items = [chunks] if was_str else list(chunks)\n"
+    "\n"
+    "    def _blen(s):\n"
+    "        return len(s.encode('utf-8'))\n"
+    "\n"
+    "    def _char_split(token):\n"
+    "        out, cur = [], ''\n"
+    "        for ch in token:\n"
+    "            if cur and _blen(cur) + _blen(ch) > max_bytes:\n"
+    "                out.append(cur)\n"
+    "                cur = ch\n"
+    "            else:\n"
+    "                cur += ch\n"
+    "        if cur:\n"
+    "            out.append(cur)\n"
+    "        return out\n"
+    "\n"
+    "    def _pack(atoms, sep):\n"
+    "        out, cur = [], ''\n"
+    "        for atom in atoms:\n"
+    "            add = _blen(atom) + (_blen(sep) if cur else 0)\n"
+    "            if cur and _blen(cur) + add > max_bytes:\n"
+    "                out.append(cur)\n"
+    "                cur = ''\n"
+    "            if not cur:\n"
+    "                if _blen(atom) <= max_bytes:\n"
+    "                    cur = atom\n"
+    "                else:\n"
+    "                    finer = _pack(atom.split(' '), ' ') if ' ' in atom else _char_split(atom)\n"
+    "                    if finer:\n"
+    "                        out.extend(finer[:-1])\n"
+    "                        cur = finer[-1]\n"
+    "            else:\n"
+    "                cur = cur + sep + atom\n"
+    "        if cur:\n"
+    "            out.append(cur)\n"
+    "        return out\n"
+    "\n"
+    "    result = []\n"
+    "    for item in items:\n"
+    "        if _blen(item) <= max_bytes:\n"
+    "            result.append(item)\n"
+    "        else:\n"
+    "            result.extend(_pack(item.split('\\n'), '\\n'))\n"
+    "    if was_str and len(result) == 1:\n"
+    "        return result[0]\n"
+    "    return result\n"
+    "\n"
+    "\n"
+)
+
+# Both messageChunker return paths, as one contiguous (and therefore
+# unambiguous) anchor — the chunked path and the short-message early return.
+_BYTE_SAFE_RETURNS_OLD = (
+    "            return final_message_list\n"
+    "\n"
+    "        return message\n"
+)
+_BYTE_SAFE_RETURNS_NEW = (
+    "            return _meshforge_byte_safe(final_message_list)\n"
+    "\n"
+    "        return _meshforge_byte_safe(message)\n"
+)
+
 
 def _log(msg: str) -> None:
     print(f"[meshforge-patch] {msg}")
@@ -115,6 +207,27 @@ def patch_system(path: Path) -> bool:
     return changed
 
 
+def patch_system_byte_safe(path: Path) -> bool:
+    """Make messageChunker byte-aware (patch 3): inject the byte-safety
+    helper and route both return paths through it."""
+    f = path / "modules" / "system.py"
+    text = f.read_text()
+    if _BYTE_SAFE_MARKER in text:
+        _log(f"{f.name}: byte-safe chunking already present")
+        return False
+    if _BYTE_SAFE_ANCHOR not in text or _BYTE_SAFE_RETURNS_OLD not in text:
+        _log(f"WARNING {f.name}: byte-safe anchor not found — skipping "
+             f"(upstream may have changed messageChunker)")
+        return False
+    # Insert the helper just above messageChunker, then rewire its returns.
+    text = text.replace(
+        _BYTE_SAFE_ANCHOR, _BYTE_SAFE_HELPER + _BYTE_SAFE_ANCHOR, 1)
+    text = text.replace(_BYTE_SAFE_RETURNS_OLD, _BYTE_SAFE_RETURNS_NEW, 1)
+    f.write_text(text)
+    _log(f"{f.name}: byte-safe chunking applied")
+    return True
+
+
 def apply_all(meshing_path: Path) -> bool:
     meshing_path = Path(meshing_path)
     if not (meshing_path / "mesh_bot.py").exists():
@@ -122,6 +235,7 @@ def apply_all(meshing_path: Path) -> bool:
         return False
     patch_mesh_bot(meshing_path)
     patch_system(meshing_path)
+    patch_system_byte_safe(meshing_path)
     ok = True
     for rel in ("mesh_bot.py", "modules/system.py"):
         try:
