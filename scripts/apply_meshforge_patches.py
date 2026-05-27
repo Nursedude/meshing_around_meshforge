@@ -18,6 +18,22 @@ Patches (verified live on the fleet 2026-05-24, base upstream commit ``3819791``
      "inch possible." continuations), mislabeling chunks and mistiming the
      ``% 4`` / ``% 5`` throttle. Replaced with ``enumerate``/``idx``.
 
+  3. modules/system.py — ``messageChunker`` sized chunks in CHARACTERS; emoji
+     (3-4 bytes each) overflowed Meshtastic's ~237-byte payload cap, raising
+     "Data payload too big" and aborting ``send_message``'s loop (dropping the
+     rest of a reply). Route both return paths through a byte-safe re-splitter.
+
+  4. mesh_bot.py — bot-side reply-dedup for DUAL-BRIDGED commands. A MeshCore
+     command from one sender reaches the bot via two bridge paths ([MC:..] and
+     [ch0:..]) seconds apart, so the bot answers twice. Coverage analysis
+     2026-05-26 showed the two paths are NOT redundant — each delivers ~33% on
+     the lossy segment, together ~55% — so they MUST both stay (dropping one at
+     the bridge would halve command delivery). Instead, suppress the duplicate
+     REPLY only: a guard after the ReceivedChannel log keys on
+     (origin, command, channel) within ``MESHFORGE_REPLY_DEDUP_S`` seconds
+     (default 30; <=0 disables). Receipt stays logged so the dual-inject watch
+     still measures true ingress rate; only the second reply is dropped.
+
 Idempotent: each patch checks whether it is already applied and is a no-op if so.
 
 Usage:
@@ -159,6 +175,59 @@ _BYTE_SAFE_RETURNS_NEW = (
 )
 
 
+# ---- mesh_bot.py: bot-side reply-dedup for dual-bridged commands (patch 4) ----
+_REPLY_DEDUP_HELPER_MARKER = "def _meshforge_reply_is_dup"
+_REPLY_DEDUP_DEF_ANCHOR = "def onReceive(packet, interface):\n"
+_REPLY_DEDUP_HELPER = (
+    "def _meshforge_reply_is_dup(original_text, command, channel, from_id):\n"
+    "    # MeshForge: dual-bridge reply guard. The same MeshCore command reaches\n"
+    "    # the bot via two bridge paths ([MC:..] and [ch0:..]) seconds apart;\n"
+    "    # BOTH are kept (each ~33% delivery, together ~55% — load-bearing\n"
+    "    # redundancy on the lossy segment, measured 2026-05-26), but the bot\n"
+    "    # must REPLY only once. Returns True if (origin, command, channel) was\n"
+    "    # already answered within MESHFORGE_REPLY_DEDUP_S seconds (default 30;\n"
+    "    # <=0 disables). origin is parsed from the [MC:who]/[chN:who] tag so two\n"
+    "    # senders' identical commands are never collapsed.\n"
+    "    import os as _os, re as _re, time as _time\n"
+    "    try:\n"
+    "        window = int(_os.environ.get('MESHFORGE_REPLY_DEDUP_S', '30'))\n"
+    "    except (TypeError, ValueError):\n"
+    "        window = 30\n"
+    "    if window <= 0 or not command:\n"
+    "        return False\n"
+    "    m = _re.search(r'\\[(?:MC|ch\\d+):([^\\]]+)\\]', original_text or '')\n"
+    "    origin = m.group(1).strip() if m else str(from_id)\n"
+    "    key = (origin, ' '.join(str(command).split()).lower(), channel)\n"
+    "    now = _time.time()\n"
+    "    cache = _meshforge_reply_is_dup.__dict__.setdefault('_seen', {})\n"
+    "    for stale in [k for k, t in cache.items() if now - t > window]:\n"
+    "        cache.pop(stale, None)\n"
+    "    if key in cache and now - cache[key] <= window:\n"
+    "        cache[key] = now\n"
+    "        return True\n"
+    "    cache[key] = now\n"
+    "    return False\n"
+    "\n"
+    "\n"
+)
+
+_REPLY_DEDUP_GUARD_MARKER = "MeshForge: reply-dedup for dual-bridged"
+# Byte-exact 2-line anchor: the channel-branch ReceivedChannel log statement.
+_REPLY_DEDUP_ANCHOR = (
+    '                        logger.info(f"Device:{rxNode} Channel:{channel_number} " + CustomFormatter.green + "ReceivedChannel: " + CustomFormatter.white + f"{message_log_string} " + CustomFormatter.purple +\\\n'
+    '                                    "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, \'long\', rxNode)}")\n'
+)
+_REPLY_DEDUP_GUARD = (
+    "                        # MeshForge: reply-dedup for dual-bridged commands —\n"
+    "                        # receipt is logged above (so the dual-inject watch\n"
+    "                        # still sees both copies); suppress only the second\n"
+    "                        # REPLY. See _meshforge_reply_is_dup.\n"
+    "                        if _meshforge_reply_is_dup(message_log_string, message_string, channel_number, message_from_id):\n"
+    "                            logger.info(f\"Device:{rxNode} Channel:{channel_number} MeshForge: dropped duplicate reply (dual-bridged), kept receipt above\")\n"
+    "                            return\n"
+)
+
+
 def _log(msg: str) -> None:
     print(f"[meshforge-patch] {msg}")
 
@@ -228,6 +297,36 @@ def patch_system_byte_safe(path: Path) -> bool:
     return True
 
 
+def patch_reply_dedup(path: Path) -> bool:
+    """Patch 4: bot-side reply-dedup for dual-bridged commands. Inject the
+    ``_meshforge_reply_is_dup`` helper (above onReceive) and a guard right
+    after the channel ReceivedChannel log (receipt stays logged; only the
+    duplicate reply is suppressed)."""
+    f = path / "mesh_bot.py"
+    text = f.read_text()
+    changed = False
+    if _REPLY_DEDUP_HELPER_MARKER in text:
+        _log(f"{f.name}: reply-dedup helper already present")
+    elif _REPLY_DEDUP_DEF_ANCHOR not in text:
+        _log(f"WARNING {f.name}: onReceive anchor not found — skipping reply-dedup helper")
+    else:
+        text = text.replace(
+            _REPLY_DEDUP_DEF_ANCHOR, _REPLY_DEDUP_HELPER + _REPLY_DEDUP_DEF_ANCHOR, 1)
+        changed = True
+    if _REPLY_DEDUP_GUARD_MARKER in text:
+        _log(f"{f.name}: reply-dedup guard already present")
+    elif _REPLY_DEDUP_ANCHOR not in text:
+        _log(f"WARNING {f.name}: ReceivedChannel anchor not found — skipping reply-dedup guard")
+    else:
+        text = text.replace(
+            _REPLY_DEDUP_ANCHOR, _REPLY_DEDUP_ANCHOR + _REPLY_DEDUP_GUARD, 1)
+        changed = True
+    if changed:
+        f.write_text(text)
+        _log(f"{f.name}: reply-dedup applied")
+    return changed
+
+
 def apply_all(meshing_path: Path) -> bool:
     meshing_path = Path(meshing_path)
     if not (meshing_path / "mesh_bot.py").exists():
@@ -236,6 +335,7 @@ def apply_all(meshing_path: Path) -> bool:
     patch_mesh_bot(meshing_path)
     patch_system(meshing_path)
     patch_system_byte_safe(meshing_path)
+    patch_reply_dedup(meshing_path)
     ok = True
     for rel in ("mesh_bot.py", "modules/system.py"):
         try:
