@@ -33,6 +33,13 @@ _CHUNK_BYTE_THRESHOLD = 40
 # Cap on simultaneous senders we track so a public broker with thousands
 # of nodes can't grow _buffers before the per-key timer fires.
 _CHUNK_MAX_SENDERS = 200
+# Per-sender hard caps. Without these a single chatty/hostile sender grows
+# ONE buffer without bound: the per-key list is appended to unconditionally
+# and the flush timer re-arms on every chunk, so under continuous traffic the
+# timer never fires and the list (each entry holds a packet dict) grows until
+# the Pi OOMs. We force-flush a buffer that hits either cap.
+_CHUNK_MAX_PER_SENDER = 16  # chunks; a real split bot reply is a handful
+_CHUNK_MAX_BUFFER_AGE = 30.0  # seconds; absolute floor for the force-flush age
 
 
 class _ChunkBuffer:
@@ -49,6 +56,10 @@ class _ChunkBuffer:
         self._timers: Dict[str, threading.Timer] = {}
         self._lock = threading.Lock()
         self._flush_callback: Optional[Any] = None
+        # Force-flush a buffer once it is this old, so a sender emitting faster
+        # than the timeout can't keep one buffer alive forever via timer resets.
+        # Always >> timeout so legitimate reassembly is never cut short.
+        self._max_age = max(_CHUNK_MAX_BUFFER_AGE, timeout * 10)
 
     @staticmethod
     def _key(sender_id: str, channel: int) -> str:
@@ -77,21 +88,35 @@ class _ChunkBuffer:
         if not self.enabled:
             return False
         key = self._key(sender_id, channel)
+        now = time.monotonic()
+        forced = None  # emit-args for a buffer we force-flush before re-buffering
         with self._lock:
-            if key in self._buffers:
-                # Already buffering this sender — add regardless of size
-                self._buffers[key].append((text, time.monotonic(), packet))
+            buf = self._buffers.get(key)
+            if buf is not None:
+                # Already buffering this sender. Bound the buffer: if it is full
+                # or too old, emit what we have and start a fresh buffer with this
+                # chunk — never grow one buffer without limit.
+                if len(buf) >= _CHUNK_MAX_PER_SENDER or (now - buf[0][1]) >= self._max_age:
+                    forced = self._pop_for_emit_unlocked(key)
+                    self._buffers[key] = [(text, now, packet)]
+                else:
+                    buf.append((text, now, packet))
                 self._reset_timer(key)
-                return True
+                result = True
             elif len(text.encode("utf-8")) >= _CHUNK_BYTE_THRESHOLD:
                 # Long enough to be a bot chunk — start buffering.  Evict
                 # the oldest sender first if we're at the cap.
                 if len(self._buffers) >= _CHUNK_MAX_SENDERS:
                     self._evict_oldest_unlocked()
-                self._buffers[key] = [(text, time.monotonic(), packet)]
+                self._buffers[key] = [(text, now, packet)]
                 self._reset_timer(key)
-                return True
-            return False  # Short message, pass through instantly
+                result = True
+            else:
+                result = False  # Short message, pass through instantly
+        # Emit outside the lock — the callback may be slow or re-enter.
+        if forced is not None:
+            self._do_emit(*forced)
+        return result
 
     def _reset_timer(self, key: str) -> None:
         """Reset the flush timer.  Caller must hold _lock."""
@@ -103,15 +128,32 @@ class _ChunkBuffer:
         t.start()
         self._timers[key] = t
 
+    def _pop_for_emit_unlocked(self, key: str):
+        """Pop a buffer + cancel its timer (caller holds _lock).
+
+        Returns (combined_text, first_packet, chunk_count) or None when empty.
+        Does NOT call the callback — emit outside the lock via _do_emit.
+        """
+        chunks = self._buffers.pop(key, [])
+        timer = self._timers.pop(key, None)
+        if timer is not None:
+            timer.cancel()
+        if not chunks:
+            return None
+        combined = "\n".join(text for text, _, _ in chunks)
+        return (combined, chunks[0][2], len(chunks))
+
+    def _do_emit(self, combined: str, first_packet: dict, count: int) -> None:
+        """Deliver a reassembled message to the flush callback (no lock held)."""
+        if self._flush_callback:
+            self._flush_callback(combined, first_packet, count)
+
     def _flush(self, key: str) -> None:
         """Timer expired — concatenate and emit."""
         with self._lock:
-            chunks = self._buffers.pop(key, [])
-            self._timers.pop(key, None)
-        if chunks and self._flush_callback:
-            combined = "\n".join(text for text, _, _ in chunks)
-            first_packet = chunks[0][2]
-            self._flush_callback(combined, first_packet, len(chunks))
+            emit = self._pop_for_emit_unlocked(key)
+        if emit is not None:
+            self._do_emit(*emit)
 
     def cancel_all(self) -> None:
         """Cancel pending timers (called on disconnect)."""

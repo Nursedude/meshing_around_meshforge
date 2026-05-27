@@ -1015,6 +1015,43 @@ class TestChunkBuffer(unittest.TestCase):
             self.assertIn("!dddd:0", keys)
         self.buffer.cancel_all()
 
+    def test_per_sender_chunk_cap_force_flushes(self):
+        """A single sender can't grow one buffer past _CHUNK_MAX_PER_SENDER.
+
+        Reboot guard: without the cap, an existing key is appended to
+        unconditionally and the timer re-arms each chunk, so the buffer (each
+        entry holds a packet dict) grows without bound under continuous traffic.
+        """
+        from meshing_around_clients.core import meshtastic_api as mod
+
+        with patch.object(mod, "_CHUNK_MAX_PER_SENDER", 4):
+            # Send one more than the cap — buffering faster than the 0.3s timeout.
+            for idx in range(5):
+                self.buffer.add("!aabb1234", 0, f"chunk{idx} " + "Z" * 150, self._packet())
+            # The first 4 must have force-flushed as one message; the buffer now
+            # holds only the 5th chunk — never all 5 at once.
+            self.assertLessEqual(len(self.buffer._buffers.get("!aabb1234:0", [])), 1)
+            self.assertEqual(len(self.flushed), 1)
+            self.assertEqual(self.flushed[0][1], 4)  # 4 chunks in the forced flush
+        self.buffer.cancel_all()
+
+    def test_buffer_age_cap_force_flushes_under_continuous_traffic(self):
+        """A buffer older than _max_age force-flushes even if chunks keep arriving.
+
+        Reboot guard: the timer reset on every chunk means a sender emitting
+        faster than the timeout would otherwise keep one buffer alive forever.
+        """
+        self.buffer._max_age = 0.0  # any existing buffer is immediately "too old"
+        self.buffer.add("!aabb1234", 0, "first " + "Z" * 150, self._packet())
+        self.assertEqual(len(self.flushed), 0)
+        # Next chunk arrives; buffer is past max_age → force-flush the first.
+        self.buffer.add("!aabb1234", 0, "second " + "Z" * 150, self._packet())
+        self.assertEqual(len(self.flushed), 1)
+        self.assertEqual(self.flushed[0][1], 1)  # the single stale chunk
+        # The new chunk started a fresh single-entry buffer, not an unbounded one.
+        self.assertEqual(len(self.buffer._buffers.get("!aabb1234:0", [])), 1)
+        self.buffer.cancel_all()
+
 
 class TestCallbackWorkerLifecycle(unittest.TestCase):
     """Worker start-before-dispatch and stop-after-on_disconnect ordering.
