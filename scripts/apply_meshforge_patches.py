@@ -176,13 +176,16 @@ _BYTE_SAFE_RETURNS_NEW = (
 
 
 # ---- mesh_bot.py: bot-side reply-dedup for dual-bridged commands (patch 4) ----
+# NOTE: injected blocks MUST be ASCII-only. write_text() uses the locale
+# encoding; the bot's locale is latin-1, so a non-ASCII char (e.g. an em-dash)
+# raises UnicodeEncodeError mid-write and TRUNCATES mesh_bot.py to empty.
 _REPLY_DEDUP_HELPER_MARKER = "def _meshforge_reply_is_dup"
 _REPLY_DEDUP_DEF_ANCHOR = "def onReceive(packet, interface):\n"
 _REPLY_DEDUP_HELPER = (
     "def _meshforge_reply_is_dup(original_text, command, channel, from_id):\n"
     "    # MeshForge: dual-bridge reply guard. The same MeshCore command reaches\n"
     "    # the bot via two bridge paths ([MC:..] and [ch0:..]) seconds apart;\n"
-    "    # BOTH are kept (each ~33% delivery, together ~55% — load-bearing\n"
+    "    # BOTH are kept (each ~33% delivery, together ~55% -- load-bearing\n"
     "    # redundancy on the lossy segment, measured 2026-05-26), but the bot\n"
     "    # must REPLY only once. Returns True if (origin, command, channel) was\n"
     "    # already answered within MESHFORGE_REPLY_DEDUP_S seconds (default 30;\n"
@@ -218,7 +221,7 @@ _REPLY_DEDUP_ANCHOR = (
     '                                    "From: " + CustomFormatter.white + f"{get_name_from_number(message_from_id, \'long\', rxNode)}")\n'
 )
 _REPLY_DEDUP_GUARD = (
-    "                        # MeshForge: reply-dedup for dual-bridged commands —\n"
+    "                        # MeshForge: reply-dedup for dual-bridged commands.\n"
     "                        # receipt is logged above (so the dual-inject watch\n"
     "                        # still sees both copies); suppress only the second\n"
     "                        # REPLY. See _meshforge_reply_is_dup.\n"
