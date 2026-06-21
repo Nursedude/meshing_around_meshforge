@@ -17,6 +17,7 @@ from meshing_around_clients.core.config import (
     LoggingConfig,
     MQTTConfig,
     TuiConfig,
+    _coerce_float,
     _coerce_int,
     _str_to_bool,
 )
@@ -490,6 +491,102 @@ class TestMQTTConfigMalformedValues(unittest.TestCase):
     def test_valid_port_preserved(self):
         cfg = MQTTConfig.from_dict({"port": "8883"})
         self.assertEqual(cfg.port, 8883)
+
+
+class TestCoerceFloat(unittest.TestCase):
+    """Test _coerce_float() helper for malformed INI values."""
+
+    def test_valid_float_string_parses(self):
+        self.assertEqual(_coerce_float("3.14", 0.0), 3.14)
+
+    def test_int_string_parses_as_float(self):
+        self.assertEqual(_coerce_float("5", 1.0), 5.0)
+
+    def test_valid_float_passthrough(self):
+        self.assertEqual(_coerce_float(2.5, 9.0), 2.5)
+
+    def test_non_numeric_string_returns_default(self):
+        self.assertEqual(_coerce_float("abc", 1.0), 1.0)
+
+    def test_empty_string_returns_default(self):
+        self.assertEqual(_coerce_float("", 1.0), 1.0)
+
+    def test_none_returns_default(self):
+        self.assertEqual(_coerce_float(None, 5.0), 5.0)
+
+
+class TestConfigLoadMalformedValues(unittest.TestCase):
+    """Config.load() must tolerate hand-edited garbage numeric INI values.
+
+    Regression for CLAUDE.md latent-bug #3: load() used ConfigParser.getint/
+    getfloat, which raise a raw ValueError on a present-but-non-numeric value.
+    That ValueError is not a configparser.Error, so it escaped load()'s except
+    clause and crashed startup before the UI/logger were up. Each field must now
+    fall back to its default instead.
+    """
+
+    def _load(self, ini_text: str) -> Config:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_path = Path(tmpdir) / "garbage.ini"
+            config_path.write_text(ini_text)
+            cfg = Config(config_path=str(config_path))
+            # Construction auto-loads; calling again must also not raise.
+            self.assertTrue(cfg.load())
+            return cfg
+
+    def test_garbage_numerics_across_sections_do_not_crash(self):
+        cfg = self._load(
+            "[network]\n"
+            "default_channel = abc\n"
+            "message_history = lots\n"
+            "max_message_length = big\n"
+            "[tui]\n"
+            "refresh_rate = fast\n"
+            "message_history = many\n"
+            "[maps]\n"
+            "port = notaport\n"
+            "[mqtt]\n"
+            "port = xyz\n"
+            "qos = high\n"
+            "connect_timeout = soon\n"
+            "[storage]\n"
+            "auto_save_interval = sometimes\n"
+            "max_message_history = inf\n"
+            "[logging]\n"
+            "max_size_mb = huge\n"
+            "backup_count = none\n"
+            "[advanced]\n"
+            "chunk_reassembly_timeout = whenever\n"
+            "[data_sources]\n"
+            "volcano_lat = north\n"
+            "volcano_lon = west\n"
+            "[emergencyHandler]\n"
+            "alert_channel = q\n"
+            "cooldown_period = q\n"
+        )
+        # Every malformed field fell back to its default. (default_channel and
+        # mqtt.port are intentionally NOT asserted to a literal — they can be
+        # overridden by the upstream-bot fallback / global config seeding, which
+        # is environment-dependent; we only require they didn't crash and stayed
+        # the right type.)
+        self.assertEqual(cfg.network_cfg.message_history, 500)
+        self.assertEqual(cfg.network_cfg.max_message_length, 200)
+        self.assertEqual(cfg.tui.refresh_rate, 1.0)
+        self.assertEqual(cfg.maps.port, 8808)
+        self.assertIsInstance(cfg.mqtt.port, int)
+        self.assertEqual(cfg.mqtt.qos, 1)
+        self.assertEqual(cfg.logging.max_size_mb, 10)
+        self.assertEqual(cfg.logging.backup_count, 3)
+        self.assertEqual(cfg.chunk_reassembly_timeout, 5.0)
+        self.assertEqual(cfg.data_sources.volcano_lat, 0.0)
+        self.assertEqual(cfg.alerts.alert_channel, 2)
+
+    def test_valid_numerics_still_parse(self):
+        # Use fields not subject to upstream/global override.
+        cfg = self._load("[maps]\nport = 9000\n[tui]\nrefresh_rate = 0.5\nmessage_history = 750\n")
+        self.assertEqual(cfg.maps.port, 9000)
+        self.assertEqual(cfg.tui.refresh_rate, 0.5)
+        self.assertEqual(cfg.tui.message_history, 750)
 
 
 if __name__ == "__main__":

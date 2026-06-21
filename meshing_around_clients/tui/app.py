@@ -78,7 +78,7 @@ except ImportError:
 
 from meshing_around_clients import __version__ as VERSION  # noqa: E402
 from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
-from meshing_around_clients.core.config import InterfaceConfig  # noqa: E402
+from meshing_around_clients.core.config import InterfaceConfig, _coerce_int  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
 
@@ -2015,8 +2015,13 @@ class ClientConfigScreen(_BaseConfigEditor):
         if hasattr(self.app, "config") and hasattr(self.app.config, "load"):
             try:
                 self.app.config.load()
-            except Exception:
-                pass  # Non-fatal — config on disk is saved
+            except Exception as e:
+                # The file is saved, but the in-memory reload failed. Don't
+                # swallow it silently (honest-failure-modes: every swallow needs
+                # a witness) — log it and surface it so the operator isn't left
+                # with a stale in-memory config and no breadcrumb.
+                logger.warning("Config reload after save failed: %s", e)
+                self._error = f"Saved, but reload failed: {type(e).__name__} -- restart to apply"
 
 
 class MapsScreen(Screen):
@@ -2910,6 +2915,7 @@ class MeshingAroundTUI:
                     # MQTT custom broker — pre-fill from config
                     mqtt = self.config.mqtt
                     broker = Prompt.ask("Broker hostname", default=mqtt.broker or "localhost")
+                    default_port = mqtt.port or 1883
                     # Parse embedded port from hostname (e.g. "host:1884")
                     if ":" in broker:
                         _parts = broker.rsplit(":", 1)
@@ -2917,9 +2923,11 @@ class MeshingAroundTUI:
                             port = int(_parts[1])
                             broker = _parts[0]
                         except ValueError:
-                            port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                            # Coerce the typed port so a non-numeric entry falls
+                            # back to the default instead of crashing the menu loop.
+                            port = _coerce_int(Prompt.ask("Broker port", default=str(default_port)), default_port)
                     else:
-                        port = int(Prompt.ask("Broker port", default=str(mqtt.port or 1883)))
+                        port = _coerce_int(Prompt.ask("Broker port", default=str(default_port)), default_port)
                     username = Prompt.ask("Username", default=mqtt.username or "")
                     password = Prompt.ask("Password", default=mqtt.password or "")
                     topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
@@ -3698,14 +3706,24 @@ class MeshingAroundTUI:
                     host, tcp_port = (
                         iface.hostname.rsplit(":", 1) if ":" in iface.hostname else (iface.hostname, "4403")
                     )
-                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    sock.settimeout(5)
                     try:
-                        sock.connect((host, int(tcp_port)))
-                        sock.close()
-                        self.console.print(f"[green]TCP connection to {host}:{tcp_port} successful![/green]")
-                    except (ConnectionRefusedError, TimeoutError, OSError) as e:
-                        self.console.print(f"[red]TCP connection failed: {e}[/red]")
+                        port_num = int(tcp_port)
+                    except ValueError:
+                        # A hand-edited hostname like "host:abc" must not crash the
+                        # TUI out of the Live context — int() ValueError escapes the
+                        # connect() except below (which only catches socket errors).
+                        port_num = -1
+                    if port_num < 0:
+                        self.console.print(f"[red]Invalid TCP port {tcp_port!r} in hostname[/red]")
+                    else:
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(5)
+                        try:
+                            sock.connect((host, port_num))
+                            sock.close()
+                            self.console.print(f"[green]TCP connection to {host}:{port_num} successful![/green]")
+                        except (ConnectionRefusedError, TimeoutError, OSError) as e:
+                            self.console.print(f"[red]TCP connection failed: {e}[/red]")
                 elif iface.type == "serial":
                     port = iface.port or "auto"
                     if port != "auto" and Path(port).exists():

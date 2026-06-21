@@ -132,16 +132,21 @@ def setup_logging(config: ConfigParser) -> None:
     global _logging_configured
     from logging.handlers import RotatingFileHandler, TimedRotatingFileHandler
 
+    # _ini_int tolerates a hand-edited non-numeric value here; a raw getint()
+    # would raise ValueError and crash before logging (or the UI) is even up
+    # (CLAUDE.md latent-bug #3).
+    from meshing_around_clients.core.config import _ini_int
+
     enabled = config.getboolean("logging", "enabled", fallback=True)
     level_str = config.get("logging", "level", fallback="INFO").upper()
     log_file = config.get("logging", "file", fallback="logs/mesh_client.log")
-    max_size_mb = config.getint("logging", "max_size_mb", fallback=10)
-    backup_count = config.getint("logging", "backup_count", fallback=3)
+    max_size_mb = _ini_int(config, "logging", "max_size_mb", 10)
+    backup_count = _ini_int(config, "logging", "backup_count", 3)
 
     # Message log settings
     msg_log_enabled = config.getboolean("logging", "message_log_enabled", fallback=True)
     msg_log_file = config.get("logging", "message_log_file", fallback="logs/mesh_messages.log")
-    msg_log_backup_count = config.getint("logging", "message_log_backup_count", fallback=7)
+    msg_log_backup_count = _ini_int(config, "logging", "message_log_backup_count", 7)
 
     # Resolve relative paths against script directory
     log_path = Path(log_file)
