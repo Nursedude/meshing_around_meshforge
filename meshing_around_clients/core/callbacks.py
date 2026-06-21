@@ -127,45 +127,58 @@ def extract_position(pos_data: dict) -> Optional[Any]:
     return None
 
 
-# Bounds a wedged audio device so a hung player can't leak its child forever
+# Bounds a wedged audio device so a hung player can't block its thread forever
 # (issue #185). Generous — any real alert chime finishes in a second or two.
 _SOUND_PLAYBACK_TIMEOUT = 30
 
 
-def _play_sound_blocking(player: str, sound_file: str) -> None:
-    """Run an audio player to completion. Intended as a daemon-thread target.
+def _play_sound_blocking(players: Tuple[str, ...], sound_file: str) -> None:
+    """Play ``sound_file`` with the first working player. Daemon-thread target.
 
-    Uses ``subprocess.run`` with a ``timeout`` so the child is always reaped and
-    a wedged audio device is bounded (issue #185 — the previous fire-and-forget
-    ``Popen`` was never waited on, accumulating zombies on a long-running TUI,
-    and had no timeout, so a hung player leaked forever). Swallows its failure
-    modes by design: this runs detached from any caller, so it must never raise.
+    Tries each candidate player in order, falling through to the next on an exec
+    error or a non-zero exit (e.g. ``paplay`` is installed but PulseAudio isn't
+    running — fall back to ALSA's ``aplay``), and stops at the first success.
+    Each attempt runs via ``subprocess.run`` with a ``timeout`` so the child is
+    always reaped and a wedged audio device is bounded (issue #185 — the previous
+    fire-and-forget ``Popen`` was never reaped, had no timeout, and tried only
+    the first available player). Swallows every failure mode by design: this runs
+    detached from any caller, so it must never raise.
     """
     import subprocess
 
-    try:
-        subprocess.run(
-            [player, sound_file],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=_SOUND_PLAYBACK_TIMEOUT,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        logger.debug("Sound player %s timed out after %ss", player, _SOUND_PLAYBACK_TIMEOUT)
-    except OSError as e:
-        logger.debug("Sound player %s failed: %s", player, e)
+    for player in players:
+        try:
+            result = subprocess.run(
+                [player, sound_file],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=_SOUND_PLAYBACK_TIMEOUT,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            # A hung player means the audio device is wedged — don't pile the
+            # next player onto it; the timeout already reaped this child.
+            logger.debug("Sound player %s timed out after %ss", player, _SOUND_PLAYBACK_TIMEOUT)
+            return
+        except OSError as e:
+            logger.debug("Sound player %s failed to exec: %s", player, e)
+            continue
+        if result.returncode == 0:
+            return
+        logger.debug("Sound player %s exited %s; trying next", player, result.returncode)
+
+    logger.debug("No sound player succeeded for %s", sound_file)
 
 
 def play_alert_sound(sound_file: str) -> bool:
-    """Play an alert sound file. Returns True if playback was started.
+    """Play an alert sound file. Returns True if a player was found and dispatched.
 
-    Selects a platform-available CLI player (paplay, aplay, afplay) and runs it
-    in a short-lived daemon thread, so the caller — the async callback worker,
-    which dispatches all callbacks serially — is never blocked for the playback
-    duration. The thread reaps the child and bounds it with a timeout, so there
-    are no zombies and no leak on a wedged audio device (issue #185).
-    No additional dependencies required — stdlib only.
+    Collects the available CLI players (paplay, aplay, afplay) and hands them to
+    a short-lived daemon thread that tries each until one works. The caller —
+    ``_dispatch_alert_actions``, which runs inline on the radio receive/packet
+    thread — is never blocked for the playback duration, and the thread reaps
+    each child and bounds it with a timeout (issue #185). No additional
+    dependencies required — stdlib only.
     """
     import shutil
 
@@ -173,18 +186,18 @@ def play_alert_sound(sound_file: str) -> bool:
         logger.warning("Sound file not found: %s", sound_file)
         return False
 
-    for player in ("paplay", "aplay", "afplay"):
-        if shutil.which(player):
-            threading.Thread(
-                target=_play_sound_blocking,
-                args=(player, sound_file),
-                name="alert-sound",
-                daemon=True,
-            ).start()
-            return True
+    players = tuple(p for p in ("paplay", "aplay", "afplay") if shutil.which(p))
+    if not players:
+        logger.debug("No sound player available")
+        return False
 
-    logger.debug("No sound player available")
-    return False
+    threading.Thread(
+        target=_play_sound_blocking,
+        args=(players, sound_file),
+        name="alert-sound",
+        daemon=True,
+    ).start()
+    return True
 
 
 class CallbackMixin:
