@@ -13,7 +13,46 @@ from meshing_around_clients.tui.helpers import (
     SEVERITY_ICONS,
     format_battery,
     format_snr,
+    safe_num,
+    safe_str,
 )
+
+
+class TestSafeNum(unittest.TestCase):
+    """safe_num coerces JSON/API values for format specs + comparisons."""
+
+    def test_numeric_passthrough(self):
+        self.assertEqual(safe_num(5), 5)
+        self.assertEqual(safe_num(3.5), 3.5)
+
+    def test_none_returns_default(self):
+        self.assertEqual(safe_num(None), 0.0)
+        self.assertEqual(safe_num(None, 7), 7)
+
+    def test_non_numeric_string_returns_default(self):
+        self.assertEqual(safe_num("loud"), 0.0)
+
+    def test_bool_rejected(self):
+        # bool is an int subclass but never a real metric here.
+        self.assertEqual(safe_num(True), 0.0)
+
+
+class TestSafeStr(unittest.TestCase):
+    """safe_str coerces JSON/API values handed to slicing / format specs."""
+
+    def test_str_passthrough(self):
+        self.assertEqual(safe_str("hi"), "hi")
+
+    def test_none_returns_default(self):
+        self.assertEqual(safe_str(None), "")
+        self.assertEqual(safe_str(None, "?"), "?")
+
+    def test_non_str_coerced(self):
+        self.assertEqual(safe_str(42), "42")
+
+    def test_slicing_safe_on_none(self):
+        # The MapsScreen pattern: link.get("source") can be None -> None[-6:] crash.
+        self.assertEqual(safe_str(None, "?")[-6:], "?")
 
 
 class TestFormatBattery(unittest.TestCase):

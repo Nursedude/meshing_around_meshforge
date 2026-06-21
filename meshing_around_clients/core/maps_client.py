@@ -12,6 +12,12 @@ from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
+# Cap a single maps response. base_url is operator-configurable and may point at
+# a remote host, so a hostile/buggy server returning a multi-GB or never-ending
+# body must not OOM a Pi Zero (latent-bug #9). TUI summaries are small (KB-to-MB
+# at most); 16 MiB is generous headroom while bounding memory.
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
 
 class MapsClient:
     """Lightweight REST client for meshforge-maps API."""
@@ -32,7 +38,17 @@ class MapsClient:
                 },
             )
             with urlopen(req, timeout=timeout) as resp:
-                return json.loads(resp.read().decode("utf-8", errors="replace"))
+                # read at most MAX+1 so we can detect (and reject) an oversized
+                # body without ever buffering the whole thing.
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    logger.warning(
+                        "Maps API response for %s exceeded %d bytes -- rejecting",
+                        path,
+                        MAX_RESPONSE_BYTES,
+                    )
+                    return {}
+                return json.loads(raw.decode("utf-8", errors="replace"))
         except (URLError, OSError, json.JSONDecodeError, ValueError) as e:
             logger.debug("Maps API fetch failed (%s): %s", path, e)
             return {}

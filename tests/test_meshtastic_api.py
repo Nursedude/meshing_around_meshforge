@@ -1375,5 +1375,38 @@ class TestEmergencyAlertCooldown(unittest.TestCase):
         self.assertEqual(len(emergency_alerts), 1, f"Expected 1 alert, got {len(emergency_alerts)}")
 
 
+class TestParseNodeInfoSnrRssi(unittest.TestCase):
+    """_parse_node_info must validate snr/rssi like other telemetry fields.
+
+    Regression: snr/rssi were assigned raw from the packet, so a JSON null or
+    out-of-range value landed None / garbage on the non-Optional NodeTelemetry
+    fields (which default to 0.0 / 0). They now route through safe_float/safe_int.
+    """
+
+    def setUp(self):
+        self.api = MockMeshtasticAPI(Config())
+
+    def test_null_snr_rssi_keep_defaults(self):
+        node = self.api._parse_node_info(
+            "!aabbccdd",
+            {"num": 1, "user": {"shortName": "X", "longName": "Xnode"}, "snr": None, "rssi": None},
+        )
+        self.assertIsNotNone(node)
+        self.assertEqual(node.telemetry.snr, 0.0)
+        self.assertEqual(node.telemetry.rssi, 0)
+        self.assertIsInstance(node.telemetry.snr, float)
+
+    def test_out_of_range_snr_rejected(self):
+        node = self.api._parse_node_info("!aabbccdd", {"num": 1, "user": {}, "snr": 9999.0})
+        self.assertIsNotNone(node)
+        self.assertEqual(node.telemetry.snr, 0.0)  # outside [-128, 128] -> rejected
+
+    def test_valid_snr_rssi_preserved(self):
+        node = self.api._parse_node_info("!aabbccdd", {"num": 1, "user": {}, "snr": 7.5, "rssi": -90})
+        self.assertIsNotNone(node)
+        self.assertEqual(node.telemetry.snr, 7.5)
+        self.assertEqual(node.telemetry.rssi, -90)
+
+
 if __name__ == "__main__":
     unittest.main()

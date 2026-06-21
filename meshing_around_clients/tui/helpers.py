@@ -77,6 +77,33 @@ def format_snr(snr: Optional[float], *, unit: bool = False, styled: bool = False
     return f"[{style}]{value_str}[/{style}]"
 
 
+def safe_num(value: Any, default: float = 0.0) -> float:
+    """Coerce a JSON/API value to a number; None / non-numeric -> *default*.
+
+    MapsScreen renders the meshforge-maps REST JSON, where a field can arrive as
+    a JSON ``null`` or a wrong type. Such a value reaching a format spec
+    (``f"{x:.1f}"``) or a comparison (``x > 5``) would raise and — via the
+    screen-render guard — blank the Maps panel. ``bool`` is rejected (an ``int``
+    subclass, but never a real metric here).
+    """
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    return default
+
+
+def safe_str(value: Any, default: str = "") -> str:
+    """Coerce a JSON/API value to a display ``str``; ``None`` -> *default*.
+
+    Guards string fields handed to ``.lower()`` / slicing / a format spec — a
+    JSON ``null`` (``None[-6:]``) would otherwise raise.
+    """
+    if value is None:
+        return default
+    return value if isinstance(value, str) else str(value)
+
+
 def safe_panel_render(func: Callable, fallback_title: str = "") -> Any:
     """Wrap a panel-rendering callable so exceptions return an error Panel.
 
