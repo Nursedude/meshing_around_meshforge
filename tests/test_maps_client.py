@@ -65,6 +65,20 @@ class TestMapsClient(unittest.TestCase):
         with patch("meshing_around_clients.core.maps_client.urlopen", return_value=cm):
             self.assertEqual(client._fetch("/x"), {})
 
+    def test_fetch_rejects_oversized_response(self):
+        """A multi-GB / never-ending body must be rejected, not buffered (latent-bug #9)."""
+        from meshing_around_clients.core.maps_client import MAX_RESPONSE_BYTES
+
+        client = MapsClient()
+        resp = MagicMock()
+        # read(MAX+1) returns more than the cap -> reject without json.loads.
+        resp.read.return_value = b"x" * (MAX_RESPONSE_BYTES + 1)
+        cm = MagicMock()
+        cm.__enter__.return_value = resp
+        cm.__exit__.return_value = False
+        with patch("meshing_around_clients.core.maps_client.urlopen", return_value=cm):
+            self.assertEqual(client._fetch("/api/nodes/geojson"), {})
+
     def test_is_available_true_when_status_returns_data(self):
         client = MapsClient()
         with _mock_urlopen({"ok": True}):

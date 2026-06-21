@@ -33,7 +33,9 @@ from meshing_around_clients.tui.helpers import (  # noqa: E402
     format_battery,
     format_snr,
     format_time_ago,
+    safe_num,
     safe_panel_render,
+    safe_str,
 )
 
 # Check for Rich library - do NOT auto-install (PEP 668 compliance)
@@ -2165,7 +2167,7 @@ class MapsScreen(Screen):
             colors = {"excellent": "green", "good": "cyan", "fair": "yellow", "poor": "red", "critical": "bold red"}
             style = colors.get(level, "white")
             health_content.append(Text(f"  {level:10s} {count}", style=style))
-        avg = health.get("average_score", 0)
+        avg = safe_num(health.get("average_score"))
         if avg:
             health_content.append(Text(f"  Average:   {avg:.0f}%", style="white bold"))
         layout["health"].update(Panel(Group(*health_content), border_style="green"))
@@ -2177,9 +2179,9 @@ class MapsScreen(Screen):
         topo_content.append(Text("Topology Links", style="bold magenta"))
         if links:
             for link in links:
-                src = link.get("source", "?")[-6:]
-                tgt = link.get("target", "?")[-6:]
-                snr = link.get("snr", 0)
+                src = safe_str(link.get("source"), "?")[-6:]
+                tgt = safe_str(link.get("target"), "?")[-6:]
+                snr = safe_num(link.get("snr"))
                 snr_style = "green" if snr > 5 else "yellow" if snr > 0 else "red"
                 line = Text()
                 line.append(f"  {src} ", style="cyan")
@@ -2198,8 +2200,8 @@ class MapsScreen(Screen):
         alert_content.append(Text("Active Alerts", style="bold red"))
         if alert_list:
             for a in alert_list[:6]:
-                rule = a.get("rule_name", "?")
-                node = a.get("node_id", "?")[-6:]
+                rule = safe_str(a.get("rule_name"), "?")
+                node = safe_str(a.get("node_id"), "?")[-6:]
                 sev = a.get("severity", "info")
                 sev_style = {"critical": "bold red", "warning": "yellow", "info": "cyan"}.get(sev, "white")
                 alert_content.append(Text(f"  {rule}: {node}", style=sev_style))
@@ -2439,6 +2441,9 @@ class MeshingAroundTUI:
         self.console = Console()
         self.config = config or Config()
         self.demo_mode = demo_mode
+        # Last distinct screen-render error signature — throttles the WARNING in
+        # the render guard so a persistent render bug logs once, not every tick.
+        self._last_render_error_sig = ""
 
         # Initialize API
         if api is not None:
@@ -2805,13 +2810,23 @@ class MeshingAroundTUI:
             try:
                 layout["body"].update(screen.render())
             except Exception as e:
-                # Guard against stale/missing API data during reconnection
-                logger.debug("Render error on %s: %s", self.current_screen, e)
-                msg = (
-                    "[red]DISCONNECTED - press 'c' to reconnect[/red]"
-                    if not self.api.is_connected
-                    else f"[yellow]Waiting for data... ({e})[/yellow]"
-                )
+                if self.api.is_connected:
+                    # Connected, yet render raised -> a real code / data-shape
+                    # defect, NOT a network condition. Surface it honestly rather
+                    # than masquerading as "waiting for data" (which sends the
+                    # operator hunting a non-existent connection problem). Log a
+                    # WARNING the first time each distinct error appears -- render
+                    # runs every refresh tick, so unconditional logging floods.
+                    sig = f"{self.current_screen}:{type(e).__name__}:{e}"
+                    if sig != self._last_render_error_sig:
+                        self._last_render_error_sig = sig
+                        logger.warning("Render error on '%s' screen", self.current_screen, exc_info=True)
+                    msg = f"[red]Render error on '{self.current_screen}' screen: {type(e).__name__}[/red]"
+                else:
+                    # Disconnected: stale/missing data during reconnection is expected.
+                    logger.debug("Render skipped on %s (disconnected): %s", self.current_screen, e)
+                    self._last_render_error_sig = ""
+                    msg = "[red]DISCONNECTED - press 'c' to reconnect[/red]"
                 layout["body"].update(Panel(msg, border_style="yellow"))
 
         return layout

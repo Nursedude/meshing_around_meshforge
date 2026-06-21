@@ -169,6 +169,8 @@ from .config import Config  # noqa: E402
 from .models import (  # noqa: E402
     DATETIME_MIN_UTC,
     MAX_MESSAGE_BYTES,
+    VALID_RSSI_RANGE,
+    VALID_SNR_RANGE,
     Alert,
     AlertType,
     Channel,
@@ -1226,11 +1228,19 @@ class MeshtasticAPI(CallbackMixin):
             if node_info.get("lastHeard"):
                 last_heard = datetime.fromtimestamp(node_info["lastHeard"], tz=timezone.utc)
 
-            # SNR/RSSI
+            # SNR/RSSI -- validate like the voltage/temperature fields so a null
+            # or out-of-range packet value can't land None on these non-Optional
+            # telemetry fields (they default to 0.0/0 on NodeTelemetry). Reuse the
+            # model's canonical ranges (the same bounds LinkQuality.update clamps
+            # to) rather than ad-hoc numbers, so all consumers agree on "valid".
             if "snr" in node_info:
-                telemetry.snr = node_info["snr"]
+                snr_val = safe_float(node_info["snr"], *VALID_SNR_RANGE)
+                if snr_val is not None:
+                    telemetry.snr = snr_val
             if "rssi" in node_info:
-                telemetry.rssi = node_info["rssi"]
+                rssi_val = safe_int(node_info["rssi"], *VALID_RSSI_RANGE)
+                if rssi_val is not None:
+                    telemetry.rssi = rssi_val
 
             return Node(
                 node_id=node_id,

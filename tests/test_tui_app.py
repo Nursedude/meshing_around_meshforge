@@ -1360,6 +1360,68 @@ class TestMapsScreenRenderIsOffline(unittest.TestCase):
             self.assertTrue(self.screen._force.is_set())
             mock_start.assert_called()
 
+    def test_render_with_malformed_data_does_not_crash(self):
+        """Null / wrong-typed JSON fields from the maps API must not blank the panel."""
+        from unittest.mock import patch
+
+        self.screen._status_msg = ""  # force the 4-quadrant body (the crash-prone path)
+        self.screen._data = {
+            "status": {"total_nodes": None, "sources": {"a": None}},
+            "health": {"average_score": "n/a", "distribution": {"good": None}},
+            "topology": {
+                "links": [
+                    {"source": None, "target": None, "snr": None},
+                    {"source": "!aabbccdd", "target": "!eeff0011", "snr": "loud"},
+                ]
+            },
+            "alerts": {"alerts": [{"rule_name": None, "node_id": None, "severity": None}]},
+            "analytics": {"growth": {"total_tracked": None}, "activity": {"active_last_hour": None}},
+        }
+        with patch.object(self.screen, "_start_worker"):
+            panel = self.screen.render()  # must not raise
+        self.assertIsNotNone(panel)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestRenderGuardHonesty(unittest.TestCase):
+    """_render must distinguish a real render bug (loud) from disconnection (quiet)."""
+
+    def _tui_with_broken_screen(self, connected):
+        from unittest.mock import MagicMock
+
+        import meshing_around_clients.tui.app as appmod
+
+        tui = appmod.MeshingAroundTUI(config=Config(), demo_mode=True)
+        if connected:
+            tui.api.connect()
+        elif tui.api.is_connected:
+            tui.api.disconnect()
+        boom = MagicMock()
+        boom.render.side_effect = ValueError("kaboom")
+        tui.screens[tui.current_screen] = boom
+        return appmod, tui
+
+    def test_connected_render_error_is_logged_loudly(self):
+        from unittest.mock import patch
+
+        appmod, tui = self._tui_with_broken_screen(connected=True)
+        try:
+            with patch.object(appmod.logger, "warning") as mock_warn:
+                layout = tui._render()
+            self.assertIsNotNone(layout)
+            mock_warn.assert_called()  # connected + render raised -> WARNING witness
+        finally:
+            tui.api.disconnect()
+
+    def test_disconnected_render_error_is_quiet(self):
+        from unittest.mock import patch
+
+        appmod, tui = self._tui_with_broken_screen(connected=False)
+        with patch.object(appmod.logger, "warning") as mock_warn:
+            layout = tui._render()
+        self.assertIsNotNone(layout)
+        mock_warn.assert_not_called()  # disconnected is expected -> no loud warning
+
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
 class TestRunCommandPromptChannelPick(unittest.TestCase):
