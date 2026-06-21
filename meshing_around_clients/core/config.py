@@ -80,6 +80,35 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
+def _coerce_float(value: Any, default: float) -> float:
+    """Coerce *value* to float, returning *default* on malformed INI input.
+
+    Float companion to :func:`_coerce_int` — a hand-edited ``refresh_rate = x``
+    or ``volcano_lat = abc`` must not raise ValueError out of config load.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _ini_int(parser: Any, section: str, key: str, default: int) -> int:
+    """Read an int from *parser* tolerant of malformed values.
+
+    ``ConfigParser.getint`` raises a raw ``ValueError`` on a present-but-garbage
+    value (the fallback only covers an *absent* key), and that ValueError is not
+    a ``configparser.Error`` so it escapes ``load()``'s except clause and crashes
+    startup. Routing through :func:`_coerce_int` makes a bad value fall back to
+    *default* per-field instead (CLAUDE.md latent-bug #3).
+    """
+    return _coerce_int(parser.get(section, key, fallback=str(default)), default)
+
+
+def _ini_float(parser: Any, section: str, key: str, default: float) -> float:
+    """Read a float from *parser* tolerant of malformed values (see _ini_int)."""
+    return _coerce_float(parser.get(section, key, fallback=str(default)), default)
+
+
 @dataclass
 class AlertConfig:
     """Alert system configuration."""
@@ -572,10 +601,10 @@ class Config:
                 keywords_str = self._parser.get(alerts_section, "emergency_keywords", fallback="")
                 if keywords_str:
                     self.alerts.emergency_keywords = [k.strip() for k in keywords_str.split(",") if k.strip()]
-                self.alerts.alert_channel = self._parser.getint(alerts_section, "alert_channel", fallback=2)
+                self.alerts.alert_channel = _ini_int(self._parser, alerts_section, "alert_channel", 2)
                 self.alerts.play_sound = self._parser.getboolean(alerts_section, "play_sound", fallback=False)
                 self.alerts.sound_file = self._parser.get(alerts_section, "sound_file", fallback="")
-                self.alerts.cooldown_period = self._parser.getint(alerts_section, "cooldown_period", fallback=300)
+                self.alerts.cooldown_period = _ini_int(self._parser, alerts_section, "cooldown_period", 300)
                 self.alerts.log_to_file = self._parser.getboolean(alerts_section, "log_to_file", fallback=False)
                 self.alerts.log_file = self._parser.get(alerts_section, "log_file", fallback="")
 
@@ -599,19 +628,19 @@ class Config:
                 ds.tsunami_region = self._parser.get("data_sources", "tsunami_region", fallback="")
                 ds.volcano_enabled = self._parser.getboolean("data_sources", "volcano_enabled", fallback=False)
                 ds.volcano_url = self._parser.get("data_sources", "volcano_url", fallback=ds.volcano_url)
-                ds.volcano_lat = self._parser.getfloat("data_sources", "volcano_lat", fallback=0.0)
-                ds.volcano_lon = self._parser.getfloat("data_sources", "volcano_lon", fallback=0.0)
+                ds.volcano_lat = _ini_float(self._parser, "data_sources", "volcano_lat", 0.0)
+                ds.volcano_lon = _ini_float(self._parser, "data_sources", "volcano_lon", 0.0)
 
             # Network
             if self._parser.has_section("network"):
-                self.network_cfg.default_channel = self._parser.getint("network", "default_channel", fallback=0)
+                self.network_cfg.default_channel = _ini_int(self._parser, "network", "default_channel", 0)
                 mc_str = self._parser.get("network", "monitored_channels", fallback="")
                 if mc_str:
                     self.network_cfg.monitored_channels = [
                         int(c.strip()) for c in mc_str.split(",") if c.strip().isdigit()
                     ]
-                self.network_cfg.message_history = self._parser.getint("network", "message_history", fallback=500)
-                self.network_cfg.max_message_length = self._parser.getint("network", "max_message_length", fallback=200)
+                self.network_cfg.message_history = _ini_int(self._parser, "network", "message_history", 500)
+                self.network_cfg.max_message_length = _ini_int(self._parser, "network", "max_message_length", 200)
 
             # NOTE: default_channel is USER-configured, not auto-synced from
             # upstream bot. The bot's defaultchannel + ignoredefaultchannel
@@ -620,12 +649,10 @@ class Config:
 
             # TUI
             if self._parser.has_section("tui"):
-                self.tui.refresh_rate = self._parser.getfloat("tui", "refresh_rate", fallback=1.0)
+                self.tui.refresh_rate = _ini_float(self._parser, "tui", "refresh_rate", 1.0)
                 self.tui.color_scheme = self._parser.get("tui", "color_scheme", fallback="default")
                 self.tui.show_timestamps = self._parser.getboolean("tui", "show_timestamps", fallback=True)
-                self.tui.message_history = max(
-                    10, min(self._parser.getint("tui", "message_history", fallback=500), 10000)
-                )
+                self.tui.message_history = max(10, min(_ini_int(self._parser, "tui", "message_history", 500), 10000))
                 self.tui.alert_sound = self._parser.getboolean("tui", "alert_sound", fallback=True)
                 self.tui.space_weather = self._parser.getboolean("tui", "space_weather", fallback=True)
 
@@ -633,7 +660,7 @@ class Config:
             if self._parser.has_section("maps"):
                 self.maps.enabled = self._parser.getboolean("maps", "enabled", fallback=True)
                 self.maps.host = self._parser.get("maps", "host", fallback="127.0.0.1")
-                self.maps.port = self._parser.getint("maps", "port", fallback=8808)
+                self.maps.port = _ini_int(self._parser, "maps", "port", 8808)
 
             # Maps export — GeoJSON file drop for meshforge-maps to consume
             if self._parser.has_section("maps_export"):
@@ -650,7 +677,7 @@ class Config:
             if self._parser.has_section("mqtt"):
                 self.mqtt.enabled = self._parser.getboolean("mqtt", "enabled", fallback=False)
                 self.mqtt.broker = self._parser.get("mqtt", "broker", fallback=self.mqtt.broker)
-                self.mqtt.port = self._parser.getint("mqtt", "port", fallback=self.mqtt.port)
+                self.mqtt.port = _ini_int(self._parser, "mqtt", "port", self.mqtt.port)
                 # Parse embedded port from broker (e.g. "host:1884")
                 if ":" in self.mqtt.broker:
                     _parts = self.mqtt.broker.rsplit(":", 1)
@@ -668,44 +695,38 @@ class Config:
                 self.mqtt.node_id = self._parser.get("mqtt", "node_id", fallback=self.mqtt.node_id)
                 self.mqtt.client_id = self._parser.get("mqtt", "client_id", fallback="")
                 self.mqtt.encryption_key = self._parser.get("mqtt", "encryption_key", fallback="")
-                raw_qos = self._parser.getint("mqtt", "qos", fallback=1)
+                raw_qos = _ini_int(self._parser, "mqtt", "qos", 1)
                 self.mqtt.qos = raw_qos if raw_qos in (0, 1, 2) else 1
-                self.mqtt.connect_timeout = max(
-                    1, min(self._parser.getint("mqtt", "connect_timeout", fallback=10), 300)
-                )
-                self.mqtt.reconnect_delay = max(
-                    1, min(self._parser.getint("mqtt", "reconnect_delay", fallback=5), 3600)
-                )
+                self.mqtt.connect_timeout = max(1, min(_ini_int(self._parser, "mqtt", "connect_timeout", 10), 300))
+                self.mqtt.reconnect_delay = max(1, min(_ini_int(self._parser, "mqtt", "reconnect_delay", 5), 3600))
                 self.mqtt.max_reconnect_delay = max(
                     self.mqtt.reconnect_delay,
-                    min(self._parser.getint("mqtt", "max_reconnect_delay", fallback=300), 86400),
+                    min(_ini_int(self._parser, "mqtt", "max_reconnect_delay", 300), 86400),
                 )
-                self.mqtt.max_reconnect_attempts = self._parser.getint("mqtt", "max_reconnect_attempts", fallback=10)
+                self.mqtt.max_reconnect_attempts = _ini_int(self._parser, "mqtt", "max_reconnect_attempts", 10)
 
             # Storage
             if self._parser.has_section("storage"):
                 self.storage.enabled = self._parser.getboolean("storage", "enabled", fallback=True)
                 self.storage.state_file = self._parser.get("storage", "state_file", fallback="")
                 self.storage.auto_save_interval = max(
-                    0, min(self._parser.getint("storage", "auto_save_interval", fallback=300), 86400)
+                    0, min(_ini_int(self._parser, "storage", "auto_save_interval", 300), 86400)
                 )
-                self.storage.max_message_history = self._parser.getint("storage", "max_message_history", fallback=1000)
-                self.storage.max_node_history_days = self._parser.getint(
-                    "storage", "max_node_history_days", fallback=30
-                )
+                self.storage.max_message_history = _ini_int(self._parser, "storage", "max_message_history", 1000)
+                self.storage.max_node_history_days = _ini_int(self._parser, "storage", "max_node_history_days", 30)
 
             # Logging
             if self._parser.has_section("logging"):
                 self.logging.enabled = self._parser.getboolean("logging", "enabled", fallback=True)
                 self.logging.level = self._parser.get("logging", "level", fallback="INFO").upper()
                 self.logging.file = self._parser.get("logging", "file", fallback="mesh_client.log")
-                self.logging.max_size_mb = max(1, min(self._parser.getint("logging", "max_size_mb", fallback=10), 1000))
-                self.logging.backup_count = max(0, min(self._parser.getint("logging", "backup_count", fallback=3), 100))
+                self.logging.max_size_mb = max(1, min(_ini_int(self._parser, "logging", "max_size_mb", 10), 1000))
+                self.logging.backup_count = max(0, min(_ini_int(self._parser, "logging", "backup_count", 3), 100))
 
             # Advanced
             if self._parser.has_section("advanced"):
                 self.chunk_reassembly_timeout = max(
-                    0.0, self._parser.getfloat("advanced", "chunk_reassembly_timeout", fallback=5.0)
+                    0.0, _ini_float(self._parser, "advanced", "chunk_reassembly_timeout", 5.0)
                 )
 
             # Fall back to bot's config.ini for shared settings
@@ -1257,14 +1278,14 @@ class Config:
         settings: Dict[str, Any] = {}
 
         if parser.has_section("location"):
-            settings["lat"] = parser.getfloat("location", "lat", fallback=0.0)
-            settings["lon"] = parser.getfloat("location", "lon", fallback=0.0)
+            settings["lat"] = _ini_float(parser, "location", "lat", 0.0)
+            settings["lon"] = _ini_float(parser, "location", "lon", 0.0)
             settings["usemetric"] = parser.getboolean("location", "usemetric", fallback=False)
-            settings["noaaforecastduration"] = parser.getint("location", "noaaforecastduration", fallback=3)
+            settings["noaaforecastduration"] = _ini_int(parser, "location", "noaaforecastduration", 3)
             settings["myfipslist"] = parser.get("location", "myfipslist", fallback="")
 
         if parser.has_section("general"):
-            settings["defaultchannel"] = parser.getint("general", "defaultchannel", fallback=0)
+            settings["defaultchannel"] = _ini_int(parser, "general", "defaultchannel", 0)
 
         return settings
 

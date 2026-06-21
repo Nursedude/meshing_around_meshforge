@@ -246,6 +246,35 @@ class TestSetupLogging(unittest.TestCase):
             self.assertEqual(rotating_handlers[0].maxBytes, 5 * 1024 * 1024)
             self.assertEqual(rotating_handlers[0].backupCount, 2)
 
+    def test_garbage_numeric_values_do_not_crash(self):
+        """Hand-edited non-numeric logging values must fall back, not crash.
+
+        Regression for CLAUDE.md latent-bug #3: setup_logging used raw
+        config.getint(), which raised ValueError on a non-numeric value and
+        crashed startup before logging was even configured.
+        """
+        import logging
+        from logging.handlers import RotatingFileHandler
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config = ConfigParser()
+            config.read_string(
+                "[logging]\n"
+                "enabled = true\n"
+                f"file = {tmpdir}/test.log\n"
+                "max_size_mb = big\n"
+                "backup_count = none\n"
+                "message_log_backup_count = lots\n"
+            )
+            mesh_client.setup_logging(config)  # must not raise
+
+            root = logging.getLogger()
+            rotating = [h for h in root.handlers if isinstance(h, RotatingFileHandler)]
+            self.assertEqual(len(rotating), 1)
+            # Defaults (10 MiB, 3 backups) applied instead of crashing.
+            self.assertEqual(rotating[0].maxBytes, 10 * 1024 * 1024)
+            self.assertEqual(rotating[0].backupCount, 3)
+
     def test_respects_disabled(self):
         """setup_logging should not add file handler when disabled."""
         import logging
