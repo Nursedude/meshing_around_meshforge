@@ -127,14 +127,47 @@ def extract_position(pos_data: dict) -> Optional[Any]:
     return None
 
 
-def play_alert_sound(sound_file: str) -> bool:
-    """Play an alert sound file. Returns True if playback was attempted.
+# Bounds a wedged audio device so a hung player can't leak its child forever
+# (issue #185). Generous — any real alert chime finishes in a second or two.
+_SOUND_PLAYBACK_TIMEOUT = 30
 
-    Uses platform-available CLI tools (paplay, aplay, afplay).
+
+def _play_sound_blocking(player: str, sound_file: str) -> None:
+    """Run an audio player to completion. Intended as a daemon-thread target.
+
+    Uses ``subprocess.run`` with a ``timeout`` so the child is always reaped and
+    a wedged audio device is bounded (issue #185 — the previous fire-and-forget
+    ``Popen`` was never waited on, accumulating zombies on a long-running TUI,
+    and had no timeout, so a hung player leaked forever). Swallows its failure
+    modes by design: this runs detached from any caller, so it must never raise.
+    """
+    import subprocess
+
+    try:
+        subprocess.run(
+            [player, sound_file],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=_SOUND_PLAYBACK_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        logger.debug("Sound player %s timed out after %ss", player, _SOUND_PLAYBACK_TIMEOUT)
+    except OSError as e:
+        logger.debug("Sound player %s failed: %s", player, e)
+
+
+def play_alert_sound(sound_file: str) -> bool:
+    """Play an alert sound file. Returns True if playback was started.
+
+    Selects a platform-available CLI player (paplay, aplay, afplay) and runs it
+    in a short-lived daemon thread, so the caller — the async callback worker,
+    which dispatches all callbacks serially — is never blocked for the playback
+    duration. The thread reaps the child and bounds it with a timeout, so there
+    are no zombies and no leak on a wedged audio device (issue #185).
     No additional dependencies required — stdlib only.
     """
     import shutil
-    import subprocess
 
     if not os.path.isfile(sound_file):
         logger.warning("Sound file not found: %s", sound_file)
@@ -142,15 +175,13 @@ def play_alert_sound(sound_file: str) -> bool:
 
     for player in ("paplay", "aplay", "afplay"):
         if shutil.which(player):
-            try:
-                subprocess.Popen(
-                    [player, sound_file],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                return True
-            except OSError as e:
-                logger.debug("Sound player %s failed: %s", player, e)
+            threading.Thread(
+                target=_play_sound_blocking,
+                args=(player, sound_file),
+                name="alert-sound",
+                daemon=True,
+            ).start()
+            return True
 
     logger.debug("No sound player available")
     return False

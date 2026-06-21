@@ -3,6 +3,7 @@ Unit tests for meshing_around_clients.core.callbacks
 """
 
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -16,7 +17,9 @@ from meshing_around_clients.core.callbacks import (
     _CALLBACK_EVENTS,
     _DEFAULT_COOLDOWN_SECONDS,
     _MAX_COOLDOWN_ENTRIES,
+    _SOUND_PLAYBACK_TIMEOUT,
     CallbackMixin,
+    _play_sound_blocking,
     extract_position,
     play_alert_sound,
     safe_float,
@@ -412,20 +415,43 @@ class TestPlayAlertSound(unittest.TestCase):
     def test_no_player_returns_false(self, mock_isfile, mock_which):
         self.assertFalse(play_alert_sound("/some/file.oga"))
 
-    @unittest.mock.patch("subprocess.Popen")
+    @unittest.mock.patch("meshing_around_clients.core.callbacks.threading")
     @unittest.mock.patch("shutil.which", return_value="/usr/bin/paplay")
     @unittest.mock.patch("os.path.isfile", return_value=True)
-    def test_successful_playback(self, mock_isfile, mock_which, mock_popen):
+    def test_successful_playback_starts_daemon_thread(self, mock_isfile, mock_which, mock_threading):
+        # A found player is played in a detached daemon thread so the caller
+        # (the serial callback worker) is never blocked for the playback duration.
         self.assertTrue(play_alert_sound("/some/file.oga"))
-        mock_popen.assert_called_once()
+        mock_threading.Thread.assert_called_once()
+        _, kwargs = mock_threading.Thread.call_args
+        self.assertIs(kwargs["target"], _play_sound_blocking)
+        self.assertEqual(tuple(kwargs["args"]), ("paplay", "/some/file.oga"))
+        self.assertTrue(kwargs["daemon"])
+        mock_threading.Thread.return_value.start.assert_called_once()
 
-    @unittest.mock.patch("subprocess.Popen", side_effect=OSError("no such player"))
-    @unittest.mock.patch("shutil.which")
-    @unittest.mock.patch("os.path.isfile", return_value=True)
-    def test_popen_failure_tries_next(self, mock_isfile, mock_which, mock_popen):
-        # All players fail with OSError
-        mock_which.return_value = "/usr/bin/paplay"
-        self.assertFalse(play_alert_sound("/some/file.oga"))
+
+class TestPlaySoundBlocking(unittest.TestCase):
+    """Test the daemon-thread target: it reaps the child and bounds it (issue #185)."""
+
+    @unittest.mock.patch("subprocess.run")
+    def test_uses_timeout_and_reaps(self, mock_run):
+        # subprocess.run waits on (reaps) the child; the timeout bounds a wedged device.
+        _play_sound_blocking("paplay", "/some/file.oga")
+        mock_run.assert_called_once()
+        _, kwargs = mock_run.call_args
+        self.assertEqual(kwargs["timeout"], _SOUND_PLAYBACK_TIMEOUT)
+
+    @unittest.mock.patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired("paplay", _SOUND_PLAYBACK_TIMEOUT),
+    )
+    def test_swallows_timeout(self, mock_run):
+        # A wedged audio device must never crash the detached worker.
+        _play_sound_blocking("paplay", "/some/file.oga")  # must not raise
+
+    @unittest.mock.patch("subprocess.run", side_effect=OSError("exec failed"))
+    def test_swallows_oserror(self, mock_run):
+        _play_sound_blocking("paplay", "/some/file.oga")  # must not raise
 
 
 class TestAsyncCallbackDispatch(unittest.TestCase):
