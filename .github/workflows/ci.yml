@@ -25,6 +25,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Version consistency (MF024)
+        run: python scripts/version_consistency_check.py
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
