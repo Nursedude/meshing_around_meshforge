@@ -32,8 +32,8 @@ from pathlib import Path
 from typing import Any, List, Optional, Tuple
 from getpass import getpass
 
-# Version info
-VERSION = "0.5.0-beta"
+# Version info — keep in sync with meshing_around_clients/__init__.py (the SSOT)
+VERSION = "0.6.0"
 SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 
 # Try to import modular components - fallback to inline if not available

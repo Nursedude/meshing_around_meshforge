@@ -1,11 +1,18 @@
 # Changelog
 
-All notable changes to MeshForge will be documented in this file.
+All notable changes to **meshing_around_meshforge** (the MeshForge client/monitor
++ maps-writer + alerting layer for the meshing-around Meshtastic bot) will be
+documented in this file. This is a distinct project from `Nursedude/meshforge`
+and from the bot fork `Nursedude/meshing-around`.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+> Header + top version corrected 2026-07-07 (audit): this file was mislabeled
+> "MeshForge" and frozen at 0.5.0-beta while the code SSOT
+> (`meshing_around_clients/__init__.py`) was already 0.6.0.
+
+## [0.6.0] - 2026-03-22
 
 ### Added
 - Shared CallbackMixin for callback/cooldown logic (`core/callbacks.py`)

@@ -1,3 +1,13 @@
+# NOTE: the version SSOT is meshing_around_clients/__init__.py (__version__).
+# This [project].version must match it — guarded when scripts/version_consistency_check.py
+# (from the meshforge repo) is mirrored here. This table is metadata only; the
+# app runs in place, it is not pip-installed.
+[project]
+name = "meshing_around_meshforge"
+version = "0.6.0"
+description = "MeshForge client/monitor + maps-writer + alerting for the meshing-around Meshtastic bot"
+requires-python = ">=3.9"
+
 [tool.black]
 line-length = 120
 target-version = ["py39", "py310", "py311", "py312"]
