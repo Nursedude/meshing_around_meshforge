@@ -58,7 +58,11 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
+
     # Provide stub classes for type hints when Rich is not available
+    def rich_escape(value):  # type: ignore
+        return str(value)
+
     Panel = Any  # type: ignore
     Console = Any  # type: ignore
     Table = Any  # type: ignore
@@ -83,6 +87,24 @@ from meshing_around_clients.core import Config, MeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.config import InterfaceConfig, _coerce_int  # noqa: E402
 from meshing_around_clients.core.meshtastic_api import MockMeshtasticAPI  # noqa: E402
 from meshing_around_clients.core.models import DATETIME_MIN_UTC, MAX_MESSAGE_BYTES  # noqa: E402
+
+
+def _rm_safe(value) -> str:
+    """Escape a NETWORK-derived string for a Rich Table cell or Tree label.
+
+    Rich parses ``[...]`` markup in plain-str cells, so an attacker-chosen node
+    or channel name like ``"[/"`` raises ``MarkupError`` and blanks the entire
+    screen on every render — a persistent, one-packet DoS of the operator's node
+    view. Escaping neutralises the markup while keeping the text visible. This
+    mirrors the inline ``rich_escape()`` already used in MessagesScreen /
+    AlertsScreen (SEC-16), applied consistently wherever a node/channel name,
+    id, or hardware string reaches the renderer. Style markup the code adds
+    itself (e.g. ``[green]...[/green]``) is composed OUTSIDE this call and stays
+    intact.
+    """
+    if value is None:
+        return ""
+    return rich_escape(str(value))
 
 
 class PlainTextTUI:
@@ -710,9 +732,9 @@ class NodesScreen(Screen):
 
             row = [
                 f"[{status_style}]{idx}[/{status_style}]",
-                node.node_id[-8:],
-                node.display_name,
-                node.hardware_model,
+                _rm_safe(node.node_id[-8:]),
+                _rm_safe(node.display_name),
+                _rm_safe(node.hardware_model),
                 node.role.value if node.role else "UNKNOWN",
                 node.time_since_heard,
                 batt_str,
@@ -747,7 +769,9 @@ class NodesScreen(Screen):
 
         # Build subtitle with search state
         if self.search_active:
-            subtitle = f"[bold yellow]Search: {self.search_query}_[/bold yellow] | Esc: cancel | Enter: confirm"
+            subtitle = (
+                f"[bold yellow]Search: {_rm_safe(self.search_query)}_[/bold yellow] | Esc: cancel | Enter: confirm"
+            )
         elif self.search_query:
             page_info = f"Page {self.page + 1}/{total_pages} ({len(nodes)}/{total_all} match)"
             subtitle = f"[dim]{page_info} | /: search | Esc: clear | j/k: page | q: return[/dim]"
@@ -876,7 +900,9 @@ class MessagesScreen(Screen):
 
         # Build subtitle with search state
         if self.search_active:
-            subtitle = f"[bold yellow]Search: {self.search_query}_[/bold yellow] | Esc: cancel | Enter: confirm"
+            subtitle = (
+                f"[bold yellow]Search: {_rm_safe(self.search_query)}_[/bold yellow] | Esc: cancel | Enter: confirm"
+            )
         elif self.search_query:
             subtitle = (
                 f"[dim]{len(filtered)}/{total_all} match | "
@@ -1006,9 +1032,9 @@ class AlertsScreen(Screen):
 
         title = f"[bold cyan]Alerts[/bold cyan] - {filter_text} ({unread} unread)"
         if self.search_active:
-            title += f"  [yellow]Search: {self.search_query}_[/yellow]"
+            title += f"  [yellow]Search: {_rm_safe(self.search_query)}_[/yellow]"
         elif self.search_query:
-            title += f"  [green]Filter: {self.search_query}[/green]"
+            title += f"  [green]Filter: {_rm_safe(self.search_query)}[/green]"
 
         return Panel(
             table,
@@ -1178,7 +1204,7 @@ class TopologyScreen(Screen):
             quality = f" [{q_color}]{q_pct}%[/{q_color}]"
 
         online = "[green][/green]" if node.is_online else "[red][/red]"
-        label = f"{online} {node.display_name[:20]}{quality}"
+        label = f"{online} {_rm_safe(node.display_name[:20])}{quality}"
 
         node_branch = parent.add(label)
 
@@ -1187,13 +1213,13 @@ class TopologyScreen(Screen):
             neighbors_str = ", ".join(n[-6:] for n in node.neighbors[:5])
             if len(node.neighbors) > 5:
                 neighbors_str += f" +{len(node.neighbors) - 5} more"
-            node_branch.add(f"[dim]Hears: {neighbors_str}[/dim]")
+            node_branch.add(f"[dim]Hears: {_rm_safe(neighbors_str)}[/dim]")
 
         if node.heard_by:
             heard_str = ", ".join(h[-6:] for h in node.heard_by[:5])
             if len(node.heard_by) > 5:
                 heard_str += f" +{len(node.heard_by) - 5} more"
-            node_branch.add(f"[dim]Heard by: {heard_str}[/dim]")
+            node_branch.add(f"[dim]Heard by: {_rm_safe(heard_str)}[/dim]")
 
     def _create_routes_panel(self) -> Panel:
         """Create known routes panel."""
@@ -1226,7 +1252,12 @@ class TopologyScreen(Screen):
                 if len(route.hops) > 1:
                     via += f" (+{len(route.hops)-1})"
 
-            table.add_row(dest_name, f"[{hop_style}]{hop_count}[/{hop_style}]", format_snr(avg_snr, styled=True), via)
+            table.add_row(
+                _rm_safe(dest_name),
+                f"[{hop_style}]{hop_count}[/{hop_style}]",
+                format_snr(avg_snr, styled=True),
+                _rm_safe(via),
+            )
 
         if not routes:
             table.add_row("[dim]No routes discovered[/dim]", "", "", "")
@@ -1265,7 +1296,7 @@ class TopologyScreen(Screen):
 
             table.add_row(
                 str(idx),
-                channel.display_name,
+                _rm_safe(channel.display_name),
                 f"[{role_style}]{channel.role.value if channel.role else 'UNKNOWN'}[/{role_style}]",
                 encrypted,
                 str(channel.message_count),
@@ -1287,8 +1318,8 @@ class TopologyScreen(Screen):
                     # Count messages observed on this channel index
                     msg_count = sum(1 for m in network.messages if str(m.channel) == ch_name)
                     table.add_row(
-                        ch_name,
-                        f"{topic}/{ch_name}",
+                        _rm_safe(ch_name),
+                        _rm_safe(f"{topic}/{ch_name}"),
                         "[cyan]MQTT[/cyan]",
                         "[dim]-[/dim]",
                         str(msg_count),
@@ -1397,7 +1428,7 @@ class DevicesScreen(Screen):
                     delta = (datetime.now(timezone.utc) - node.last_heard).total_seconds()
                     last_heard = format_time_ago(delta)
 
-                nodes_table.add_row(name, node_id, hw, role, batt, last_heard)
+                nodes_table.add_row(_rm_safe(name), _rm_safe(node_id), _rm_safe(hw), role, batt, last_heard)
 
             layout.add_row(nodes_table)
 

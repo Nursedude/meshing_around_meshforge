@@ -4,6 +4,7 @@ Unit tests for meshing_around_clients.tui.app
 Tests TUI rendering crash guards and connection health indicator.
 """
 
+import io
 import sys
 import unittest
 
@@ -1713,6 +1714,76 @@ class TestAlertsScreenMarkupEscape(unittest.TestCase):
         panel = self.screen.render()
         rendered = self._render_to_string(panel)
         self.assertIsInstance(rendered, str)
+
+
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestHostileNodeNameRenderDoS(unittest.TestCase):
+    """A node/channel name with attacker-chosen Rich markup must not DoS the
+    render. Rich parses ``[...]`` in Table cells and Tree labels, so a name like
+    ``"[/"`` raised MarkupError and blanked the whole screen on EVERY render
+    while the node stayed in the DB — a persistent, one-packet DoS. The fix
+    escapes every network-derived string at the render sites (_rm_safe).
+    """
+
+    def setUp(self):
+        from datetime import datetime, timezone
+
+        from meshing_around_clients.core.models import Node
+        from meshing_around_clients.tui.app import DevicesScreen, MeshingAroundTUI
+
+        self.tui = MeshingAroundTUI(config=Config(), demo_mode=True)
+        self.tui.api.connect()
+        self._DevicesScreen = DevicesScreen
+        # The real MarkupError trigger is a CLOSE tag with no matching open —
+        # "[/]" or "[/red]" — NOT the incomplete "[/" (Rich renders that
+        # literally). A hostile node needs only set its name to "[/]".
+        hostile = Node(
+            node_id="!deadbeef",
+            node_num=0xDEADBEEF,
+            long_name="[/]",
+            short_name="[/red]",
+            hardware_model="[/bold]",
+            last_heard=datetime.now(timezone.utc),
+            is_online=True,
+            neighbors=["[/nbr]", "[/x]"],
+            heard_by=["[/hb]"],
+        )
+        self.tui.api.network.add_node(hostile)
+
+    def tearDown(self):
+        self.tui.api.disconnect()
+
+    def _render(self, panel):
+        """Render to a real Console — this is where Rich parses markup and would
+        raise MarkupError on an unescaped hostile cell."""
+        from rich.console import Console
+
+        console = Console(file=io.StringIO(), width=200)
+        console.print(panel)
+        return console.file.getvalue()
+
+    def test_harness_actually_detects_bad_markup(self):
+        # Guard against a no-op test: the render harness MUST raise on an
+        # unescaped close-with-no-open "[/]", or the screen tests below would
+        # pass vacuously.
+        from rich.errors import MarkupError
+        from rich.table import Table
+
+        t = Table()
+        t.add_column("x")
+        t.add_row("[/]")
+        with self.assertRaises(MarkupError):
+            self._render(t)
+
+    def test_nodes_screen_survives_hostile_name(self):
+        # Must not raise MarkupError.
+        self._render(self.tui.screens["nodes"].render())
+
+    def test_topology_screen_survives_hostile_name(self):
+        self._render(self.tui.screens["topology"].render())
+
+    def test_devices_screen_survives_hostile_name(self):
+        self._render(self._DevicesScreen(self.tui).render())
 
 
 if __name__ == "__main__":
