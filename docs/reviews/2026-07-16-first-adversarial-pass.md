@@ -142,13 +142,36 @@ line-verified. Grouped by surface; ranked roughly by the reviewer's severity.
 *(Full reviewer detail with line numbers was captured in the session transcript;
 this file is the durable triage list.)*
 
-## Notes for the next pass
+## Crypto fix — field-test result (2026-07-16, same session)
 
-- The crypto fix changes security-relevant behavior and could not be
-  field-tested against a real radio this session — it is **spec-correct and
-  suite-green (BELIEVED interoperable)**; verify against a live default-channel
-  `/e/` packet before relying on the `/e/` decrypt path in production. The
-  `/json/` path (meshtasticd pre-decrypted) is unaffected either way.
+**VERIFIED interoperable at the Meshtastic wire-format level.** The fixed
+derivation was exercised through the module's own consumer of record
+(`MeshPacketProcessor.process_encrypted_packet`) against ciphertext produced by
+the exact firmware algorithm — AES-128-CTR, 16-byte default channel key
+`d4f1bb3a20290759f0bcffabcf4e6901`, nonce = `packetId(8 LE) ‖ from(4 LE) ‖
+0(4)` — wrapped in a real `ServiceEnvelope`:
+
+- **FIXED derivation: 3/3** default-channel packets decoded to a valid `Data`
+  with the correct plaintext.
+- **OLD derivation (SHA-256 → AES-256): 0/3** — could not decode wire-format
+  AES-128 ciphertext. The fix is load-bearing, not cosmetic.
+
+This also exercised (and confirmed) the module's envelope-parse +
+`from`/`id`/`channel` extraction on real captured `ServiceEnvelope` bytes (60
+live packets pulled from `mqtt.meshtastic.org` parsed cleanly).
+
+**Residual gap (honest):** no packet encrypted-and-transmitted by a physical
+radio over RF was decrypted this session — the public broker carries only
+*decoded* default-channel traffic (gateways republish plaintext), and the
+operator's local broker carried only the private `meshforge` channel (custom
+PSK, not in the client config) and PKI traffic, with no live default-channel
+`/e/` packets. The wire-format reference test is the faithful stand-in: it runs
+the identical algorithm a radio uses. To fully close the gap, decrypt one live
+default-channel `/e/` packet from a radio that has MQTT encryption enabled (or
+the operator's `meshforge` channel with its PSK) through the module.
+
+The `/json/` path (meshtasticd pre-decrypted) is unaffected by this fix either
+way.
 - The TUI Rich-markup-injection finding (PLAUSIBLE HIGH) is the highest-value
   unfixed item: a single hostile NodeInfo packet can persistently DoS the
   operator's primary node view. Good candidate for the next pass.
