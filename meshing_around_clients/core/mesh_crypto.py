@@ -10,7 +10,6 @@ This module provides:
 
 import base64
 import binascii
-import hashlib
 import logging
 import struct
 from dataclasses import dataclass
@@ -64,6 +63,12 @@ except ImportError:
 
 # Meshtastic default channel key (AQ== in base64 = 0x01)
 DEFAULT_CHANNEL_KEY = bytes([0x01])
+
+# The full 16-byte Meshtastic default PSK. A 1-byte "simple" PSK is an index
+# into the default-key family: index N (1-based) is this key with its final
+# byte offset by (N - 1); index 1 (AQ==) is the plain default key. Used as an
+# AES-128 key. (Source: Meshtastic firmware Channel PSK expansion.)
+DEFAULT_PSK_16 = bytes.fromhex("d4f1bb3a20290759f0bcffabcf4e6901")
 
 # Well-known channel presets and their keys
 CHANNEL_PRESETS = {
@@ -141,7 +146,9 @@ class MeshCrypto:
                 self._derived_key = None
                 return True
 
-            raw_key = base64.b64decode(key)
+            # validate=True so a typo'd key (stray non-alphabet chars) is
+            # REJECTED rather than silently truncated to a different key.
+            raw_key = base64.b64decode(key, validate=True)
             if len(raw_key) == 0:
                 return False
 
@@ -155,25 +162,47 @@ class MeshCrypto:
             # TypeError: Non-string/bytes input
             return False
 
-    def _derive_key(self, raw_key: bytes) -> bytes:
+    def _derive_key(self, raw_key: bytes) -> Optional[bytes]:
         """
-        Derive AES-256 key from raw PSK.
+        Derive the AES key bytes from a raw Meshtastic PSK.
 
-        Meshtastic uses SHA-256 to expand short keys to 32 bytes.
+        Meshtastic key rules (must match the firmware, or real traffic never
+        decrypts):
+        - 32 bytes: used directly as an AES-256 key.
+        - 16 bytes: used directly as an AES-128 key.
+        - 1 byte:   an *index* into the default-key family. Index 0 means "no
+                    encryption"; index N (1-based) is the 16-byte default PSK
+                    with its final byte offset by (N - 1). Index 1 (AQ==) is the
+                    plain default key. Result is a 16-byte AES-128 key.
+
+        The AES key length itself selects AES-128 vs AES-256, so we return the
+        raw key bytes rather than always hashing to 32. (The previous SHA-256
+        expansion was self-consistent for loopback but could not interoperate
+        with real radios.)
+
+        Returns None when no usable key can be derived (no-encryption index, or
+        a non-standard length) — the caller treats a falsy derived key as "no
+        key set"; None must never be mapped to a valid-looking key.
         """
-        if len(raw_key) == 32:
+        if len(raw_key) == 1:
+            index = raw_key[0]
+            if index == 0:
+                return None  # 0x00 == "no encryption" channel index
+            key = bytearray(DEFAULT_PSK_16)
+            key[-1] = (key[-1] + index - 1) & 0xFF
+            return bytes(key)
+        if len(raw_key) in (16, 32):
             return raw_key
-        elif len(raw_key) == 16:
-            # 128-bit key, expand with SHA-256
-            return hashlib.sha256(raw_key).digest()
-        elif len(raw_key) == 1:
-            # Single-byte key (like default 0x01)
-            # Expand using the "Meshtastic" salt
-            expanded = b"Meshtastic" + raw_key
-            return hashlib.sha256(expanded).digest()
-        else:
-            # Use SHA-256 for other key sizes
-            return hashlib.sha256(raw_key).digest()
+        # Meshtastic only defines 1/16/32-byte PSKs. A non-standard length can
+        # never interoperate; surface it loudly instead of silently hashing to
+        # a valid-looking 32-byte key (honest-failure-modes: a bad key must not
+        # read as a healthy key).
+        logger.warning(
+            "Non-standard PSK length %d (expected 1, 16, or 32) — cannot derive "
+            "a Meshtastic-compatible key; encryption disabled for this key",
+            len(raw_key),
+        )
+        return None
 
     def _create_nonce(self, packet_id: int, sender: int) -> bytes:
         """

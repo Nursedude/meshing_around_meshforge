@@ -63,7 +63,12 @@ class VersionInfo:
 
 
 def run_command(
-    cmd: List[str], timeout: int = 600, capture: bool = True, sudo: bool = False, cwd: Optional[Path] = None
+    cmd: List[str],
+    timeout: int = 600,
+    capture: bool = True,
+    sudo: bool = False,
+    cwd: Optional[Path] = None,
+    desc: str = "",
 ) -> Tuple[int, str, str]:
     """Run a shell command with optional sudo.
 
@@ -73,10 +78,16 @@ def run_command(
         capture: Whether to capture output
         sudo: Whether to prepend sudo
         cwd: Working directory
+        desc: Optional human-readable description. Accepted for parity with
+            configure_bot.py's fallback shim, which some callers invoke with
+            ``desc=`` — the modular version previously raised TypeError on it,
+            crashing the update / patch-reapply path.
 
     Returns:
         Tuple of (return_code, stdout, stderr)
     """
+    if desc:
+        logger.info("%s...", desc)
     if sudo:
         cmd = ["sudo"] + cmd
 

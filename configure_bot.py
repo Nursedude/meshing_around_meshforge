@@ -1012,6 +1012,56 @@ def install_dependencies(meshing_path: Path, venv_path: Optional[Path] = None) -
     return True
 
 
+def _is_safe_rmtree_target(path: Path) -> bool:
+    """Return True only if `path` is safe to recursively delete as root.
+
+    The install directory is user-typed, and removal runs with root privileges,
+    so a typo like ``/`` or ``/home/pi`` must never be recursively deleted.
+    Refuse root, obvious system directories, any home-directory *root* (a user's
+    home itself, not a subdirectory), and any path shallower than two
+    components below root (e.g. ``/opt`` is refused, ``/opt/meshing-around`` is
+    allowed).
+    """
+    try:
+        resolved = path.expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+
+    parts = resolved.parts  # ('/', 'opt', 'meshing-around')
+    if len(parts) < 3:
+        # '/' or a single top-level dir like '/opt', '/home', '/root'
+        return False
+
+    forbidden_roots = {
+        Path("/"),
+        Path("/bin"),
+        Path("/boot"),
+        Path("/dev"),
+        Path("/etc"),
+        Path("/home"),
+        Path("/lib"),
+        Path("/opt"),
+        Path("/proc"),
+        Path("/root"),
+        Path("/run"),
+        Path("/sbin"),
+        Path("/srv"),
+        Path("/sys"),
+        Path("/tmp"),
+        Path("/usr"),
+        Path("/var"),
+    }
+    if resolved in forbidden_roots:
+        return False
+
+    # A home-directory root itself (/home/<user>) — refuse; a subdirectory of it
+    # (/home/<user>/meshing-around) is fine.
+    if resolved.parent == Path("/home") or resolved.parent == Path("/Users"):
+        return False
+
+    return True
+
+
 def install_meshing_around() -> Tuple[bool, Optional[Path], Optional[Path]]:
     """Download and fully install meshing-around from GitHub
 
@@ -1047,6 +1097,9 @@ This wizard will:
                 success, path = update_meshing_around(install_path)
                 return success, path, None
             elif get_yes_no("Remove and reinstall?", False):
+                if not _is_safe_rmtree_target(install_path):
+                    print_error(f"Refusing to delete unsafe path: {install_path}")
+                    return False, None, None
                 try:
                     shutil.rmtree(install_path)
                     print_success("Removed existing installation")
@@ -1058,6 +1111,9 @@ This wizard will:
         else:
             print_warning("Directory exists but doesn't contain meshing-around")
             if not get_yes_no("Remove and use this directory?", False):
+                return False, None, None
+            if not _is_safe_rmtree_target(install_path):
+                print_error(f"Refusing to delete unsafe path: {install_path}")
                 return False, None, None
             try:
                 shutil.rmtree(install_path)
@@ -1175,8 +1231,22 @@ def create_systemd_service(install_path: Path, venv_path: Optional[Path] = None)
     """Create a systemd service file for meshing-around auto-start"""
     print_section("Create Systemd Service")
 
-    # Get current user
-    username = os.environ.get("USER", os.environ.get("LOGNAME", "pi"))
+    # Get the real invoking user. Under `sudo python3 configure_bot.py` (the
+    # documented mode) $USER is "root", which would silently create the bot
+    # service as User=root — the bot executes network-derived commands, so it
+    # must not run as root. Prefer SUDO_USER (mirrors get_user_home / MF001).
+    username = (
+        os.environ.get("SUDO_USER")
+        or os.environ.get("USER")
+        or os.environ.get("LOGNAME")
+        or "pi"
+    )
+    if username == "root":
+        print_warning(
+            "Creating the service as User=root — the bot will run with full "
+            "privileges. Re-run without sudo, or edit User= in the unit, to "
+            "run it as an unprivileged user."
+        )
 
     # Determine python path
     if venv_path and venv_path.exists():

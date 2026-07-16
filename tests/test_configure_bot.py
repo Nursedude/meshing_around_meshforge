@@ -83,5 +83,31 @@ class TestGetUserHomeFallback(unittest.TestCase):
         self.assertEqual(result, Path("/home/alice"))
 
 
+class TestRmtreeTargetGuard(unittest.TestCase):
+    """`_is_safe_rmtree_target` must refuse dangerous root-owned deletions."""
+
+    def setUp(self):
+        import importlib
+
+        self.configure_bot = importlib.import_module("configure_bot")
+
+    def test_refuses_root_and_system_dirs(self):
+        for p in ["/", "/home", "/opt", "/etc", "/usr", "/root", "/var", "/boot"]:
+            self.assertFalse(
+                self.configure_bot._is_safe_rmtree_target(Path(p)),
+                f"should refuse {p}",
+            )
+
+    def test_refuses_home_directory_root(self):
+        # A user's home itself must be refused (typo'd install dir).
+        self.assertFalse(self.configure_bot._is_safe_rmtree_target(Path("/home/pi")))
+        self.assertFalse(self.configure_bot._is_safe_rmtree_target(Path("/home/alice")))
+
+    def test_allows_install_subdirectory(self):
+        # The intended target — a named subdirectory — is allowed.
+        self.assertTrue(self.configure_bot._is_safe_rmtree_target(Path("/home/pi/meshing-around")))
+        self.assertTrue(self.configure_bot._is_safe_rmtree_target(Path("/opt/meshing-around")))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,6 @@ Protobuf decode tests are skipped when meshtastic is not installed.
 """
 
 import base64
-import hashlib
 import struct
 import sys
 import unittest
@@ -18,6 +17,7 @@ from meshing_around_clients.core.mesh_crypto import (
     CHANNEL_PRESETS,
     CRYPTO_AVAILABLE,
     DEFAULT_CHANNEL_KEY,
+    DEFAULT_PSK_16,
     PROTOBUF_AVAILABLE,
     DecryptedPacket,
     MeshCrypto,
@@ -125,38 +125,63 @@ class TestMeshCryptoSetKey(unittest.TestCase):
         # Use a string with characters that are truly invalid for base64
         self.assertFalse(crypto.set_key("\x00\x01\x02==="))
 
+    def test_set_key_rejects_non_base64_chars(self):
+        # A typo'd key with stray non-alphabet characters must be REJECTED, not
+        # silently truncated to a different key (base64.b64decode drops such
+        # characters unless validate=True).
+        crypto = MeshCrypto()
+        self.assertFalse(crypto.set_key("Secret Key!"))
+
 
 class TestMeshCryptoKeyDerivation(unittest.TestCase):
     """Test key derivation logic."""
 
     def test_32_byte_key_used_directly(self):
+        # 32-byte PSK: used verbatim as an AES-256 key.
         crypto = MeshCrypto()
         key = b"\xab" * 32
         derived = crypto._derive_key(key)
         self.assertEqual(derived, key)
+        self.assertEqual(len(derived), 32)
 
-    def test_16_byte_key_expanded_with_sha256(self):
+    def test_16_byte_key_used_directly_as_aes128(self):
+        # 16-byte PSK: used verbatim as an AES-128 key (Meshtastic spec) — NOT
+        # SHA-256 expanded. The old self-consistent SHA-256 path could not
+        # interoperate with real radios.
         crypto = MeshCrypto()
         key = b"\xcd" * 16
         derived = crypto._derive_key(key)
-        expected = hashlib.sha256(key).digest()
-        self.assertEqual(derived, expected)
-        self.assertEqual(len(derived), 32)
+        self.assertEqual(derived, key)
+        self.assertEqual(len(derived), 16)
 
-    def test_1_byte_key_expanded_with_salt(self):
+    def test_1_byte_default_index_expands_to_default_psk(self):
+        # AQ== (index 1) expands to the well-known 16-byte Meshtastic default
+        # PSK, used as AES-128.
         crypto = MeshCrypto()
-        key = bytes([0x01])
-        derived = crypto._derive_key(key)
-        expected = hashlib.sha256(b"Meshtastic" + key).digest()
-        self.assertEqual(derived, expected)
-        self.assertEqual(len(derived), 32)
+        derived = crypto._derive_key(bytes([0x01]))
+        self.assertEqual(derived, DEFAULT_PSK_16)
+        self.assertEqual(derived.hex(), "d4f1bb3a20290759f0bcffabcf4e6901")
+        self.assertEqual(len(derived), 16)
 
-    def test_other_length_key_uses_sha256(self):
+    def test_1_byte_nondefault_index_offsets_last_byte(self):
+        # Index N (1-based) offsets the default PSK's final byte by (N - 1).
         crypto = MeshCrypto()
-        key = b"\xef" * 8  # 8 bytes — not 1, 16, or 32
-        derived = crypto._derive_key(key)
-        expected = hashlib.sha256(key).digest()
-        self.assertEqual(derived, expected)
+        derived = crypto._derive_key(bytes([0x02]))
+        expected = bytearray(DEFAULT_PSK_16)
+        expected[-1] = (expected[-1] + 1) & 0xFF
+        self.assertEqual(derived, bytes(expected))
+        self.assertEqual(len(derived), 16)
+
+    def test_1_byte_zero_index_means_no_encryption(self):
+        # Index 0 is the "no encryption" channel; derivation yields no key.
+        crypto = MeshCrypto()
+        self.assertIsNone(crypto._derive_key(bytes([0x00])))
+
+    def test_nonstandard_length_key_rejected(self):
+        # Meshtastic only defines 1/16/32-byte PSKs; anything else cannot
+        # interoperate and must NOT be silently mapped to a valid-looking key.
+        crypto = MeshCrypto()
+        self.assertIsNone(crypto._derive_key(b"\xef" * 8))
 
 
 class TestMeshCryptoNonce(unittest.TestCase):

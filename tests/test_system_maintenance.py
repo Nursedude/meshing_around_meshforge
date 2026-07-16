@@ -115,6 +115,16 @@ class TestRunCommand(unittest.TestCase):
             run_command(["ls"], cwd=Path("/tmp"))
             self.assertEqual(mock_run.call_args[1]["cwd"], "/tmp")
 
+    def test_desc_kwarg_accepted(self):
+        """configure_bot.py passes desc= (matching the fallback shim); the
+        modular run_command must accept it rather than raising TypeError and
+        crashing the update / patch-reapply path."""
+        with patch("meshing_around_clients.setup.system_maintenance.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            # Must not raise TypeError: unexpected keyword argument 'desc'
+            ret, _, _ = run_command(["echo", "x"], desc="Doing a thing", capture=False)
+            self.assertEqual(ret, 0)
+
 
 class TestShouldCheckUpdates(unittest.TestCase):
     """Test should_check_updates scheduling logic."""
