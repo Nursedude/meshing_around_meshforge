@@ -714,7 +714,7 @@ class TestTcpHostPortParsing(unittest.TestCase):
 
         config = Config()
         config.interface.type = "tcp"
-        config.interface.hostname = "192.168.86.248"
+        config.interface.hostname = "192.0.2.50"
         api = MeshtasticAPI(config)
 
         mock_tcp = MagicMock()
@@ -727,7 +727,7 @@ class TestTcpHostPortParsing(unittest.TestCase):
         ):
             api._create_interface("tcp")
 
-        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=4403, connectTimeoutSeconds=30.0, noNodes=True)
+        mock_tcp.assert_called_once_with("192.0.2.50", portNumber=4403, connectTimeoutSeconds=30.0, noNodes=True)
 
     def test_hostname_with_port_parses_correctly(self):
         """Hostname with :port should extract and pass portNumber."""
@@ -738,7 +738,7 @@ class TestTcpHostPortParsing(unittest.TestCase):
 
         config = Config()
         config.interface.type = "tcp"
-        config.interface.hostname = "192.168.86.248:9443"
+        config.interface.hostname = "192.0.2.50:9443"
         api = MeshtasticAPI(config)
 
         mock_tcp = MagicMock()
@@ -751,7 +751,7 @@ class TestTcpHostPortParsing(unittest.TestCase):
         ):
             api._create_interface("tcp")
 
-        mock_tcp.assert_called_once_with("192.168.86.248", portNumber=9443, connectTimeoutSeconds=30.0, noNodes=True)
+        mock_tcp.assert_called_once_with("192.0.2.50", portNumber=9443, connectTimeoutSeconds=30.0, noNodes=True)
 
     def test_device_path_preserves_full_hostname(self):
         """connection_info.device_path should keep the original host:port string."""
