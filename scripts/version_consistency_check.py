@@ -28,6 +28,7 @@ Portability note: the SSOT file differs per repo (``src/__version__.py`` here,
 the meshing_around client). ``--ssot`` overrides the default so the same guard
 can be mirrored to the sisters as a follow-on.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -202,16 +203,16 @@ def check(
     except ConsumerUnreadable as e:
         problems.append(f"{README} unreadable — cannot verify: {e}")
     readers = [
-        (f"{PYPROJECT} [project].version",
-         lambda: read_pyproject_version(repo_root)),
-        (f"{README} version badge",
-         lambda: read_readme_badge_version(repo_root, readme_text)
-         if readme_text is not None else None),
-        (f"{README} 'What Works (v…)' heading",
-         lambda: read_readme_whatworks_version(repo_root, readme_text)
-         if readme_text is not None else None),
-        (f"{CHANGELOG} newest release heading",
-         lambda: read_changelog_version(repo_root)),
+        (f"{PYPROJECT} [project].version", lambda: read_pyproject_version(repo_root)),
+        (
+            f"{README} version badge",
+            lambda: read_readme_badge_version(repo_root, readme_text) if readme_text is not None else None,
+        ),
+        (
+            f"{README} 'What Works (v…)' heading",
+            lambda: read_readme_whatworks_version(repo_root, readme_text) if readme_text is not None else None,
+        ),
+        (f"{CHANGELOG} newest release heading", lambda: read_changelog_version(repo_root)),
     ]
     checked_any = False
     for label, reader in readers:
@@ -236,11 +237,12 @@ def check(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="MeshForge version-consistency guard")
-    parser.add_argument("--repo", default=None,
-                        help="Repo root (default: the repo this script lives in)")
-    parser.add_argument("--ssot", default=None,
-                        help="SSOT file relative to repo root (default: auto-detect "
-                             f"from {', '.join(CANDIDATE_SSOTS)})")
+    parser.add_argument("--repo", default=None, help="Repo root (default: the repo this script lives in)")
+    parser.add_argument(
+        "--ssot",
+        default=None,
+        help="SSOT file relative to repo root (default: auto-detect " f"from {', '.join(CANDIDATE_SSOTS)})",
+    )
     args = parser.parse_args()
 
     repo_root = args.repo or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -1918,9 +1918,9 @@ class _BaseConfigEditor(Screen):
             if self._config_path.exists():
                 bak = self._config_path.with_suffix(".ini.bak")
                 _shutil.copy2(str(self._config_path), str(bak))
-            with open(self._config_path, "w") as f:
-                self._parser.write(f)
-            self._config_path.chmod(0o600)
+            from meshing_around_clients.core.config import _atomic_write_parser
+
+            _atomic_write_parser(self._parser, self._config_path)
             self._dirty = False
             self._template_keys.clear()
             self._post_save_hook()

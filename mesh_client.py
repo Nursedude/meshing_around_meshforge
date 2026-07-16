@@ -736,17 +736,11 @@ def save_config(config: ConfigParser):
             shutil.copy2(str(CONFIG_FILE), str(bak_path))
         except OSError as e:
             log(f"Warning: could not create config backup: {e}", "WARN")
-    tmp_path = str(CONFIG_FILE) + ".tmp"
-    try:
-        fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            config.write(f)
-        os.replace(tmp_path, str(CONFIG_FILE))
-    except OSError:
-        # Fallback: direct write if atomic rename fails (e.g. cross-device)
-        with open(CONFIG_FILE, "w") as f:
-            config.write(f)
-        os.chmod(CONFIG_FILE, 0o600)
+    # Atomic: temp-in-same-dir + fsync + os.replace (the same-dir temp means no
+    # cross-device rename, so the old best-effort fallback is unnecessary).
+    from meshing_around_clients.core.config import _atomic_write_parser
+
+    _atomic_write_parser(config, CONFIG_FILE)
     log(f"Saved config to {CONFIG_FILE}", "OK")
 
 
@@ -916,11 +910,11 @@ def apply_bot_profile(profile_id: str) -> bool:
                 for field in ("hostname", "http_url"):
                     upstream.remove_option(iface_section, field)
 
-    # Save
+    # Save (atomic — torn-write safe on SD-card Pis)
     try:
-        with open(upstream_path, "w") as f:
-            upstream.write(f)
-        upstream_path.chmod(0o600)
+        from meshing_around_clients.core.config import _atomic_write_parser
+
+        _atomic_write_parser(upstream, upstream_path)
         log(f"Bot profile '{profile_id}' applied to {upstream_path}", "OK")
         return True
     except OSError as e:
@@ -1089,11 +1083,11 @@ def import_upstream_config(source_path: str):
                 for key, value in parser.items(section):
                     new_parser.set(section, key, value)
 
-        # Save
+        # Save (atomic)
+        from meshing_around_clients.core.config import _atomic_write_parser
+
         dest = Path(CONFIG_FILE)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with open(dest, "w") as f:
-            new_parser.write(f)
+        _atomic_write_parser(new_parser, dest)
 
         log(f"Config imported (basic) to: {dest}", "OK")
         log("Note: Install dependencies for full format conversion", "INFO")

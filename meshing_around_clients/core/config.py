@@ -34,7 +34,7 @@ def _atomic_write_parser(parser: configparser.ConfigParser, path: Path, mode: in
     try:
         os.chmod(tmp, mode)
         with os.fdopen(fd, "w") as f:
-            parser.write(f)
+            parser.write(f)  # atomic-write-ok: writes the TEMP file, replaced below
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, path)

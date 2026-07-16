@@ -76,6 +76,14 @@ if [ "$RUN_LINT" -eq 1 ]; then
         print_fail "flake8 errors"
         RC=1
     fi
+
+    print_step "Lint — config-atomicity (MED3: no torn config writes)"
+    if python3 scripts/lint_config_atomicity.py ; then
+        print_ok "config-atomicity clean"
+    else
+        print_fail "non-atomic config write(s) — route through _atomic_write_parser"
+        RC=1
+    fi
 fi
 
 if [ "$RUN_TESTS" -eq 1 ] && [ "$RC" -eq 0 ]; then

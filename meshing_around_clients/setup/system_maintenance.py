@@ -601,9 +601,9 @@ def migrate_config(config_path: Path, progress_callback: Optional[Callable[[str]
 
     if changes:
         try:
-            with open(config_path, "w") as f:
-                parser.write(f)
-            os.chmod(config_path, 0o600)
+            from meshing_around_clients.core.config import _atomic_write_parser
+
+            _atomic_write_parser(parser, Path(config_path))
         except OSError as e:
             report(f"Failed to write migrated config: {e}")
             return []

@@ -1821,9 +1821,9 @@ def save_config(config: configparser.ConfigParser, config_file: str):
         except OSError:
             pass  # Best effort backup
     try:
-        with open(config_file, "w") as f:
-            config.write(f)
-        os.chmod(config_file, 0o600)
+        from meshing_around_clients.core.config import _atomic_write_parser
+
+        _atomic_write_parser(config, Path(config_file))
         print_success(f"\nConfiguration saved to {config_file}")
     except OSError as e:
         print_error(f"Failed to save config: {e}")

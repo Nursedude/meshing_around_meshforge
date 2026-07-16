@@ -458,8 +458,9 @@ class WhiptailTUI:
                 if path.exists():
                     bak = path.with_suffix(".ini.bak")
                     shutil.copy2(str(path), str(bak))
-                with open(path, "w") as f:
-                    parser.write(f)
+                from meshing_around_clients.core.config import _atomic_write_parser
+
+                _atomic_write_parser(parser, path)
             except OSError as e:
                 msgbox(f"Save failed:\n{e}", title="Error")
                 # Roll back the in-memory change so we don't show stale state

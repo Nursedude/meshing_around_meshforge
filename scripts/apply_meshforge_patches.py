@@ -40,6 +40,7 @@ Usage:
     python3 scripts/apply_meshforge_patches.py [/path/to/meshing-around]
 If no path is given, common install locations are probed.
 """
+
 from __future__ import annotations
 
 import os
@@ -53,7 +54,7 @@ MARKER = "MeshForge: strip leading bridge routing tags"
 _ANCHOR_BOT = "message_log_string = message_string.replace('\\r', ' ').replace('\\n', ' ')"
 _BLOCK_BOT = (
     "            # MeshForge: strip leading bridge routing tags (e.g. [RNS:xxxx], [Mesh:xxxx], [ch0:?])\n"
-    "            # so bridged commands like \"[RNS:3dfb] wx\" parse as commands. Log keeps the original tag.\n"
+    '            # so bridged commands like "[RNS:3dfb] wx" parse as commands. Log keeps the original tag.\n'
     "            if isinstance(message_string, str):\n"
     "                _mf_ms = message_string.lstrip()\n"
     "                while _mf_ms.startswith('['):\n"
@@ -67,10 +68,8 @@ _BLOCK_BOT = (
 # ---- modules/system.py: enumerate fix -----------------------------------------
 _SYS_REPLACEMENTS = [
     (
-        "            for m in message_list:\n"
-        "                chunkOf = f\"{message_list.index(m)+1}/{num_chunks}\"\n",
-        "            for idx, m in enumerate(message_list):\n"
-        "                chunkOf = f\"{idx+1}/{num_chunks}\"\n",
+        "            for m in message_list:\n" '                chunkOf = f"{message_list.index(m)+1}/{num_chunks}"\n',
+        "            for idx, m in enumerate(message_list):\n" '                chunkOf = f"{idx+1}/{num_chunks}"\n',
     ),
     (
         "                if (message_list.index(m)+1) % 4 == 0:\n",
@@ -103,7 +102,7 @@ _BYTE_SAFE_HELPER = (
     "    # MeshForge: guarantee no emitted chunk exceeds the Meshtastic byte\n"
     "    # budget. messageChunker sized chunks in characters; emoji (3-4 bytes\n"
     "    # each) overflowed the ~237-byte payload limit, making sendText raise\n"
-    "    # \"Data payload too big\" and abort send_message's loop (dropping the\n"
+    '    # "Data payload too big" and abort send_message\'s loop (dropping the\n'
     "    # rest of a multi-part reply). Re-split on UTF-8 byte boundaries:\n"
     "    # newline, then word, then a codepoint-safe hard split. ASCII is\n"
     "    # unaffected. Idempotent: chunks already within budget pass through.\n"
@@ -163,11 +162,7 @@ _BYTE_SAFE_HELPER = (
 
 # Both messageChunker return paths, as one contiguous (and therefore
 # unambiguous) anchor — the chunked path and the short-message early return.
-_BYTE_SAFE_RETURNS_OLD = (
-    "            return final_message_list\n"
-    "\n"
-    "        return message\n"
-)
+_BYTE_SAFE_RETURNS_OLD = "            return final_message_list\n" "\n" "        return message\n"
 _BYTE_SAFE_RETURNS_NEW = (
     "            return _meshforge_byte_safe(final_message_list)\n"
     "\n"
@@ -226,7 +221,7 @@ _REPLY_DEDUP_GUARD = (
     "                        # still sees both copies); suppress only the second\n"
     "                        # REPLY. See _meshforge_reply_is_dup.\n"
     "                        if _meshforge_reply_is_dup(message_log_string, message_string, channel_number, message_from_id):\n"
-    "                            logger.info(f\"Device:{rxNode} Channel:{channel_number} MeshForge: dropped duplicate reply (dual-bridged), kept receipt above\")\n"
+    '                            logger.info(f"Device:{rxNode} Channel:{channel_number} MeshForge: dropped duplicate reply (dual-bridged), kept receipt above")\n'
     "                            return\n"
 )
 
@@ -237,8 +232,12 @@ def _log(msg: str) -> None:
 
 def find_meshing_around() -> Path | None:
     home = Path(os.path.expanduser("~"))
-    for p in (home / "meshing-around", Path("/opt/meshing-around"),
-              Path.cwd().parent / "meshing-around", Path.cwd() / "meshing-around"):
+    for p in (
+        home / "meshing-around",
+        Path("/opt/meshing-around"),
+        Path.cwd().parent / "meshing-around",
+        Path.cwd() / "meshing-around",
+    ):
         if (p / "mesh_bot.py").exists():
             return p
     return None
@@ -288,12 +287,10 @@ def patch_system_byte_safe(path: Path) -> bool:
         _log(f"{f.name}: byte-safe chunking already present")
         return False
     if _BYTE_SAFE_ANCHOR not in text or _BYTE_SAFE_RETURNS_OLD not in text:
-        _log(f"WARNING {f.name}: byte-safe anchor not found — skipping "
-             f"(upstream may have changed messageChunker)")
+        _log(f"WARNING {f.name}: byte-safe anchor not found — skipping " f"(upstream may have changed messageChunker)")
         return False
     # Insert the helper just above messageChunker, then rewire its returns.
-    text = text.replace(
-        _BYTE_SAFE_ANCHOR, _BYTE_SAFE_HELPER + _BYTE_SAFE_ANCHOR, 1)
+    text = text.replace(_BYTE_SAFE_ANCHOR, _BYTE_SAFE_HELPER + _BYTE_SAFE_ANCHOR, 1)
     text = text.replace(_BYTE_SAFE_RETURNS_OLD, _BYTE_SAFE_RETURNS_NEW, 1)
     f.write_text(text)
     _log(f"{f.name}: byte-safe chunking applied")
@@ -313,16 +310,14 @@ def patch_reply_dedup(path: Path) -> bool:
     elif _REPLY_DEDUP_DEF_ANCHOR not in text:
         _log(f"WARNING {f.name}: onReceive anchor not found — skipping reply-dedup helper")
     else:
-        text = text.replace(
-            _REPLY_DEDUP_DEF_ANCHOR, _REPLY_DEDUP_HELPER + _REPLY_DEDUP_DEF_ANCHOR, 1)
+        text = text.replace(_REPLY_DEDUP_DEF_ANCHOR, _REPLY_DEDUP_HELPER + _REPLY_DEDUP_DEF_ANCHOR, 1)
         changed = True
     if _REPLY_DEDUP_GUARD_MARKER in text:
         _log(f"{f.name}: reply-dedup guard already present")
     elif _REPLY_DEDUP_ANCHOR not in text:
         _log(f"WARNING {f.name}: ReceivedChannel anchor not found — skipping reply-dedup guard")
     else:
-        text = text.replace(
-            _REPLY_DEDUP_ANCHOR, _REPLY_DEDUP_ANCHOR + _REPLY_DEDUP_GUARD, 1)
+        text = text.replace(_REPLY_DEDUP_ANCHOR, _REPLY_DEDUP_ANCHOR + _REPLY_DEDUP_GUARD, 1)
         changed = True
     if changed:
         f.write_text(text)
