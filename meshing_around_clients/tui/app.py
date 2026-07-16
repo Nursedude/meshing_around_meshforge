@@ -107,6 +107,19 @@ def _rm_safe(value) -> str:
     return rich_escape(str(value))
 
 
+_SECRET_KEY_HINTS = ("password", "passwd", "secret", "token", "psk", "auth")
+
+
+def _is_secret_key(key: str) -> bool:
+    """True for a config key whose VALUE is a credential and must not be shown
+    on screen or echoed as a prompt default (mqtt.password, encryption_key/PSK,
+    api tokens, ...)."""
+    if not key:
+        return False
+    k = key.lower()
+    return k == "key" or k.endswith("_key") or any(h in k for h in _SECRET_KEY_HINTS)
+
+
 class PlainTextTUI:
     """Minimal plain-text fallback TUI for when Rich is not available.
 
@@ -1703,12 +1716,21 @@ class _BaseConfigEditor(Screen):
                 table.add_row(f"[{sec_style}][{section}][/{sec_style}]", "", "")
             else:
                 is_default = (section, key) in self._template_keys
-                val_display = value if value else "[dim](empty)[/dim]"
-                if value and value.lower() in ("true", "false"):
-                    val_color = "green" if value.lower() == "true" else "red"
-                    val_display = f"[{val_color}]{value}[/{val_color}]"
-                if value and len(value) > 50:
-                    val_display = value[:47] + "..."
+                if _is_secret_key(key):
+                    # Never render a credential on screen — mask, don't leak
+                    # length either.
+                    val_display = "[red]********[/red]" if value else "[dim](empty)[/dim]"
+                else:
+                    # Escape the config value too — a value containing '[' would
+                    # otherwise MarkupError and blank the editor (same class as
+                    # the network-name render DoS).
+                    safe = _rm_safe(value)
+                    val_display = safe if value else "[dim](empty)[/dim]"
+                    if value and value.lower() in ("true", "false"):
+                        val_color = "green" if value.lower() == "true" else "red"
+                        val_display = f"[{val_color}]{safe}[/{val_color}]"
+                    elif value and len(value) > 50:
+                        val_display = _rm_safe(value[:47]) + "..."
                 if is_default and not is_selected:
                     val_display = f"[dim italic]{val_display} (default)[/dim italic]"
 
@@ -1806,12 +1828,23 @@ class _BaseConfigEditor(Screen):
 
     def _edit_value(self, section: str, key: str, current: str) -> None:
         """Edit a config value using prompt mode."""
+        secret = _is_secret_key(key)
         with self.app._prompt_mode():
             self.console.clear()
             self.console.print(f"[cyan][{section}] {key}[/cyan]")
-            self.console.print(f"[dim]Current: {current}[/dim]\n")
+            if secret:
+                # Don't print the credential; don't echo it as a default either.
+                shown = "********" if current else "(empty)"
+                self.console.print(f"[dim]Current: {shown}[/dim]")
+                self.console.print("[dim](input hidden — leave blank to keep current)[/dim]\n")
+            else:
+                self.console.print(f"[dim]Current: {_rm_safe(current)}[/dim]\n")
             try:
-                new_val = Prompt.ask("New value", default=current)
+                if secret:
+                    entered = Prompt.ask("New value", password=True, default="")
+                    new_val = entered if entered else current
+                else:
+                    new_val = Prompt.ask("New value", default=current)
                 if new_val != current:
                     self._parser.set(section, key, new_val)
                     self._template_keys.discard((section, key))
@@ -2975,7 +3008,10 @@ class MeshingAroundTUI:
                     else:
                         port = _coerce_int(Prompt.ask("Broker port", default=str(default_port)), default_port)
                     username = Prompt.ask("Username", default=mqtt.username or "")
-                    password = Prompt.ask("Password", default=mqtt.password or "")
+                    # Hidden input; don't echo the stored password as a visible
+                    # default. Blank keeps the current password.
+                    _pw = Prompt.ask("Password (blank = keep current)", password=True, default="")
+                    password = _pw if _pw else (mqtt.password or "")
                     topic = Prompt.ask("Topic root", default=mqtt.topic_root or "msh/US")
                     channel = Prompt.ask("Channel", default=mqtt.channel or "LongFast")
                     try:

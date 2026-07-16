@@ -626,3 +626,51 @@ class TestCorruptConfigLeavesWitness(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAtomicConfigWrite(unittest.TestCase):
+    """save() must be torn-write safe: temp-in-same-dir + os.replace, so a
+    crash/power-loss mid-write can never leave a truncated config on an SD-card
+    Pi (it would strand the operator's only config)."""
+
+    def _tmpdir(self):
+        import shutil
+
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        return Path(d)
+
+    def test_atomic_write_produces_file_perms_and_no_leftover_tmp(self):
+        import configparser
+
+        from meshing_around_clients.core.config import _atomic_write_parser
+
+        p = self._tmpdir() / "sub" / "mesh_client.ini"  # parent auto-created
+        parser = configparser.ConfigParser()
+        parser["mqtt"] = {"broker": "b.internal", "password": "sekret"}
+        _atomic_write_parser(parser, p)
+
+        self.assertTrue(p.exists())
+        self.assertEqual(oct(p.stat().st_mode & 0o777), "0o600")
+        self.assertEqual([f for f in os.listdir(p.parent) if f.endswith(".tmp")], [])
+        rp = configparser.ConfigParser()
+        rp.read(p)
+        self.assertEqual(rp["mqtt"]["broker"], "b.internal")
+
+    def test_failed_write_preserves_old_file_and_cleans_tmp(self):
+        from meshing_around_clients.core.config import _atomic_write_parser
+
+        d = self._tmpdir()
+        p = d / "mesh_client.ini"
+        p.write_text("[old]\nk = v\n")  # pre-existing good config
+
+        class BadParser:
+            def write(self, f):
+                raise IOError("disk full mid-write")
+
+        with self.assertRaises(IOError):
+            _atomic_write_parser(BadParser(), p)
+
+        # Atomicity: the old file is untouched and no temp is left behind.
+        self.assertEqual(p.read_text(), "[old]\nk = v\n")
+        self.assertEqual([f for f in os.listdir(d) if f.endswith(".tmp")], [])

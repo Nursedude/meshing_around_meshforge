@@ -7,6 +7,7 @@ import configparser
 import logging
 import os
 import pathlib
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -14,6 +15,35 @@ from typing import Any, Dict, List, Optional
 from .global_config import load_global_config
 
 logger = logging.getLogger(__name__)
+
+
+def _atomic_write_parser(parser: configparser.ConfigParser, path: Path, mode: int = 0o600) -> None:
+    """Write a ConfigParser to ``path`` atomically.
+
+    Truncate-in-place (``O_TRUNC`` then ``write``) leaves a torn or empty config
+    if the box loses power mid-write — a real hazard on the fleet's SD-card Pis,
+    and it strands the operator's only config. Instead write a temp file in the
+    SAME directory, ``fsync`` it, then ``os.replace`` (an atomic rename on
+    POSIX): a reader always sees either the intact old file or the fully-written
+    new one, never a half. Restrictive ``0o600`` is set before the rename so the
+    secret-bearing file is never briefly world-readable.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        os.chmod(tmp, mode)
+        with os.fdopen(fd, "w") as f:
+            parser.write(f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def get_user_home() -> Path:
@@ -1017,14 +1047,13 @@ class Config:
             self._parser.set("logging", "backup_count", str(self.logging.backup_count))
 
             if self.config_path:
-                # Atomic open with restricted permissions (TOCTOU-safe)
-                fd = os.open(str(self.config_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-                with os.fdopen(fd, "w") as f:
-                    self._parser.write(f)
+                # Atomic: temp-in-same-dir + fsync + os.replace (torn-write safe
+                # on the fleet's SD-card Pis); 0o600 set before the rename.
+                _atomic_write_parser(self._parser, self.config_path)
 
             return True
         except (configparser.Error, OSError) as e:
-            print(f"Error saving config: {e}")
+            logger.error("Failed to save config to %s: %s", self.config_path, e)
             return False
 
     def to_dict(self) -> Dict[str, Any]:

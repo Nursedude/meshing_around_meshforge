@@ -204,8 +204,15 @@ class LinkQuality:
 
     @property
     def quality_percent(self) -> int:
-        """Estimate link quality as percentage (0-100)."""
+        """Estimate link quality as percentage (0-100).
+
+        Returns 0 when SNR is unknown (None) — a node heard with no SNR yet
+        must not crash every consumer that reads quality (the ``>=`` on None
+        raised TypeError and took down the whole TUI on one such node).
+        """
         # Based on typical Meshtastic SNR ranges (-20 to +10 dB)
+        if self.snr_avg is None:
+            return 0
         if self.snr_avg >= 10:
             return 100
         elif self.snr_avg <= -15:

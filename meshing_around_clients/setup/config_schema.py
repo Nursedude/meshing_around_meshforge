@@ -14,12 +14,14 @@ Compatible with:
 """
 
 import configparser
-import os
+import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class ConnectionType(Enum):
@@ -791,14 +793,15 @@ class ConfigLoader:
         parser.set("auto_update", "notify_only", str(config.auto_update.notify_only))
 
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            # Atomic open with restricted permissions (TOCTOU-safe)
-            fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as f:
-                parser.write(f)
+            # Atomic: temp-in-same-dir + fsync + os.replace (torn-write safe on
+            # SD-card Pis); shares the one writer with core.config so the two
+            # save paths can't drift (honest_failure_modes #5).
+            from meshing_around_clients.core.config import _atomic_write_parser
+
+            _atomic_write_parser(parser, path)
             return True
         except OSError as e:
-            print(f"Error saving config: {e}")
+            logger.error("Failed to save config to %s: %s", path, e)
             return False
 
 

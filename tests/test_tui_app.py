@@ -1786,5 +1786,58 @@ class TestHostileNodeNameRenderDoS(unittest.TestCase):
         self._render(self._DevicesScreen(self.tui).render())
 
 
+@unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
+class TestSecretMasking(unittest.TestCase):
+    """Credentials (mqtt.password, encryption_key/PSK, tokens) must never be
+    rendered on screen or echoed as a prompt default in the config editors."""
+
+    def test_is_secret_key_classification(self):
+        from meshing_around_clients.tui.app import _is_secret_key
+
+        for k in (
+            "password",
+            "mqtt_password",
+            "encryption_key",
+            "rpc_key",
+            "api_token",
+            "smtp_secret",
+            "psk",
+            "authkey",
+        ):
+            self.assertTrue(_is_secret_key(k), f"{k} should be secret")
+        for k in ("broker", "topic_root", "username", "port", "node_id", "channel", "bot_name"):
+            self.assertFalse(_is_secret_key(k), f"{k} should NOT be secret")
+
+    def test_editor_render_masks_secret_values(self):
+        import configparser
+
+        from meshing_around_clients.tui.app import ClientConfigScreen, MeshingAroundTUI
+
+        tui = MeshingAroundTUI(config=Config(), demo_mode=True)
+        ed = ClientConfigScreen(tui)
+        parser = configparser.ConfigParser()
+        parser["mqtt"] = {
+            "broker": "broker.internal",
+            "username": "meshuser",
+            "password": "topsecret123",
+            "encryption_key": "deadbeefpsk==",
+        }
+        ed._parser = parser
+        ed._config_path = None
+        ed._loaded = True
+        ed._rebuild_items()
+
+        from rich.console import Console
+
+        console = Console(file=io.StringIO(), width=200)
+        console.print(ed.render())
+        out = console.file.getvalue()
+
+        self.assertNotIn("topsecret123", out)  # password masked
+        self.assertNotIn("deadbeefpsk", out)  # PSK masked
+        self.assertIn("********", out)  # mask shown
+        self.assertIn("broker.internal", out)  # non-secret still visible
+
+
 if __name__ == "__main__":
     unittest.main()

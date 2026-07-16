@@ -265,5 +265,44 @@ class TestPiZeroAutoDefault(unittest.TestCase):
         self.assertFalse(captured.get("called"), "run_application should not fire on non-Pi-Zero")
 
 
+class TestWhiptailNoneNodeGuards(unittest.TestCase):
+    """A node with None role/snr/latitude (malformed packet or partial
+    deserialize) must not crash whiptail rendering — run_interactive() catches
+    only KeyboardInterrupt, so one such node would exit the WHOLE TUI."""
+
+    def _none_node(self):
+        from meshing_around_clients.core.models import LinkQuality, Node, Position
+
+        return Node(
+            node_id="!badnode",
+            node_num=0xBAD,
+            long_name="Broken",
+            role=None,  # crashes `node.role.value`
+            link_quality=LinkQuality(snr=None, snr_avg=None, rssi=None),  # crashes `snr:.1f`
+            position=Position(latitude=None, longitude=1.234),  # crashes `latitude:.5f`
+        )
+
+    def test_role_value_helper_is_none_safe(self):
+        from meshing_around_clients.tui.whiptail_tui import _role_value
+
+        self.assertEqual(_role_value(self._none_node()), "UNKNOWN")
+
+    def test_show_node_detail_survives_none_fields(self):
+        tui = _make_tui()
+        node = self._none_node()
+        with patch("meshing_around_clients.tui.whiptail_tui.msgbox") as mbox:
+            # Must not raise (was AttributeError/TypeError before the guards).
+            tui._show_node_detail(node.node_id, [node])
+        mbox.assert_called_once()
+
+    def test_node_menu_desc_survives_none_snr(self):
+        # The node-list menu builds "SNR:{snr:.0f}" — None snr must not crash it.
+        tui = _make_tui()
+        node = self._none_node()
+        tui.api.network.add_node(node)
+        with patch("meshing_around_clients.tui.whiptail_tui.menu", return_value=None):
+            tui._show_nodes()  # builds the menu desc for each node
+
+
 if __name__ == "__main__":
     unittest.main()

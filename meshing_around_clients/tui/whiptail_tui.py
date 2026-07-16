@@ -27,6 +27,13 @@ _SEVERITY_LABELS: Dict[int, str] = {
 }
 
 
+def _role_value(node) -> str:
+    """Node role name, None-safe. A node whose role is None (malformed packet /
+    partial deserialize) would otherwise raise AttributeError and — since
+    run_interactive() catches only KeyboardInterrupt — crash the whole TUI."""
+    return node.role.value if node.role else "UNKNOWN"
+
+
 class WhiptailTUI:
     """Whiptail-based monitoring TUI for Raspberry Pi.
 
@@ -174,7 +181,7 @@ class WhiptailTUI:
         # Build menu items — show up to 20 nodes
         items: list = []
         for node in nodes[:20]:
-            snr = f"SNR:{node.link_quality.snr:.0f}" if node.link_quality else ""
+            snr = f"SNR:{node.link_quality.snr:.0f}" if node.link_quality and node.link_quality.snr is not None else ""
             bat = ""
             if node.telemetry and node.telemetry.battery_level is not None:
                 bat = f"Bat:{node.telemetry.battery_level}%"
@@ -198,7 +205,11 @@ class WhiptailTUI:
         lines = [
             f"Name:     {node.display_name}",
             f"ID:       {node.node_id}",
-            f"Role:     {node.role.value}",
+            # role/snr/lat can arrive None from a malformed packet or a partial
+            # deserialize; whiptail's run_interactive() catches only
+            # KeyboardInterrupt, so one such node would crash the WHOLE TUI.
+            # Guard each format (parity with app.py's `node.role else UNKNOWN`).
+            f"Role:     {node.role.value if node.role else 'UNKNOWN'}",
             f"Hardware: {node.hardware_model}",
             f"Heard:    {node.time_since_heard}",
             f"Hops:     {node.hop_count}",
@@ -206,8 +217,11 @@ class WhiptailTUI:
 
         if node.link_quality:
             lq = node.link_quality
-            lines.append(f"SNR:      {lq.snr:.1f} dB (avg {lq.snr_avg:.1f})")
-            lines.append(f"RSSI:     {lq.rssi} dBm")
+            if lq.snr is not None:
+                avg = lq.snr_avg if lq.snr_avg is not None else lq.snr
+                lines.append(f"SNR:      {lq.snr:.1f} dB (avg {avg:.1f})")
+            if lq.rssi is not None:
+                lines.append(f"RSSI:     {lq.rssi} dBm")
             lines.append(f"Quality:  {lq.quality_percent}%")
 
         if node.telemetry:
@@ -223,7 +237,9 @@ class WhiptailTUI:
 
         if node.position and (node.position.latitude or node.position.longitude):
             p = node.position
-            lines.append(f"Position: {p.latitude:.5f}, {p.longitude:.5f}")
+            lat = p.latitude if p.latitude is not None else 0.0
+            lon = p.longitude if p.longitude is not None else 0.0
+            lines.append(f"Position: {lat:.5f}, {lon:.5f}")
             if p.altitude:
                 lines.append(f"Altitude: {p.altitude}m")
 
@@ -294,9 +310,9 @@ class WhiptailTUI:
             return
 
         # Build a simple tree: group nodes by role, show neighbors
-        routers = [n for n in nodes if n.role.value in ("ROUTER", "ROUTER_CLIENT")]
-        clients = [n for n in nodes if n.role.value in ("CLIENT", "CLIENT_MUTE")]
-        repeaters = [n for n in nodes if n.role.value == "REPEATER"]
+        routers = [n for n in nodes if _role_value(n) in ("ROUTER", "ROUTER_CLIENT")]
+        clients = [n for n in nodes if _role_value(n) in ("CLIENT", "CLIENT_MUTE")]
+        repeaters = [n for n in nodes if _role_value(n) == "REPEATER"]
 
         lines = [f"Mesh Network ({len(nodes)} nodes)", ""]
 
@@ -304,7 +320,7 @@ class WhiptailTUI:
             lines.append(f"Routers ({len(routers)}):")
             for node in routers[:10]:
                 n_count = len(node.neighbors) if node.neighbors else 0
-                lines.append(f"  +-- {node.display_name} ({node.role.value}) - {n_count} neighbors")
+                lines.append(f"  +-- {node.display_name} ({_role_value(node)}) - {n_count} neighbors")
                 for nb_id in (node.neighbors or [])[:5]:
                     nb = next((n for n in nodes if n.node_id == nb_id), None)
                     nb_name = nb.display_name if nb else nb_id
