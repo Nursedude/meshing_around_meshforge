@@ -15,6 +15,7 @@ Extracted from configure_bot.py for reusability.
 import configparser
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
@@ -761,6 +762,52 @@ def install_python_dependencies(
 # =============================================================================
 
 
+def _sanitize_unit_value(value: str, field: str) -> str:
+    """Reject a value that would inject directives into a systemd unit.
+
+    Every interpolated value is written into a ROOT-owned unit file. A newline
+    (or any C0 control) lets a caller-supplied value smuggle extra ``[Service]``
+    directives (``ExecStartPre=``, ``User=root``, ...) into that unit, which
+    systemd would run at boot. Refuse loudly rather than write a booby-trapped
+    unit. (Keep in sync with configure_bot._sanitize_unit_value.)
+    """
+    text = str(value)
+    if any(ord(c) < 0x20 for c in text):
+        raise ValueError(f"{field} contains a control character; refusing to build a systemd unit")
+    return text
+
+
+def _render_systemd_unit(exec_start, working_dir, user, description, venv_path) -> str:
+    """Build the unit text with every interpolated value validated (S4)."""
+    es = _sanitize_unit_value(exec_start, "exec_start")
+    wd = _sanitize_unit_value(str(working_dir), "working_dir")
+    usr = _sanitize_unit_value(user, "user")
+    desc = _sanitize_unit_value(description, "description")
+    venv_env = f"Environment=VIRTUAL_ENV={_sanitize_unit_value(str(venv_path), 'venv_path')}" if venv_path else ""
+    return f"""[Unit]
+Description={desc}
+After=network.target
+
+[Service]
+Type=simple
+User={usr}
+WorkingDirectory={wd}
+ExecStart={es}
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+{venv_env}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+# A systemd unit name must not smuggle a path (traversal into the unit filename)
+# or control chars — restrict to the character class systemd itself allows.
+_VALID_UNIT_NAME = re.compile(r"^[A-Za-z0-9_.@-]+$")
+
+
 def create_systemd_service(
     name: str,
     exec_start: str,
@@ -783,27 +830,15 @@ def create_systemd_service(
         Tuple of (success, message)
     """
     if user is None:
-        user = os.environ.get("USER", os.environ.get("LOGNAME", "pi"))
+        user = os.environ.get("SUDO_USER") or os.environ.get("USER") or os.environ.get("LOGNAME") or "pi"
 
-    venv_env = f"Environment=VIRTUAL_ENV={venv_path}" if venv_path else ""
+    if not _VALID_UNIT_NAME.match(name or ""):
+        return False, f"Invalid service name {name!r}: use [A-Za-z0-9_.@-] only"
 
-    service_content = f"""[Unit]
-Description={description}
-After=network.target
-
-[Service]
-Type=simple
-User={user}
-WorkingDirectory={working_dir}
-ExecStart={exec_start}
-Restart=on-failure
-RestartSec=10
-Environment=PYTHONUNBUFFERED=1
-{venv_env}
-
-[Install]
-WantedBy=multi-user.target
-"""
+    try:
+        service_content = _render_systemd_unit(exec_start, working_dir, user, description, venv_path)
+    except ValueError as e:
+        return False, str(e)
 
     service_path = Path(f"/etc/systemd/system/{name}.service")
 

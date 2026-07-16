@@ -109,5 +109,39 @@ class TestRmtreeTargetGuard(unittest.TestCase):
         self.assertTrue(self.configure_bot._is_safe_rmtree_target(Path("/opt/meshing-around")))
 
 
+class TestSystemdUnitBuilder(unittest.TestCase):
+    """S4: the meshing-around unit builder must quote ExecStart paths (so an
+    install dir with a space stays one argv token) and refuse control-char /
+    quote injection into a root-owned unit."""
+
+    def setUp(self):
+        import importlib
+
+        self.cb = importlib.import_module("configure_bot")
+
+    def test_execstart_paths_quoted_for_spaces(self):
+        unit = self.cb._build_meshing_around_unit(
+            Path("/home/pi/mesh bot"), "/home/pi/mesh bot/.venv/bin/python3", "pi", None
+        )
+        self.assertIn('ExecStart="/home/pi/mesh bot/.venv/bin/python3" "/home/pi/mesh bot/mesh_bot.py"', unit)
+
+    def test_user_and_workdir_present(self):
+        unit = self.cb._build_meshing_around_unit(Path("/opt/app"), "/usr/bin/python3", "meshuser", None)
+        self.assertIn("User=meshuser", unit)
+        self.assertIn("WorkingDirectory=/opt/app", unit)
+
+    def test_rejects_newline_injection(self):
+        with self.assertRaises(ValueError):
+            self.cb._build_meshing_around_unit(Path("/opt/x\nExecStartPre=/bin/evil"), "/usr/bin/python3", "pi", None)
+
+    def test_rejects_quote_in_path(self):
+        with self.assertRaises(ValueError):
+            self.cb._build_meshing_around_unit(Path('/opt/x"y'), "/usr/bin/python3", "pi", None)
+
+    def test_rejects_newline_in_username(self):
+        with self.assertRaises(ValueError):
+            self.cb._build_meshing_around_unit(Path("/opt/app"), "/usr/bin/python3", "pi\nExecStartPre=/bin/evil", None)
+
+
 if __name__ == "__main__":
     unittest.main()

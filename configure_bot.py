@@ -1227,6 +1227,60 @@ This wizard will:
     return len(errors) == 0, install_path, venv_path
 
 
+def _sanitize_unit_value(value: str, field: str) -> str:
+    """Reject a value that would inject directives into a systemd unit.
+
+    Written into a ROOT-owned unit file, a newline (or any C0 control) lets a
+    value smuggle extra ``[Service]`` directives that systemd runs at boot; a
+    double-quote would break the ExecStart quoting below. Refuse loudly rather
+    than write a booby-trapped unit. (Keep in sync with
+    system_maintenance._sanitize_unit_value.)
+    """
+    text = str(value)
+    if any(ord(c) < 0x20 for c in text) or '"' in text:
+        raise ValueError(f"{field} contains a control character or quote; refusing to build a systemd unit")
+    return text
+
+
+def _build_meshing_around_unit(install_path: Path, python_path: str, username: str, venv_path: Optional[Path]) -> str:
+    """Render the meshing-around unit with validated, argv-safe values (S4).
+
+    ExecStart paths are double-quoted so an install path containing a space
+    stays a single argv token instead of splitting the command (systemd honours
+    double-quotes in Exec lines). WorkingDirectory takes its value literally, so
+    it is validated but not quoted.
+    """
+    inst = _sanitize_unit_value(str(install_path), "install_path")
+    py = _sanitize_unit_value(python_path, "python_path")
+    user = _sanitize_unit_value(username, "username")
+    venv_env = ""
+    if venv_path:
+        venv_env = f"Environment=VIRTUAL_ENV={_sanitize_unit_value(str(venv_path), 'venv_path')}"
+    return f"""[Unit]
+Description=Meshing-Around Meshtastic Bot
+After=network.target
+
+[Service]
+Type=simple
+User={user}
+WorkingDirectory={inst}
+ExecStart="{py}" "{inst}/mesh_bot.py"
+Restart=on-failure
+RestartSec=10
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+{venv_env}
+
+# Logging
+StandardOutput=append:/var/log/meshing-around.log
+StandardError=append:/var/log/meshing-around.log
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
 def create_systemd_service(install_path: Path, venv_path: Optional[Path] = None) -> bool:
     """Create a systemd service file for meshing-around auto-start"""
     print_section("Create Systemd Service")
@@ -1235,12 +1289,7 @@ def create_systemd_service(install_path: Path, venv_path: Optional[Path] = None)
     # documented mode) $USER is "root", which would silently create the bot
     # service as User=root — the bot executes network-derived commands, so it
     # must not run as root. Prefer SUDO_USER (mirrors get_user_home / MF001).
-    username = (
-        os.environ.get("SUDO_USER")
-        or os.environ.get("USER")
-        or os.environ.get("LOGNAME")
-        or "pi"
-    )
+    username = os.environ.get("SUDO_USER") or os.environ.get("USER") or os.environ.get("LOGNAME") or "pi"
     if username == "root":
         print_warning(
             "Creating the service as User=root — the bot will run with full "
@@ -1254,31 +1303,13 @@ def create_systemd_service(install_path: Path, venv_path: Optional[Path] = None)
     else:
         python_path = "/usr/bin/python3"
 
-    # Create service file content
+    # Create service file content (validated + argv-safe — S4)
     service_name = "meshing-around"
-    service_content = f"""[Unit]
-Description=Meshing-Around Meshtastic Bot
-After=network.target
-
-[Service]
-Type=simple
-User={username}
-WorkingDirectory={install_path}
-ExecStart={python_path} {install_path}/mesh_bot.py
-Restart=on-failure
-RestartSec=10
-
-# Environment
-Environment=PYTHONUNBUFFERED=1
-{f'Environment=VIRTUAL_ENV={venv_path}' if venv_path else ''}
-
-# Logging
-StandardOutput=append:/var/log/meshing-around.log
-StandardError=append:/var/log/meshing-around.log
-
-[Install]
-WantedBy=multi-user.target
-"""
+    try:
+        service_content = _build_meshing_around_unit(install_path, python_path, username, venv_path)
+    except ValueError as e:
+        print_error(f"Cannot create service: {e}")
+        return False
 
     # Preview the service
     print_info("Service file preview:")

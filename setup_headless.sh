@@ -389,7 +389,7 @@ Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${BOT_DIR}
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash ${BOT_DIR}/launch.sh mesh
+ExecStart=/bin/bash "${BOT_DIR}/launch.sh" mesh
 Restart=on-failure
 RestartSec=10
 

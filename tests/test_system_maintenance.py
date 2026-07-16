@@ -885,3 +885,54 @@ class TestRollbackToVersion(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSystemdUnitInjectionGuard(unittest.TestCase):
+    """S4: every value interpolated into a ROOT-owned unit must be validated —
+    a newline lets a caller smuggle extra [Service] directives systemd runs at
+    boot; a bad service name is path traversal into the unit filename."""
+
+    def test_render_rejects_newline_in_exec_start(self):
+        from meshing_around_clients.setup.system_maintenance import _render_systemd_unit
+
+        with self.assertRaises(ValueError):
+            _render_systemd_unit(
+                "/usr/bin/python3 bot.py\nExecStartPre=/bin/rm -rf /", Path("/opt/app"), "pi", "desc", None
+            )
+
+    def test_render_rejects_newline_in_working_dir(self):
+        from meshing_around_clients.setup.system_maintenance import _render_systemd_unit
+
+        with self.assertRaises(ValueError):
+            _render_systemd_unit("/usr/bin/true", "/opt/app\nUser=root", "pi", "desc", None)
+
+    def test_render_rejects_newline_in_user(self):
+        from meshing_around_clients.setup.system_maintenance import _render_systemd_unit
+
+        with self.assertRaises(ValueError):
+            _render_systemd_unit("/usr/bin/true", Path("/opt/app"), "pi\nExecStartPre=/bin/evil", "desc", None)
+
+    def test_render_normal_contains_fields(self):
+        from meshing_around_clients.setup.system_maintenance import _render_systemd_unit
+
+        content = _render_systemd_unit("/usr/bin/python3 bot.py", Path("/opt/app"), "pi", "My Bot", None)
+        self.assertIn("ExecStart=/usr/bin/python3 bot.py", content)
+        self.assertIn("User=pi", content)
+        self.assertIn("WorkingDirectory=/opt/app", content)
+        self.assertIn("Description=My Bot", content)
+
+    def test_create_service_rejects_traversal_name(self):
+        from meshing_around_clients.setup.system_maintenance import create_systemd_service
+
+        ok, msg = create_systemd_service("../../evil", "/usr/bin/true", Path("/opt/app"))
+        self.assertFalse(ok)
+        self.assertIn("Invalid service name", msg)
+
+    def test_create_service_rejects_injected_exec_start(self):
+        # No systemctl/cp runs because rendering fails first (no run_command patch
+        # needed — a raised/handled ValueError returns before any subprocess).
+        from meshing_around_clients.setup.system_maintenance import create_systemd_service
+
+        ok, msg = create_systemd_service("mybot", "/usr/bin/true\nExecStartPre=/bin/evil", Path("/opt/app"))
+        self.assertFalse(ok)
+        self.assertIn("control character", msg)
