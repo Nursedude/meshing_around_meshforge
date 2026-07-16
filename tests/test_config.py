@@ -589,5 +589,40 @@ class TestConfigLoadMalformedValues(unittest.TestCase):
         self.assertEqual(cfg.tui.message_history, 750)
 
 
+class TestCorruptConfigLeavesWitness(unittest.TestCase):
+    """A corrupt EXISTING config must not silently fall back to defaults (the
+    public broker + public creds). load() must leave a witness (load_error +
+    an ERROR log), not a stdout flash the TUI overwrites."""
+
+    def _write(self, text):
+        fd, path = tempfile.mkstemp(suffix=".ini")
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def test_corrupt_config_sets_load_error_and_logs(self):
+        # No section header -> configparser.MissingSectionHeaderError.
+        bad = self._write("this is not a valid ini file\nkey = value\n")
+        with self.assertLogs("meshing_around_clients.core.config", level="ERROR") as cm:
+            cfg = Config(bad)
+        self.assertIsNotNone(cfg.load_error)
+        self.assertTrue(any("Failed to load config" in m for m in cm.output))
+
+    def test_corrupt_config_still_exposes_default_broker_but_flagged(self):
+        # The dataclass default broker is the PUBLIC one; the point of the fix
+        # is that the fallback is now OBSERVABLE (load_error set), not silent.
+        bad = self._write("]]]not ini[[[\n")
+        cfg = Config(bad)
+        self.assertIsNotNone(cfg.load_error)
+        self.assertEqual(cfg.mqtt.broker, "mqtt.meshtastic.org")  # default, now witnessed
+
+    def test_valid_config_has_no_load_error(self):
+        good = self._write("[mqtt]\nbroker = broker.example.internal\n")
+        cfg = Config(good)
+        self.assertIsNone(cfg.load_error)
+        self.assertEqual(cfg.mqtt.broker, "broker.example.internal")
+
+
 if __name__ == "__main__":
     unittest.main()

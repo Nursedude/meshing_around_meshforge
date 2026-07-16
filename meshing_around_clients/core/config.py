@@ -428,6 +428,16 @@ class Config:
         # Config format tracking
         self.config_format = "meshforge"  # or "upstream"
 
+        # Witness for a FAILED load of an existing config file. A corrupt
+        # mesh_client.ini otherwise leaves every section at its dataclass
+        # default — including the PUBLIC broker (mqtt.meshtastic.org) and its
+        # public credentials — and the client would silently connect there
+        # instead of the operator's private broker. load() records the error
+        # here (and logs it) so the UI / a probe can surface the degradation
+        # instead of it vanishing into a stdout flash (honest_failure_modes:
+        # every swallow leaves a witness; a bad load must not read as healthy).
+        self.load_error: Optional[str] = None
+
         # MeshForge ecosystem-wide shared identity layer.
         # Reads ~/.config/meshforge/global.ini if present and seeds the
         # dataclasses BEFORE per-app load() runs, so per-app INI values
@@ -436,7 +446,18 @@ class Config:
         self._apply_global_defaults()
 
         if self.config_path and self.config_path.exists():
-            self.load()
+            if not self.load():
+                # An EXISTING file that failed to load is a degraded state, not
+                # a fresh install — surface it loudly. load() has already set
+                # self.load_error and logged; warn that defaults (incl. the
+                # public broker) are now in effect so this is never silent.
+                logger.warning(
+                    "Config at %s failed to load — running on DEFAULTS "
+                    "(broker=%s). Fix the file or the client may connect to the "
+                    "PUBLIC broker with public credentials.",
+                    self.config_path,
+                    self.mqtt.broker,
+                )
 
     def _apply_global_defaults(self) -> None:
         """Seed dataclass fields from ~/.config/meshforge/global.ini.
@@ -736,9 +757,14 @@ class Config:
             # Apply environment variable overrides (highest priority)
             self._apply_env_overrides()
 
+            self.load_error = None  # a clean load clears any prior witness
             return True
         except (configparser.Error, OSError) as e:
-            print(f"Error loading config: {e}")
+            # Witness, don't print: a bare print() corrupts the TUI and is
+            # overwritten instantly, so the operator never sees WHY the client
+            # fell back to defaults (the public broker). Record + log instead.
+            self.load_error = str(e)
+            logger.error("Failed to load config from %s: %s", self.config_path, e)
             return False
 
     def _load_upstream_interface_fallback(self) -> None:
