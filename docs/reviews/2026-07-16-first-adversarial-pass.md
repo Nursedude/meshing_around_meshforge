@@ -58,13 +58,25 @@ Raspberry Pis. Those two facts anchor severity.
   Now `load_error` witness + ERROR log + a WARNING naming the effective default
   broker. +3 tests.
 
-## Open — PLAUSIBLE, not verified (triage before acting) — remaining MED cluster
+## Item-3 MED cluster — ALL FIXED (2026-07-16, commit `86a78c9`)
 
-Still queued from item 3: **secrets rendered unmasked** in the TUI config editors
-(mqtt.password / encryption_key shown plaintext), **whiptail TUI crashes on one
-malformed node** (`node.role.value`/`snr` formatting on `None`), and **non-atomic
-config writes** (`config.py`/`config_schema.py` `save()` truncate-in-place, no
-temp+rename → torn INI on power loss). Each still needs line-verification.
+- **Secrets rendered unmasked (CONFIRMED)** — mqtt.password / encryption_key were
+  shown plaintext in the editor Value column, in `_edit_value`'s "Current:" line,
+  and as a visible `Prompt.ask` default. Now `_is_secret_key` + `"********"` mask,
+  hidden (`password=True`) prompts, no echoed default; non-secret values are also
+  rich-escaped (closes a config-value markup-DoS).
+- **Whiptail crashes the whole TUI on one malformed node (CONFIRMED)** —
+  `role.value`/`snr`/`latitude` on `None`. Now `_role_value` + per-site None
+  guards, plus a ROOT-CAUSE fix of `LinkQuality.quality_percent` (`snr_avg >= 10`
+  on None) so every consumer is safe — a deeper blind spot the test surfaced.
+- **Non-atomic config writes (CONFIRMED)** — `O_TRUNC`-then-write left a torn INI
+  on power loss (SD-card Pis). Now one shared `_atomic_write_parser` (temp +
+  fsync + `os.replace`, 0o600 before rename) for both save paths.
+
++9 tests. This closes every item from the first-pass triage list. The remaining
+open findings below are the ones NOT on that list — still PLAUSIBLE, unverified,
+and a good worklist for the next (possibly cheaper) pass now that the repo is
+charted.
 
 ## Open — PLAUSIBLE, not verified this pass (triage before acting)
 
