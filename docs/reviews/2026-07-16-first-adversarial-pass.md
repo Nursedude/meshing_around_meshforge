@@ -39,16 +39,32 @@ Raspberry Pis. Those two facts anchor severity.
 
 ---
 
-## Open — CONFIRMED, not fixed this pass (queued for triage)
+## Fixed in follow-up passes (2026-07-16, same day)
 
-- **S4 (HIGH→robustness) — systemd unit built by f-string interpolation of
-  `username`/`install_path`/`python_path`** (`configure_bot.py:1189-1211`,
-  `system_maintenance.py:779-797`). An install path with a space breaks
-  `ExecStart` into the wrong argv (service flaps under `Restart=on-failure`);
-  the library-API `exec_start`/`working_dir` values are newline-injection
-  capable into a root-run unit. Fix: validate/quote, reject newlines, prefer a
-  drop-in with `ExecStart` as an explicit argv. Same pattern unquoted in
-  `setup_headless.sh:314-330,380-398`.
+- **S4 (HIGH→robustness) — systemd-unit f-string injection / unquoted ExecStart**
+  — FIXED, commit `2af1db3`. `_sanitize_unit_value` rejects C0 controls in every
+  interpolated value; ExecStart paths are double-quoted (spaces stay one argv
+  token); service names validated against `[A-Za-z0-9_.@-]`; `setup_headless.sh`
+  mesh_bot heredoc quoted. +11 tests.
+- **TUI Rich-markup render-DoS (was PLAUSIBLE HIGH → CONFIRMED, corrected)** —
+  FIXED, commit `3f6682f`. `_rm_safe` escapes every network-derived string at the
+  Nodes/Topology/Devices/Channels/Routes render sites + the typed search query.
+  ⚠️ The finding's example trigger `"[/"` does NOT crash (Rich renders incomplete
+  markup literally) — the real trigger is a close-with-no-open `"[/]"`/`"[/red]"`;
+  verified live and corrected. +4 tests incl. a self-checking harness.
+- **Config silent public-broker fallback (was PLAUSIBLE MED → CONFIRMED)** —
+  FIXED, commit `580d529`. `Config.__init__` discarded `load()`'s return; a
+  corrupt private config silently kept the public-broker + public-creds defaults.
+  Now `load_error` witness + ERROR log + a WARNING naming the effective default
+  broker. +3 tests.
+
+## Open — PLAUSIBLE, not verified (triage before acting) — remaining MED cluster
+
+Still queued from item 3: **secrets rendered unmasked** in the TUI config editors
+(mqtt.password / encryption_key shown plaintext), **whiptail TUI crashes on one
+malformed node** (`node.role.value`/`snr` formatting on `None`), and **non-atomic
+config writes** (`config.py`/`config_schema.py` `save()` truncate-in-place, no
+temp+rename → torn INI on power loss). Each still needs line-verification.
 
 ## Open — PLAUSIBLE, not verified this pass (triage before acting)
 
