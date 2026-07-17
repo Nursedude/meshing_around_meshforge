@@ -170,6 +170,49 @@ line-verified. Grouped by surface; ranked roughly by the reviewer's severity.
 *(Full reviewer detail with line numbers was captured in the session transcript;
 this file is the durable triage list.)*
 
+---
+
+## SECOND PASS — verification triage (2026-07-16, Fable 5)
+
+Four adversarial verifiers (one per surface) re-checked every open finding
+against HEAD `ffc4233`, refute-by-default, reconciling against the fixes that
+already landed. Suite at pass start: **1058 passed, exit 0**. Verdicts:
+
+| ID | Finding | Verdict | Sev (verified) |
+|----|---------|---------|-----|
+| **A1** | config editor bakes template defaults + commented examples into live config on `_save` (#62 trap) | **CONFIRMED** | **HIGH** |
+| B1 | control-char / ANSI injection from mesh text+names into the console logger | CONFIRMED | MED |
+| B2 | `get_geojson`→unlocked `get_nodes()` → export thread dies on `RuntimeError` → frozen geojson read as live | CONFIRMED | MED |
+| B3 | unbounded `_decrypt_warn_last` keyed by attacker channel name (siblings are bounded) | CONFIRMED | MED |
+| B4 | `AttributeError` on type-confused JSON uncaught + not counted → blinds malformed-rate signal | CONFIRMED | MED |
+| A2 | header/footer render exception → eternal frozen frame presented as live | CONFIRMED | MED (no attacker trigger at HEAD) |
+| A3a | ANSI injection in `setup/whiptail.py` plain-text fallback (network names/text) | CONFIRMED | MED/MED-HIGH |
+| A3c | bare `int()` in `config_schema.py` `SentryConfig`/`AltitudeAlertConfig.from_upstream` (helper `_coerce_int` exists, unused) | CONFIRMED | MED |
+| C1 | `apply_meshforge_patches.py` non-atomic in-place write of live `mesh_bot.py`, compile-after-write, no backup (truncation happened once) | CONFIRMED | MED |
+| C2 | apt sites lack `DEBIAN_FRONTEND=noninteractive`/`--force-confold` → conffile prompt hangs then dpkg SIGKILLed mid-txn | CONFIRMED | MED(-HIGH) |
+| C3 | `dpkg -l`/`-s` rc=0 for removed-but-not-purged (empirically proven) → skipped installs | CONFIRMED | MED |
+| C4 | git pull main→master→develop merges alt branch into current, reports success | CONFIRMED | MED |
+| C5 | `git stash pop` rc ignored → MeshForge patches conflict-stranded while "Updated" reported | CONFIRMED | MED |
+| C6 | `verify_bot_running` bare `python3` + `pgrep -f` overmatch + 3s-alive; venv-miss = false FAILURE (stderr→DEVNULL) | CONFIRMED | LOW-MED |
+| A3b | `mesh_client.py load_config()` own loader unguarded (crashes not coerces); missing-file→public-broker default | PARTIAL | MED |
+| A3d | IPv6 broker `rsplit(":",1)` mangle at 4 sites (numeric last group); 7× duplicated parser is the real smell | PARTIAL | LOW-MED |
+| B5 | node fields mutated off `network._lock` (GIL masks on CPython today) | CONFIRMED | LOW |
+| C7 | `setup_headless.sh` `set -e` kills `print_summary`; unquoted `$USER`. SMTP-secret leg REFUTED (public demo creds only; Python writers fixed by ffc4233) | PARTIAL | LOW |
+| C8 | `whiptail.py` `_reset_terminal` `TimeoutExpired` escapes `except OSError` + fd leak; `_fallback_yesno` Ctrl-C→default_yes. "implicit answer via timeout" REFUTED (re-prompts) | PARTIAL | LOW |
+| D1 | multi-key first-parse-wins false-accept: real (no portnum-vocab gate, 3-key loop) but measured **0/1e6** fake text/position — content uncontrollable random garbage; node-touch already keyless-reachable | PARTIAL | LOW (filed MED) |
+| D2 | `decrypt()` collapses backend-absent/raised/empty into `b""`; real gap = broken `cryptography` swallowed with NO witness, `result.error` discarded everywhere → operator sees no cause | PARTIAL | LOW |
+
+**Cross-cutting (next-pass candidates, not fixed here):** (1) B1/B2/B4/B5
+share the honest-failure signature — closeable at the ingestion boundary
+(scrub + type-guard + snapshot) rather than per-handler. (2) A1/A3b/A3d trace
+to **duplicated config machinery** (`mesh_client.py` raw ConfigParser /
+`core/config.py` typed `Config` / `config_schema.py` `ConfigLoader` / app.py
+`_BaseConfigEditor`) — a single `parse_broker()` + one loader (or a lint)
+would collapse the drift class.
+
+### Fix log (second pass, red-test-first, suite re-derived per commit)
+_(updated as each batch lands)_
+
 ## Crypto fix — field-test result (2026-07-16, same session)
 
 **VERIFIED interoperable at the Meshtastic wire-format level.** The fixed

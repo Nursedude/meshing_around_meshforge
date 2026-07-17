@@ -36,6 +36,32 @@ VALID_RSSI_RANGE = (-200, 0)  # dBm
 # UTC-aware minimum datetime for sort sentinels
 DATETIME_MIN_UTC = datetime.min.replace(tzinfo=timezone.utc)
 
+# C0 control chars (0x00-0x1F), DEL (0x7F), and C1 controls (0x80-0x9F) that a
+# mesh/MQTT publisher can smuggle into node names and message text.  Rendered
+# raw to the operator's console/logger they are a terminal-injection primitive
+# (ESC[2J screen-wipe, OSC title/clipboard writes, fake log lines).  We strip
+# them at the model boundary so every downstream consumer — logger, TUI, and
+# the geojson export — inherits clean strings (honest_failure_modes: sanitize
+# once at ingestion, not per-consumer).
+_CONTROL_CHARS = frozenset(range(0x00, 0x20)) | {0x7F} | frozenset(range(0x80, 0xA0))
+
+
+def sanitize_control_chars(value: str, keep_newlines: bool = False) -> str:
+    """Strip terminal-control characters from a network-derived string.
+
+    ``keep_newlines`` retains ``\\n`` and ``\\t`` (legitimate in multi-line
+    message text); node/channel names pass ``False`` so they stay single-line
+    identifiers.  Non-str input is returned unchanged (callers coerce upstream).
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    allowed_newlines = {0x09, 0x0A} if keep_newlines else set()
+    if not any(ord(c) in _CONTROL_CHARS and ord(c) not in allowed_newlines for c in value):
+        return value
+    return "".join(
+        c for c in value if ord(c) not in _CONTROL_CHARS or ord(c) in allowed_newlines
+    )
+
 # --- Message limits ---
 MAX_MESSAGE_BYTES = 228  # Meshtastic maximum text payload length (bytes)
 
@@ -417,6 +443,10 @@ class Node:
     first_seen: Optional[datetime] = None
 
     def __post_init__(self):
+        # Names come straight off RF/MQTT — scrub terminal-control chars here so
+        # the log path, TUI, and geojson export all inherit clean identifiers.
+        self.short_name = sanitize_control_chars(self.short_name)
+        self.long_name = sanitize_control_chars(self.long_name)
         if self.position is None:
             self.position = Position()
         if self.telemetry is None:
@@ -511,6 +541,11 @@ class Message:
     ack_received: bool = False
 
     def __post_init__(self):
+        # Text/sender/channel names are attacker-controllable — scrub control
+        # chars so console logging and TUI render inherit clean strings.
+        self.text = sanitize_control_chars(self.text, keep_newlines=True)
+        self.sender_name = sanitize_control_chars(self.sender_name)
+        self.channel_name = sanitize_control_chars(self.channel_name)
         if self.timestamp is None:
             self.timestamp = datetime.now(timezone.utc)
 
@@ -806,6 +841,67 @@ class MeshNetwork:
             if node_id in self.nodes:
                 self.nodes[node_id].link_quality.update(snr, rssi, hop_count)
                 self._dirty = True
+
+    def touch_node(self, node_id: str, *, online: Optional[bool] = None) -> None:
+        """Stamp ``last_heard`` (and optionally ``is_online``) under the lock.
+
+        Handlers previously rebound these fields on the object returned by
+        ``get_node`` outside the lock — a locking-contract violation the GIL
+        masks on CPython today but that a free-threaded build would race.
+        """
+        with self._lock:
+            node = self.nodes.get(node_id)
+            if node is not None:
+                node.last_heard = datetime.now(timezone.utc)
+                if online is not None:
+                    node.is_online = online
+                self._dirty = True
+
+    def update_node_position(self, node_id: str, position: "Position") -> None:
+        """Set a node's position and stamp last_heard under the lock."""
+        with self._lock:
+            node = self.nodes.get(node_id)
+            if node is not None:
+                if position:
+                    node.position = position
+                node.last_heard = datetime.now(timezone.utc)
+                self._dirty = True
+
+    def update_node_telemetry(self, node_id: str, telemetry: "NodeTelemetry") -> None:
+        """Set a node's telemetry and stamp last_heard under the lock."""
+        with self._lock:
+            node = self.nodes.get(node_id)
+            if node is not None:
+                node.telemetry = telemetry
+                node.last_heard = datetime.now(timezone.utc)
+                self._dirty = True
+
+    def update_node_info(
+        self,
+        node_id: str,
+        *,
+        short_name: Optional[str] = None,
+        long_name: Optional[str] = None,
+        hardware_model: Optional[str] = None,
+    ) -> None:
+        """Update identity fields under the lock, scrubbing control chars.
+
+        ``Node.__post_init__`` only scrubs at construction; a nodeinfo packet
+        that updates an *existing* node must scrub here too, or a hostile
+        ``longName`` reaches the console/TUI unsanitized.
+        """
+        with self._lock:
+            node = self.nodes.get(node_id)
+            if node is None:
+                return
+            if short_name is not None:
+                node.short_name = sanitize_control_chars(short_name)
+            if long_name is not None:
+                node.long_name = sanitize_control_chars(long_name)
+            if hardware_model is not None:
+                node.hardware_model = hardware_model
+            node.last_heard = datetime.now(timezone.utc)
+            self._dirty = True
 
     def cleanup_stale_nodes(self, stale_hours: int = STALE_NODE_HOURS, max_nodes: int = MAX_NODES) -> int:
         """Remove nodes not seen within stale_hours, or prune to max_nodes.

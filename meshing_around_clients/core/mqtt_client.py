@@ -101,6 +101,9 @@ HEALTH_STALE_TIMEOUT = 300  # 5 minutes without messages = stale
 HEALTH_SLOW_TIMEOUT = 60  # 1 minute without messages = slow
 # Alert cooldown pruning
 MAX_ALERT_COOLDOWNS = 1000  # Prune oldest entries when exceeded
+# Decrypt-warning rate-limit map is keyed by attacker-controlled channel name;
+# cap it so a wildcard-subscription flood of unique names can't grow it forever.
+_MAX_DECRYPT_WARN_ENTRIES = 1000
 
 
 class MQTTMeshtasticClient(CallbackMixin):
@@ -310,8 +313,14 @@ class MQTTMeshtasticClient(CallbackMixin):
                     break
                 try:
                     self._write_geojson_export(path_str)
-                except (OSError, ValueError) as e:
-                    logger.debug("Maps export write failed: %s", e)
+                except Exception as e:  # noqa: BLE001 — must not let the export thread die silently
+                    # A dead export thread freezes nodes.geojson while it still
+                    # reads as live.  Catch everything (incl. a RuntimeError from
+                    # a concurrent dict mutation), leave a probe-visible witness,
+                    # and keep the thread alive (honest_failure_modes #9).
+                    with self._stats_lock:
+                        self._stats["maps_export_errors"] = self._stats.get("maps_export_errors", 0) + 1
+                    logger.warning("Maps export write failed (%s): %s", type(e).__name__, e)
 
         self._maps_export_thread = threading.Thread(target=export_loop, daemon=True, name="mqtt-maps-export")
         self._maps_export_thread.start()
@@ -876,22 +885,29 @@ class MQTTMeshtasticClient(CallbackMixin):
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # SEC-18: Truncate exception to avoid leaking message content in logs
             logger.debug("Malformed MQTT message on %s: %s: %.80s", topic, type(e).__name__, str(e))
-            with self._stats_lock:
-                self._stats["messages_rejected"] += 1
-            # SEC-14: Escalate to WARNING if rejection rate is high (thread-safe)
-            with self._stats_lock:
-                self._rejection_window_count += 1
-                now = time.monotonic()
-                if now - self._rejection_window_start > 60:
-                    if self._rejection_window_count > 10:
-                        logger.warning(
-                            "High malformed message rate: %d rejected in last 60s",
-                            self._rejection_window_count,
-                        )
-                    self._rejection_window_start = now
-                    self._rejection_window_count = 0
-        except (KeyError, ValueError, TypeError, struct.error) as e:
+            self._record_rejected()
+        except (KeyError, ValueError, TypeError, AttributeError, struct.error) as e:
+            # AttributeError included: type-confused JSON (a non-dict top level or
+            # payload, which json.loads happily accepts) reaches `.get` on an int/
+            # list/str.  Without this it escaped uncounted, blinding the malformed-
+            # rate health signal to a flood (B4).
             logger.warning("Error parsing MQTT message (%s): %s", type(e).__name__, e)
+            self._record_rejected()
+
+    def _record_rejected(self) -> None:
+        """Count a rejected message and drive the SEC-14 high-rate escalation."""
+        with self._stats_lock:
+            self._stats["messages_rejected"] += 1
+            self._rejection_window_count += 1
+            now = time.monotonic()
+            if now - self._rejection_window_start > 60:
+                if self._rejection_window_count > 10:
+                    logger.warning(
+                        "High malformed message rate: %d rejected in last 60s",
+                        self._rejection_window_count,
+                    )
+                self._rejection_window_start = now
+                self._rejection_window_count = 0
 
     def _parse_topic(self, topic: str) -> Dict[str, Any]:
         """Parse MQTT topic to extract metadata.
@@ -955,10 +971,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             # These can indicate node presence
             node_id = topic_info.get("node_id", "")
             if node_id and node_id.startswith("!"):
-                node = self.network.get_node(node_id)
-                if node:
-                    node.last_heard = datetime.now(timezone.utc)
-                    node.is_online = True
+                self.network.touch_node(node_id, online=True)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # SEC-18: Truncate exception to avoid leaking message content in logs
             logger.debug("Malformed stat message: %s: %.80s", type(e).__name__, str(e))
@@ -968,6 +981,12 @@ class MQTTMeshtasticClient(CallbackMixin):
         try:
             data = json.loads(payload.decode("utf-8"))
             topic_info = topic_info or {}
+
+            # json.loads accepts a bare int/list/str top level; guard before any
+            # .get so a type-confused payload is counted as rejected, not an
+            # uncaught AttributeError that blinds the malformed-rate signal (B4).
+            if not isinstance(data, dict):
+                raise TypeError("JSON top-level is not an object")
 
             # Extract message info
             sender = data.get("from", 0)
@@ -1028,8 +1047,11 @@ class MQTTMeshtasticClient(CallbackMixin):
             # actionable; log at debug only.
             # SEC-18: Truncate exception to avoid leaking message content in logs
             logger.debug("Malformed JSON message on %s: %s: %.80s", topic, type(e).__name__, str(e))
-        except (KeyError, TypeError, ValueError) as e:
+            self._record_rejected()
+        except (KeyError, TypeError, ValueError, AttributeError) as e:
+            # AttributeError: a non-dict `payload` reaching `.get` in a sub-handler.
             logger.warning("JSON message parse error (%s): %s", type(e).__name__, e)
+            self._record_rejected()
 
     def _emit_mqtt_message(self, text: str, meta: dict) -> None:
         """Create and store a Message from MQTT metadata, check commands/keywords."""
@@ -1143,9 +1165,7 @@ class MQTTMeshtasticClient(CallbackMixin):
         node = self.network.get_node(sender_id)
         if node:
             position = self._extract_position(pos_data)
-            if position:
-                node.position = position
-            node.last_heard = datetime.now(timezone.utc)
+            self.network.update_node_position(sender_id, position)
 
     def _handle_telemetry_from_json(self, data: dict, sender_id: str):
         """Handle telemetry from JSON with input validation."""
@@ -1174,7 +1194,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             pressure = safe_float(env_metrics.get("barometricPressure"), 300.0, 1200.0)
             gas_resistance = safe_float(env_metrics.get("gasResistance"), 0.0, 1000000.0)
 
-            node.telemetry = NodeTelemetry(
+            new_telemetry = NodeTelemetry(
                 battery_level=battery if battery is not None else prev.battery_level,
                 voltage=voltage if voltage is not None else prev.voltage,
                 channel_utilization=ch_util if ch_util is not None else prev.channel_utilization,
@@ -1188,10 +1208,10 @@ class MQTTMeshtasticClient(CallbackMixin):
                 gas_resistance=gas_resistance if gas_resistance is not None else prev.gas_resistance,
                 last_updated=datetime.now(timezone.utc),
             )
+            self.network.update_node_telemetry(sender_id, new_telemetry)
             # Surface effective ch_util for the alert checks below, even if
             # this packet didn't carry one (keeps original alert behavior).
-            ch_util = node.telemetry.channel_utilization
-            node.last_heard = datetime.now(timezone.utc)
+            ch_util = new_telemetry.channel_utilization
 
             self._check_battery_alert(node, sender_id)
 
@@ -1238,10 +1258,12 @@ class MQTTMeshtasticClient(CallbackMixin):
             )
             self.network.add_node(node)
 
-        node.short_name = user.get("shortName", node.short_name)
-        node.long_name = user.get("longName", node.long_name)
-        node.hardware_model = user.get("hwModel", node.hardware_model)
-        node.last_heard = datetime.now(timezone.utc)
+        self.network.update_node_info(
+            sender_id,
+            short_name=user.get("shortName"),
+            long_name=user.get("longName"),
+            hardware_model=user.get("hwModel"),
+        )
 
         self._trigger_callbacks("on_node_update", sender_id, False)
 
@@ -1297,10 +1319,28 @@ class MQTTMeshtasticClient(CallbackMixin):
                 # of truth for what actually decoded.
                 with self._stats_lock:
                     self._stats["decrypt_failures"] += 1
-                now = time.monotonic()
-                last = self._decrypt_warn_last.get(channel_name, 0.0)
-                if now - last >= 60.0:
+                    now = time.monotonic()
+                    last = self._decrypt_warn_last.get(channel_name, 0.0)
                     self._decrypt_warn_last[channel_name] = now
+                    # ``channel_name`` is an attacker-controlled topic segment;
+                    # without a cap a wildcard-subscription flood of unique names
+                    # grows this dict without bound (OOM on a Pi Zero).  Prune
+                    # oldest-by-timestamp like the sibling _alert_cooldowns (B3).
+                    if len(self._decrypt_warn_last) > _MAX_DECRYPT_WARN_ENTRIES:
+                        cutoff = now - 300.0
+                        pruned = {
+                            k: v for k, v in self._decrypt_warn_last.items() if v > cutoff
+                        }
+                        # A fast unique-name flood can keep everything inside the
+                        # time window; hard-cap to the newest half so the bound
+                        # holds regardless of arrival rate.
+                        if len(pruned) > _MAX_DECRYPT_WARN_ENTRIES:
+                            keep = sorted(pruned.items(), key=lambda kv: kv[1])[
+                                -(_MAX_DECRYPT_WARN_ENTRIES // 2):
+                            ]
+                            pruned = dict(keep)
+                        self._decrypt_warn_last = pruned
+                if now - last >= 60.0:
                     logger.debug(
                         "MQTT decrypt failed on channel %r (likely custom PSK)",
                         channel_name,
@@ -1916,7 +1956,7 @@ class MQTTMeshtasticClient(CallbackMixin):
 
     def get_nodes(self) -> List[Node]:
         """Get all known nodes."""
-        return list(self.network.nodes.values())
+        return self.network.get_nodes_snapshot()
 
     def get_messages(self, channel: Optional[int] = None, limit: int = 100) -> List[Message]:
         """Get messages."""
@@ -1997,7 +2037,11 @@ class MQTTMeshtasticClient(CallbackMixin):
         Compatible with meshforge's map cache format for Leaflet.js visualization.
         """
         features = []
-        for node in self.get_nodes():
+        # Iterate a locked snapshot, not the live dict: the export runs on its
+        # own thread while cleanup deletes nodes under the lock, and an unlocked
+        # ``list(nodes.values())`` raced that delete → RuntimeError → dead
+        # export thread → silently frozen geojson (B2).
+        for node in self.network.get_nodes_snapshot():
             if node.position and node.position.is_valid():
                 properties = {
                     "node_id": node.node_id,
