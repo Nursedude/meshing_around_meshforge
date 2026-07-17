@@ -70,6 +70,7 @@ def run_command(
     sudo: bool = False,
     cwd: Optional[Path] = None,
     desc: str = "",
+    env: Optional[dict] = None,
 ) -> Tuple[int, str, str]:
     """Run a shell command with optional sudo.
 
@@ -93,7 +94,18 @@ def run_command(
         cmd = ["sudo"] + cmd
 
     try:
-        result = subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout, cwd=str(cwd) if cwd else None)
+        result = subprocess.run(
+            cmd,
+            capture_output=capture,
+            text=True,
+            timeout=timeout,
+            cwd=str(cwd) if cwd else None,
+            env=env,
+            # Never inherit an interactive stdin: a captured apt/dpkg conffile
+            # prompt would otherwise block invisibly until the timeout SIGKILLs
+            # dpkg mid-transaction (C2).
+            stdin=subprocess.DEVNULL,
+        )
         stdout = result.stdout if capture else ""
         stderr = result.stderr if capture else ""
         return result.returncode, stdout, stderr
@@ -103,6 +115,34 @@ def run_command(
         return -1, "", f"Command not found: {cmd[0]}"
     except subprocess.SubprocessError as e:
         return -1, "", str(e)
+
+
+def _apt_run(apt_args: List[str], **kwargs) -> Tuple[int, str, str]:
+    """Run an apt/apt-get command non-interactively (C2).
+
+    Injects ``DEBIAN_FRONTEND=noninteractive`` and keeps modified conffiles
+    (``--force-confold``) so a conffile prompt can never hang the run; combined
+    with ``run_command``'s ``stdin=DEVNULL`` this makes captured apt safe.
+    """
+    env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+    cmd = list(apt_args)
+    # Insert the dpkg confold options right after the apt subcommand.
+    if len(cmd) >= 2:
+        cmd = [cmd[0], cmd[1], "-o", "Dpkg::Options::=--force-confold", *cmd[2:]]
+    return run_command(cmd, env=env, **kwargs)
+
+
+def is_pkg_installed(package: str) -> bool:
+    """True only if *package* is fully installed (C3).
+
+    ``dpkg -l``/``dpkg -s`` exit 0 for a removed-but-not-purged package (``rc``
+    state), so they read as installed and skip a needed reinstall.  Query the
+    Status field explicitly and require ``install ok installed``.
+    """
+    ret, out, _ = run_command(
+        ["dpkg-query", "-W", "-f=${Status}", package], capture=True
+    )
+    return ret == 0 and out.strip() == "install ok installed"
 
 
 # =============================================================================
@@ -133,7 +173,7 @@ def system_update(
 
     # apt update
     report("Updating package lists...")
-    ret, stdout, stderr = run_command(["apt", "update"], sudo=True)
+    ret, stdout, stderr = _apt_run(["apt", "update"], sudo=True)
     if ret != 0:
         result.errors.append(f"apt update failed: {stderr[:100]}")
         result.success = False
@@ -144,7 +184,7 @@ def system_update(
     # apt upgrade
     if upgrade:
         report("Upgrading packages...")
-        ret, stdout, stderr = run_command(["apt", "upgrade", "-y"], sudo=True)
+        ret, stdout, stderr = _apt_run(["apt", "upgrade", "-y"], sudo=True)
         if ret != 0:
             result.errors.append(f"apt upgrade failed: {stderr[:100]}")
             result.success = False
@@ -156,7 +196,7 @@ def system_update(
     # apt autoremove
     if autoremove:
         report("Cleaning up...")
-        run_command(["apt", "autoremove", "-y"], sudo=True)
+        _apt_run(["apt", "autoremove", "-y"], sudo=True)
         messages.append("Cleaned up")
 
     result.message = "; ".join(messages) if messages else "Update completed"
@@ -173,12 +213,11 @@ def install_package(package: str, sudo: bool = True) -> Tuple[bool, str]:
     Returns:
         Tuple of (success, message)
     """
-    # Check if already installed
-    ret, _, _ = run_command(["dpkg", "-l", package], capture=True)
-    if ret == 0:
+    # Check if already installed (Status field, not bare dpkg rc — C3)
+    if is_pkg_installed(package):
         return True, f"{package} already installed"
 
-    ret, _, stderr = run_command(["apt", "install", "-y", package], sudo=sudo)
+    ret, _, stderr = _apt_run(["apt", "install", "-y", package], sudo=sudo)
     if ret == 0:
         return True, f"Installed {package}"
     else:
@@ -196,8 +235,7 @@ def check_required_packages(packages: List[str]) -> List[str]:
     """
     missing = []
     for pkg in packages:
-        ret, _, _ = run_command(["dpkg", "-s", pkg], capture=True)
-        if ret != 0:
+        if not is_pkg_installed(pkg):
             missing.append(pkg)
     return missing
 
@@ -328,17 +366,11 @@ def git_pull(repo_path: Path, remote: str = "origin", branch: str = "main", stas
         if ret != 0:
             result.errors.append(f"Failed to stash changes: {stderr[:50]}")
 
-    # Pull
+    # Pull the requested branch only.  The old code fell back main->master->
+    # develop and merged whichever succeeded INTO the checked-out branch,
+    # reporting "Updated from origin/develop" as a routine update — an
+    # unintended-branch merge masquerading as success (C4).  Fail loud instead.
     ret, stdout, stderr = run_command(["git", "pull", remote, branch], cwd=repo_path)
-
-    if ret != 0:
-        # Try other common branch names
-        for alt_branch in ["master", "develop"]:
-            if alt_branch != branch:
-                ret, stdout, stderr = run_command(["git", "pull", remote, alt_branch], cwd=repo_path)
-                if ret == 0:
-                    branch = alt_branch
-                    break
 
     if ret == 0:
         if "Already up to date" in stdout:
@@ -352,9 +384,20 @@ def git_pull(repo_path: Path, remote: str = "origin", branch: str = "main", stas
         result.message = f"Pull failed: {stderr[:100]}"
         result.errors.append(stderr)
 
-    # Restore stashed changes
+    # Restore stashed changes — a pop conflict must NOT be silent: it strands the
+    # local edits (e.g. the MeshForge source patches) with conflict markers while
+    # the update otherwise reported success (C5).
     if has_changes and stash_changes:
-        run_command(["git", "stash", "pop"], cwd=repo_path)
+        pop_ret, _, pop_stderr = run_command(["git", "stash", "pop"], cwd=repo_path)
+        if pop_ret != 0:
+            result.success = False
+            result.requires_restart = False
+            msg = (
+                "git stash pop failed after pull — local changes are stranded in "
+                f"the stash or left with conflict markers: {pop_stderr[:120]}"
+            )
+            result.errors.append(msg)
+            result.message = f"{result.message} (WARNING: {msg})"
 
     return result
 
@@ -505,9 +548,15 @@ def rollback_to_version(
 
     report(f"Now at {commit_hash}. Run 'Update (git pull)' to return to latest.")
 
-    # Restore stashed changes
+    # Restore stashed changes — surface a pop conflict rather than stranding
+    # the local edits silently (C5).
     if has_changes and stash_changes:
-        run_command(["git", "stash", "pop"], cwd=repo_path)
+        pop_ret, _, pop_stderr = run_command(["git", "stash", "pop"], cwd=repo_path)
+        if pop_ret != 0:
+            result.errors.append(
+                "git stash pop failed after rollback — local changes are stranded "
+                f"in the stash or left with conflict markers: {pop_stderr[:120]}"
+            )
 
     return result
 

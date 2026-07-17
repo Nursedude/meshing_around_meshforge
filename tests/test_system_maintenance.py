@@ -29,6 +29,7 @@ from meshing_around_clients.setup.system_maintenance import (
     git_pull,
     install_package,
     install_python_dependencies,
+    is_pkg_installed,
     list_recent_versions,
     manage_service,
     perform_scheduled_update_check,
@@ -39,6 +40,81 @@ from meshing_around_clients.setup.system_maintenance import (
     update_meshforge,
     update_upstream,
 )
+
+
+class TestInstallerHardeningAdversarial(unittest.TestCase):
+    """C2-C5: apt non-interactive, dpkg status truth, git branch/stash honesty."""
+
+    @patch("meshing_around_clients.setup.system_maintenance.subprocess.run")
+    def test_apt_upgrade_noninteractive_and_stdin_devnull(self, mock_run):
+        # C2: apt must run with DEBIAN_FRONTEND=noninteractive, --force-confold,
+        # and a DEVNULL stdin so a conffile prompt can never hang.
+        import subprocess as _sp
+
+        mock_run.return_value = MagicMock(returncode=0, stdout="upgraded", stderr="")
+        system_update(upgrade=True, autoremove=False)
+        # Find the apt upgrade invocation.
+        upgrade_calls = [
+            c for c in mock_run.call_args_list if "upgrade" in c[0][0]
+        ]
+        self.assertTrue(upgrade_calls)
+        call = upgrade_calls[0]
+        cmd = call[0][0]
+        self.assertIn("-o", cmd)
+        self.assertIn("Dpkg::Options::=--force-confold", cmd)
+        self.assertEqual(call[1]["env"]["DEBIAN_FRONTEND"], "noninteractive")
+        self.assertEqual(call[1]["stdin"], _sp.DEVNULL)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_is_pkg_installed_rejects_removed_not_purged(self, mock_run):
+        # C3: an rc-state package (removed, config-files remain) is NOT installed.
+        mock_run.return_value = (0, "deinstall ok config-files", "")
+        self.assertFalse(is_pkg_installed("gnome-menus"))
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_is_pkg_installed_accepts_installed_status(self, mock_run):
+        mock_run.return_value = (0, "install ok installed", "")
+        self.assertTrue(is_pkg_installed("git"))
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_git_pull_does_not_fall_back_to_other_branch(self, mock_run):
+        # C4: a failed pull of `main` must NOT silently merge master/develop.
+        calls = []
+
+        def fake(cmd, **kw):
+            calls.append(cmd)
+            if cmd[:2] == ["git", "status"]:
+                return (0, "", "")
+            if cmd[:2] == ["git", "pull"]:
+                return (1, "", "fatal: couldn't find remote ref main")
+            return (0, "", "")
+
+        mock_run.side_effect = fake
+        result = git_pull(Path("/repo"), "origin", "main", stash_changes=False)
+        self.assertFalse(result.success)
+        # No pull of master or develop was attempted.
+        pull_branches = [c[3] for c in calls if c[:2] == ["git", "pull"]]
+        self.assertEqual(pull_branches, ["main"])
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_git_pull_stash_pop_conflict_surfaced(self, mock_run):
+        # C5: a stash-pop conflict must flip success False, not be swallowed.
+        def fake(cmd, **kw):
+            if cmd[:2] == ["git", "status"]:
+                return (0, " M mesh_bot.py", "")  # has local changes
+            if cmd[:2] == ["git", "stash"] and cmd[2:] == []:
+                return (0, "Saved working directory", "")
+            if cmd[:3] == ["git", "stash", "pop"]:
+                return (1, "", "CONFLICT (content): Merge conflict in mesh_bot.py")
+            if cmd[:2] == ["git", "pull"]:
+                return (0, "Updating abc..def", "")
+            return (0, "", "")
+
+        mock_run.side_effect = fake
+        result = git_pull(Path("/repo"), "origin", "main", stash_changes=True)
+        self.assertFalse(result.success)
+        self.assertFalse(result.requires_restart)
+        self.assertTrue(any("stash pop failed" in e for e in result.errors))
 
 
 class TestUpdateResultDataclass(unittest.TestCase):
@@ -191,7 +267,7 @@ class TestInstallPackage(unittest.TestCase):
 
     @patch("meshing_around_clients.setup.system_maintenance.run_command")
     def test_already_installed(self, mock_run):
-        mock_run.return_value = (0, "", "")  # dpkg -l succeeds
+        mock_run.return_value = (0, "install ok installed", "")  # dpkg-query status
         success, msg = install_package("git")
         self.assertTrue(success)
         self.assertIn("already installed", msg)
@@ -222,15 +298,15 @@ class TestCheckRequiredPackages(unittest.TestCase):
 
     @patch("meshing_around_clients.setup.system_maintenance.run_command")
     def test_all_installed(self, mock_run):
-        mock_run.return_value = (0, "", "")  # All dpkg -s succeed
+        mock_run.return_value = (0, "install ok installed", "")  # dpkg-query status
         missing = check_required_packages(["git", "python3"])
         self.assertEqual(missing, [])
 
     @patch("meshing_around_clients.setup.system_maintenance.run_command")
     def test_some_missing(self, mock_run):
         mock_run.side_effect = [
-            (0, "", ""),  # git installed
-            (1, "", ""),  # missing-pkg not installed
+            (0, "install ok installed", ""),  # git installed
+            (0, "deinstall ok config-files", ""),  # removed-not-purged -> missing
         ]
         missing = check_required_packages(["git", "missing-pkg"])
         self.assertEqual(missing, ["missing-pkg"])
