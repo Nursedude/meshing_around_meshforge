@@ -1529,8 +1529,16 @@ def verify_bot_running(meshing_path: Path) -> bool:
         print_error(f"mesh_bot.py not found at {meshing_path}")
         return False
 
-    # Check if bot is already running
-    ret, stdout, _ = run_command(["pgrep", "-f", "mesh_bot.py"], capture=True)
+    # Prefer the project venv's interpreter (a bare python3 dies on ImportError
+    # on a PEP 668 box where deps live only in the venv) — C6.
+    venv_python = meshing_path / "venv" / "bin" / "python3"
+    python_cmd = str(venv_python) if venv_python.exists() else "python3"
+
+    # Check if bot is already running.  Match the interpreter+script pair, not a
+    # bare "mesh_bot.py" that also matches `nano mesh_bot.py` / a log tail (C6).
+    ret, stdout, _ = run_command(
+        ["pgrep", "-f", r"python[0-9.]* .*mesh_bot\.py"], capture=True
+    )
     if ret == 0 and stdout.strip():
         print_success("Bot is already running!")
         print_info(f"PID(s): {stdout.strip()}")
@@ -1538,7 +1546,7 @@ def verify_bot_running(meshing_path: Path) -> bool:
 
     # Test if bot can start (syntax check)
     print_info("Checking bot syntax...")
-    ret, stdout, stderr = run_command(["python3", "-m", "py_compile", str(bot_script)], capture=True)
+    ret, stdout, stderr = run_command([python_cmd, "-m", "py_compile", str(bot_script)], capture=True)
     if ret != 0:
         print_error(f"Syntax error in bot: {stderr}")
         return False
@@ -1554,12 +1562,19 @@ def verify_bot_running(meshing_path: Path) -> bool:
     # Try to start the bot (use cwd parameter instead of os.chdir)
     if get_yes_no("Start the bot now?", True):
         print_info("Starting mesh_bot.py...")
+        # Capture stderr to a log instead of DEVNULL so a crash (e.g. an
+        # ImportError on a mis-provisioned box) is diagnosable, not silent (C6).
+        err_log = meshing_path / "mesh_bot_start.log"
+        try:
+            err_fh = open(err_log, "w")
+        except OSError:
+            err_fh = subprocess.DEVNULL
         try:
             # Start in background
             process = subprocess.Popen(
-                ["python3", str(bot_script)],
+                [python_cmd, str(bot_script)],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stderr=err_fh,
                 start_new_session=True,
                 cwd=str(meshing_path),
             )
@@ -1573,11 +1588,25 @@ def verify_bot_running(meshing_path: Path) -> bool:
                 return True
             else:
                 print_error("Bot failed to start (exited within 3 seconds)")
+                if err_fh is not subprocess.DEVNULL:
+                    try:
+                        tail = err_log.read_text()[-500:]
+                        if tail.strip():
+                            print_error(f"Startup error output:\n{tail}")
+                        print_info(f"Full startup log: {err_log}")
+                    except OSError:
+                        pass
                 return False
 
         except (OSError, FileNotFoundError, subprocess.SubprocessError) as e:
             print_error(f"Failed to start bot: {e}")
             return False
+        finally:
+            if err_fh is not subprocess.DEVNULL:
+                try:
+                    err_fh.close()
+                except OSError:
+                    pass
 
     return True
 

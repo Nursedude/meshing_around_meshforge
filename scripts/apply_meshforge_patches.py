@@ -226,6 +226,42 @@ _REPLY_DEDUP_GUARD = (
 )
 
 
+def _atomic_write_py(target: Path, text: str) -> None:
+    """Write Python source atomically (C1).
+
+    The old ``f.write_text(text)`` truncated the live file first, so a mid-write
+    failure (encode error — the module's own history — ENOSPC, power loss on an
+    SD-card Pi) left ``mesh_bot.py`` torn or empty, and ``py_compile`` ran only
+    AFTER the write, validating already-destroyed content.  Here: back up, write
+    a same-dir temp with explicit utf-8, validate the NEW content in memory, then
+    ``os.replace`` — a bad write can never replace a good file.
+    """
+    import shutil
+    import tempfile
+
+    target = Path(target)
+    if target.exists():
+        try:
+            shutil.copy2(str(target), str(target) + ".bak")
+        except OSError:
+            pass
+    # Validate before touching the target at all.
+    compile(text, str(target), "exec")
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=target.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, str(target))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def _log(msg: str) -> None:
     print(f"[meshforge-patch] {msg}")
 
@@ -253,7 +289,7 @@ def patch_mesh_bot(path: Path) -> bool:
         _log(f"WARNING {f.name}: anchor not found — skipping (upstream may have changed)")
         return False
     text = text.replace(_ANCHOR_BOT + "\n", _ANCHOR_BOT + "\n" + _BLOCK_BOT, 1)
-    f.write_text(text)
+    _atomic_write_py(f, text)
     _log(f"{f.name}: bracket-strip applied")
     return True
 
@@ -271,7 +307,7 @@ def patch_system(path: Path) -> bool:
         text = text.replace(old, new, 1)
         changed = True
     if changed:
-        f.write_text(text)
+        _atomic_write_py(f, text)
         _log(f"{f.name}: enumerate/idx fix applied")
     else:
         _log(f"{f.name}: enumerate/idx fix already present")
@@ -292,7 +328,7 @@ def patch_system_byte_safe(path: Path) -> bool:
     # Insert the helper just above messageChunker, then rewire its returns.
     text = text.replace(_BYTE_SAFE_ANCHOR, _BYTE_SAFE_HELPER + _BYTE_SAFE_ANCHOR, 1)
     text = text.replace(_BYTE_SAFE_RETURNS_OLD, _BYTE_SAFE_RETURNS_NEW, 1)
-    f.write_text(text)
+    _atomic_write_py(f, text)
     _log(f"{f.name}: byte-safe chunking applied")
     return True
 
@@ -320,7 +356,7 @@ def patch_reply_dedup(path: Path) -> bool:
         text = text.replace(_REPLY_DEDUP_ANCHOR, _REPLY_DEDUP_ANCHOR + _REPLY_DEDUP_GUARD, 1)
         changed = True
     if changed:
-        f.write_text(text)
+        _atomic_write_py(f, text)
         _log(f"{f.name}: reply-dedup applied")
     return changed
 

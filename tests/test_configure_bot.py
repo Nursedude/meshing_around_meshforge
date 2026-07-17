@@ -143,5 +143,45 @@ class TestSystemdUnitBuilder(unittest.TestCase):
             self.cb._build_meshing_around_unit(Path("/opt/app"), "/usr/bin/python3", "pi\nExecStartPre=/bin/evil", None)
 
 
+class TestVerifyBotRunningPgrepPattern(unittest.TestCase):
+    """C6: the running-bot check must not match `nano mesh_bot.py` / a log tail."""
+
+    def setUp(self):
+        import importlib
+        import tempfile
+
+        self.cb = importlib.import_module("configure_bot")
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "mesh_bot.py").write_text("x = 1\n")
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_pgrep_matches_interpreter_script_pair(self):
+        from unittest.mock import patch
+
+        captured = {}
+
+        def fake_run_command(cmd, **kw):
+            if cmd and cmd[0] == "pgrep":
+                captured["pgrep"] = cmd
+                return (0, "4321", "")  # pretend a real bot is running
+            return (0, "", "")
+
+        with patch.object(self.cb, "run_command", side_effect=fake_run_command):
+            result = self.cb.verify_bot_running(self.tmp)
+
+        self.assertTrue(result)
+        # The pattern must require a python interpreter before mesh_bot.py, so
+        # `nano mesh_bot.py` cannot match.
+        self.assertIn("pgrep", captured)
+        pattern = captured["pgrep"][-1]
+        self.assertIn("python", pattern)
+        self.assertIn(r"mesh_bot\.py", pattern)
+        self.assertNotEqual(pattern, "mesh_bot.py")
+
+
 if __name__ == "__main__":
     unittest.main()
