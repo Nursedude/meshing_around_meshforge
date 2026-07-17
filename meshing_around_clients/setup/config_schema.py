@@ -831,6 +831,9 @@ def _coerce_int(value: Any, default: int) -> int:
     try:
         return int(value)
     except (TypeError, ValueError):
+        # Witness the fallback: a silent default inside the healthy domain
+        # hides the typo forever (honest_failure_modes #1/#9, 3rd pass).
+        logger.warning("Non-integer config value %r — using default %d", value, default)
         return default
 
 
@@ -839,6 +842,7 @@ def _coerce_float(value: Any, default: float) -> float:
     try:
         return float(value)
     except (TypeError, ValueError):
+        logger.warning("Non-numeric config value %r — using default %s", value, default)
         return default
 
 

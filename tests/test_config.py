@@ -23,6 +23,26 @@ from meshing_around_clients.core.config import (
 )
 
 
+class TestCoerceWitness(unittest.TestCase):
+    """3rd pass: coercion failure must leave a log witness, not a silent default."""
+
+    def test_coercion_failure_leaves_a_log_witness(self):
+        from unittest.mock import patch
+
+        with patch("meshing_around_clients.core.config.logger") as mock_logger:
+            _coerce_int("two", 2)
+            _coerce_float("junk", 1.0)
+            self.assertEqual(mock_logger.warning.call_count, 2)
+
+    def test_coercion_success_logs_nothing(self):
+        from unittest.mock import patch
+
+        with patch("meshing_around_clients.core.config.logger") as mock_logger:
+            _coerce_int("42", 0)
+            _coerce_float("3.14", 0.0)
+            mock_logger.warning.assert_not_called()
+
+
 class TestStrToBool(unittest.TestCase):
     """Test _str_to_bool() utility function."""
 

@@ -669,6 +669,35 @@ class TestSafePanelRender(unittest.TestCase):
         layout = self.tui._render()
         self.assertIsNotNone(layout)
 
+    def test_chrome_error_dedup_is_per_label_and_message_stable(self):
+        """3rd pass: one shared dedup slot meant header+footer failing together
+        alternated the signature and logged 2 WARNINGs + tracebacks per FRAME
+        (render is mqtt-event-driven — a log flood on a Pi); a per-frame-varying
+        exception message defeated dedup the same way."""
+        from unittest.mock import patch
+
+        self.tui._get_header = lambda: (_ for _ in ()).throw(ValueError("header boom"))
+        self.tui._get_footer = lambda: (_ for _ in ()).throw(TypeError("footer boom"))
+        with patch("meshing_around_clients.tui.app.logger") as mock_logger:
+            for _ in range(10):
+                self.tui._render()
+            self.assertLessEqual(mock_logger.warning.call_count, 2, "chrome error dedup floods when both labels fail")
+
+        # Varying message, same label+type: still one log.
+        counter = {"n": 0}
+
+        def varying():
+            counter["n"] += 1
+            raise KeyError(f"node-{counter['n']}")
+
+        self.tui._get_header = varying
+        self.tui._get_footer = self.tui.__class__._get_footer.__get__(self.tui)
+        self.tui._chrome_error_sigs = {}
+        with patch("meshing_around_clients.tui.app.logger") as mock_logger:
+            for _ in range(10):
+                self.tui._render()
+            self.assertLessEqual(mock_logger.warning.call_count, 1, "per-frame-varying message defeats dedup")
+
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
 class TestConfigValidationOnStartup(unittest.TestCase):
@@ -1028,6 +1057,87 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
         saved = configparser.ConfigParser()
         saved.read(self.config_path)
         self.assertEqual(saved.get("general", "whoami"), "False")
+
+    def test_second_save_does_not_bake_template_defaults(self):
+        """3rd pass: _save() cleared _template_keys, so the SECOND save of the
+        same editor session baked every template default + commented example
+        into the live config — the exact #62 trap A1 claimed closed."""
+        import configparser
+
+        self._setup_merge_test()
+        self.screen._loaded = True
+        self.screen._rebuild_items()
+
+        # Save 1 — one edited key.
+        self.screen._parser.set("general", "motd", "Edited")
+        self.screen._template_keys.discard(("general", "motd"))
+        self.screen._dirty = True
+        self.screen._save()
+
+        # Save 2 — a different key edited later in the same session.
+        self.screen._parser.set("location", "lat", "19.4")
+        self.screen._template_keys.discard(("location", "lat"))
+        self.screen._dirty = True
+        self.screen._save()
+
+        saved = configparser.ConfigParser()
+        saved.read(self.config_path)
+        self.assertFalse(saved.has_option("general", "whoami"))
+        self.assertFalse(saved.has_option("general", "ollamamodel"))
+        self.assertFalse(saved.has_section("sentry"))
+        # And the dim "(default)" indicator stays honest after a save.
+        self.assertIn(("general", "whoami"), self.screen._template_keys)
+
+    def test_profile_apply_values_survive_save(self):
+        """3rd pass: _apply_regional_template set values without discarding
+        them from _template_keys, so _parser_for_save silently DROPPED the
+        applied profile on save while reporting success."""
+        import configparser
+        from pathlib import Path
+
+        self._setup_merge_test()
+        self.screen._loaded = True
+        self.screen._rebuild_items()
+
+        profile_path = os.path.join(self.tmp_dir, "profile_test.template")
+        with open(profile_path, "w") as f:
+            f.write("[sentry]\nsentryenabled = True\nsentrychannel = 5\n")
+
+        self.screen._apply_regional_template(Path(profile_path))
+        self.assertTrue(self.screen._dirty)
+        self.screen._save()
+
+        saved = configparser.ConfigParser()
+        saved.read(self.config_path)
+        self.assertTrue(saved.has_section("sentry"), "applied profile values were dropped on save")
+        self.assertEqual(saved.get("sentry", "sentryenabled"), "True")
+        self.assertEqual(saved.get("sentry", "sentrychannel"), "5")
+
+    def test_default_section_survives_save_without_duplication(self):
+        """3rd pass: _parser_for_save duplicated [DEFAULT] keys into every
+        section and dropped the [DEFAULT] section itself."""
+        import configparser
+        from pathlib import Path
+
+        with open(self.config_path, "w") as f:
+            f.write("[DEFAULT]\nshared = yes\n\n[general]\nmotd = Hello\n")
+        self.screen._parser = configparser.ConfigParser()
+        self.screen._parser.read(self.config_path)
+        self.screen._config_path = Path(self.config_path)
+        self.screen._template_keys = set()
+        self.screen._loaded = True
+
+        out = self.screen._parser_for_save()
+        self.assertEqual(out.defaults().get("shared"), "yes")
+        # Re-read semantics preserved, and no literal duplication into sections.
+        self.assertEqual(out.get("general", "shared"), "yes")  # via DEFAULT
+        with open(self.config_path) as f:
+            pass  # config untouched here; write path covered above
+        self.screen._dirty = True
+        self.screen._save()
+        raw = open(self.config_path).read()
+        self.assertIn("[DEFAULT]", raw)
+        self.assertEqual(raw.count("shared = yes"), 1, "DEFAULT key duplicated into sections")
 
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")

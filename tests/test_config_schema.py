@@ -509,6 +509,25 @@ class TestCoerceHelpers(unittest.TestCase):
     def test_coerce_float_returns_default_on_none(self):
         self.assertEqual(_coerce_float(None, 2.5), 2.5)
 
+    def test_coercion_failure_leaves_a_log_witness(self):
+        """3rd pass: a hand-typed `SentryChannel = two` silently became
+        channel 2 — a crash was traded for a silent default with NO witness
+        (honest_failure_modes #1 without the promised #9 witness)."""
+        from unittest.mock import patch
+
+        with patch("meshing_around_clients.setup.config_schema.logger") as mock_logger:
+            _coerce_int("two", 2)
+            _coerce_float("junk", 1.0)
+            self.assertEqual(mock_logger.warning.call_count, 2)
+
+    def test_coercion_success_logs_nothing(self):
+        from unittest.mock import patch
+
+        with patch("meshing_around_clients.setup.config_schema.logger") as mock_logger:
+            _coerce_int("42", 0)
+            _coerce_float("3.14", 0.0)
+            mock_logger.warning.assert_not_called()
+
 
 class TestMalformedIniDoesNotCrash(unittest.TestCase):
     """Every dataclass loader that takes INI data should tolerate non-numeric

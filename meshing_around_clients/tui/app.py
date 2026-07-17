@@ -1627,6 +1627,10 @@ class _BaseConfigEditor(Screen):
                     if current != value:
                         self._parser.set(section, key, value)
                         applied += 1
+                # An applied profile value is user-intended: without this
+                # discard, _parser_for_save treated it as an untouched template
+                # default and silently DROPPED it on save (3rd-pass finding).
+                self._template_keys.discard((section, key))
 
         if applied > 0:
             self._dirty = True
@@ -1923,11 +1927,18 @@ class _BaseConfigEditor(Screen):
         import configparser as _cp
 
         out = _cp.ConfigParser()
+        # Preserve a user [DEFAULT] section: options() folds DEFAULT keys into
+        # every section, which duplicated them per-section and dropped the
+        # [DEFAULT] section itself on save (3rd-pass finding).
+        defaults = dict(self._parser.defaults())
+        for key, value in defaults.items():
+            out.set(_cp.DEFAULTSECT, key, value)
         for section in self._parser.sections():
             kept = [
                 (key, self._parser.get(section, key, raw=True))
                 for key in self._parser.options(section)
                 if (section, key) not in self._template_keys
+                and not (key in defaults and defaults[key] == self._parser.get(section, key, raw=True))
             ]
             if not kept:
                 continue
@@ -1950,7 +1961,11 @@ class _BaseConfigEditor(Screen):
 
             _atomic_write_parser(self._parser_for_save(), self._config_path)
             self._dirty = False
-            self._template_keys.clear()
+            # Do NOT clear _template_keys: untouched merged defaults are still
+            # template-sourced after a save. Clearing them made the SECOND save
+            # of a session bake every default + commented example into the live
+            # config (3rd-pass finding — the #62 trap resurrected), and killed
+            # the dim "(default)" indicator for the rest of the session.
             self._post_save_hook()
         except OSError as e:
             self._error = f"Save failed: {e}"
@@ -2896,9 +2911,16 @@ class MeshingAroundTUI:
         try:
             return build()
         except Exception as e:  # noqa: BLE001 — chrome must never freeze the frame
-            sig = f"{label}:{type(e).__name__}:{e}"
-            if sig != getattr(self, "_last_chrome_error_sig", None):
-                self._last_chrome_error_sig = sig
+            # Dedup per label, keyed by exception TYPE only: one shared slot
+            # alternated when header+footer both failed (2 WARNINGs/frame on an
+            # mqtt-event-driven render = log flood on a Pi), and str(e) in the
+            # signature defeated dedup whenever the message varied per frame
+            # (3rd-pass finding).
+            sigs = getattr(self, "_chrome_error_sigs", None)
+            if sigs is None:
+                sigs = self._chrome_error_sigs = {}
+            if sigs.get(label) != type(e).__name__:
+                sigs[label] = type(e).__name__
                 logger.warning("Render error building %s", label, exc_info=True)
             return Text(f"[{label} render error: {type(e).__name__}]", style="red")
 
