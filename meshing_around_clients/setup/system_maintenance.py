@@ -123,12 +123,22 @@ def _apt_run(apt_args: List[str], **kwargs) -> Tuple[int, str, str]:
     Injects ``DEBIAN_FRONTEND=noninteractive`` and keeps modified conffiles
     (``--force-confold``) so a conffile prompt can never hang the run; combined
     with ``run_command``'s ``stdin=DEVNULL`` this makes captured apt safe.
+
+    The frontend is passed as a ``sudo VAR=val`` argv element, not only via
+    ``env=``: sudoers ``Defaults env_reset`` strips an inherited env var from
+    the elevated apt, so an env-only pass silently reached a stripped
+    environment (3rd-pass finding). ``env=`` is kept for the non-sudo path.
     """
     env = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
     cmd = list(apt_args)
     # Insert the dpkg confold options right after the apt subcommand.
     if len(cmd) >= 2:
         cmd = [cmd[0], cmd[1], "-o", "Dpkg::Options::=--force-confold", *cmd[2:]]
+    # Under sudo, prepend the assignment so it becomes `sudo DEBIAN_FRONTEND=...
+    # apt ...` — sudo sets it explicitly, surviving env_reset. Never prepend on
+    # the non-sudo path (a bare VAR=val argv[0] is not an executable).
+    if kwargs.get("sudo"):
+        cmd = ["DEBIAN_FRONTEND=noninteractive", *cmd]
     return run_command(cmd, env=env, **kwargs)
 
 
@@ -355,14 +365,22 @@ def git_pull(repo_path: Path, remote: str = "origin", branch: str = "main", stas
     """
     result = UpdateResult(success=True, message="")
 
-    # Check for uncommitted changes
+    # Check for uncommitted changes. Only TRACKED changes are stashable — an
+    # untracked-only tree (?? lines, e.g. the .bak/log files the installer's own
+    # fixes create) makes `git stash` a no-op, and popping a non-existent stash
+    # then false-failed a good pull (3rd-pass finding).
     ret, stdout, _ = run_command(["git", "status", "--porcelain"], cwd=repo_path)
-    has_changes = bool(stdout.strip())
+    has_tracked_changes = any(not line.startswith("??") for line in stdout.splitlines() if line.strip())
 
-    if has_changes and stash_changes:
-        ret, _, stderr = run_command(["git", "stash"], cwd=repo_path)
+    stashed = False
+    if has_tracked_changes and stash_changes:
+        ret, stash_out, stderr = run_command(["git", "stash"], cwd=repo_path)
         if ret != 0:
             result.errors.append(f"Failed to stash changes: {stderr[:50]}")
+        else:
+            # `git stash` says "No local changes to save" (and creates no entry)
+            # when there was nothing to stash; only pop if it actually stashed.
+            stashed = "No local changes to save" not in stash_out
 
     # Pull the requested branch only.  The old code fell back main->master->
     # develop and merged whichever succeeded INTO the checked-out branch,
@@ -384,8 +402,8 @@ def git_pull(repo_path: Path, remote: str = "origin", branch: str = "main", stas
 
     # Restore stashed changes — a pop conflict must NOT be silent: it strands the
     # local edits (e.g. the MeshForge source patches) with conflict markers while
-    # the update otherwise reported success (C5).
-    if has_changes and stash_changes:
+    # the update otherwise reported success (C5). Only pop if we actually stashed.
+    if stashed:
         pop_ret, _, pop_stderr = run_command(["git", "stash", "pop"], cwd=repo_path)
         if pop_ret != 0:
             result.success = False
@@ -517,15 +535,19 @@ def rollback_to_version(
 
     result = UpdateResult(success=True, message="")
 
-    # Stash any local changes
+    # Stash any TRACKED local changes (untracked-only isn't stashable — same
+    # false-pop guard as git_pull, 3rd pass).
     ret, stdout, _ = run_command(["git", "status", "--porcelain"], cwd=repo_path)
-    has_changes = bool(stdout.strip())
+    has_tracked_changes = any(not line.startswith("??") for line in stdout.splitlines() if line.strip())
 
-    if has_changes and stash_changes:
+    stashed = False
+    if has_tracked_changes and stash_changes:
         report("Stashing local changes...")
-        ret, _, stderr = run_command(["git", "stash"], cwd=repo_path)
+        ret, stash_out, stderr = run_command(["git", "stash"], cwd=repo_path)
         if ret != 0:
             result.errors.append(f"Failed to stash changes: {stderr[:50]}")
+        else:
+            stashed = "No local changes to save" not in stash_out
 
     # Checkout the target commit
     report(f"Rolling back to {commit_hash}...")
@@ -536,7 +558,7 @@ def rollback_to_version(
         result.message = f"Rollback failed: {stderr[:100]}"
         result.errors.append(stderr)
         # Restore stash if we made one
-        if has_changes and stash_changes:
+        if stashed:
             run_command(["git", "stash", "pop"], cwd=repo_path)
         return result
 
@@ -547,10 +569,13 @@ def rollback_to_version(
     report(f"Now at {commit_hash}. Run 'Update (git pull)' to return to latest.")
 
     # Restore stashed changes — surface a pop conflict rather than stranding
-    # the local edits silently (C5).
-    if has_changes and stash_changes:
+    # the local edits silently (C5). A conflict here leaves the rolled-back tree
+    # with conflict markers, so it is NOT a clean restart target: fail loud.
+    if stashed:
         pop_ret, _, pop_stderr = run_command(["git", "stash", "pop"], cwd=repo_path)
         if pop_ret != 0:
+            result.success = False
+            result.requires_restart = False
             result.errors.append(
                 "git stash pop failed after rollback — local changes are stranded "
                 f"in the stash or left with conflict markers: {pop_stderr[:120]}"

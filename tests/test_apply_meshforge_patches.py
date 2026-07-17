@@ -39,6 +39,18 @@ class TestAtomicWritePy(unittest.TestCase):
             amp._atomic_write_py(self.target, "def broken(:\n")
         self.assertEqual(self.target.read_text(), "original = True\n")
 
+    def test_atomic_write_preserves_target_mode(self):
+        # 3rd pass / CRITICAL: mkstemp makes the temp 0600 owned by the writer;
+        # os.replace with no copystat installed root:root 0600 over a
+        # world-readable bot source, so the User=<pi> service could no longer
+        # read it (PermissionError at next restart, fleet-wide).
+        import os as _os
+
+        _os.chmod(self.target, 0o644)
+        amp._atomic_write_py(self.target, "patched = True\n")
+        mode = _os.stat(self.target).st_mode & 0o777
+        self.assertEqual(mode, 0o644, "atomic write dropped the target's mode")
+
     def test_mid_write_failure_preserves_target(self):
         # Simulate a failure during the temp write (e.g. ENOSPC): the original
         # must survive intact and no temp file is left behind.

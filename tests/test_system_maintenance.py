@@ -63,6 +63,43 @@ class TestInstallerHardeningAdversarial(unittest.TestCase):
         self.assertEqual(call[1]["env"]["DEBIAN_FRONTEND"], "noninteractive")
         self.assertEqual(call[1]["stdin"], _sp.DEVNULL)
 
+    @patch("meshing_around_clients.setup.system_maintenance.subprocess.run")
+    def test_apt_passes_frontend_through_sudo_argv(self, mock_run):
+        # 3rd pass: env=DEBIAN_FRONTEND on the sudo process is stripped by
+        # sudoers `Defaults env_reset` — it must be a sudo VAR=val argv element
+        # to actually reach apt.
+        mock_run.return_value = MagicMock(returncode=0, stdout="upgraded", stderr="")
+        system_update(upgrade=True, autoremove=False)
+        upgrade_calls = [c for c in mock_run.call_args_list if "upgrade" in c[0][0]]
+        self.assertTrue(upgrade_calls)
+        cmd = upgrade_calls[0][0][0]
+        self.assertEqual(cmd[0], "sudo")
+        self.assertIn("DEBIAN_FRONTEND=noninteractive", cmd)
+        # The assignment must precede the apt program token.
+        self.assertLess(cmd.index("DEBIAN_FRONTEND=noninteractive"), cmd.index("apt"))
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_git_pull_untracked_only_tree_is_not_a_false_failure(self, mock_run):
+        # 3rd pass: an untracked-only working tree (?? lines — e.g. the .bak and
+        # mesh_bot_start.log the fixes themselves create) made `git stash` save
+        # nothing (rc0), then `git stash pop` find no entry (rc1), flipping
+        # success=False on a perfectly good pull.
+        def fake(cmd, **kw):
+            if cmd[:2] == ["git", "status"]:
+                return (0, "?? mesh_bot_start.log\n?? mesh_bot.py.bak", "")
+            if cmd[:2] == ["git", "stash"] and cmd[2:] == []:
+                return (0, "No local changes to save", "")
+            if cmd[:3] == ["git", "stash", "pop"]:
+                return (1, "", "No stash entries found.")
+            if cmd[:2] == ["git", "pull"]:
+                return (0, "Updating abc..def", "")
+            return (0, "", "")
+
+        mock_run.side_effect = fake
+        result = git_pull(Path("/repo"), "origin", "main", stash_changes=True)
+        self.assertTrue(result.success, "untracked-only tree false-failed a good pull")
+        self.assertTrue(result.requires_restart)
+
     @patch("meshing_around_clients.setup.system_maintenance.run_command")
     def test_is_pkg_installed_rejects_removed_not_purged(self, mock_run):
         # C3: an rc-state package (removed, config-files remain) is NOT installed.
@@ -910,6 +947,22 @@ class TestRollbackToVersion(unittest.TestCase):
         result = rollback_to_version(Path("/tmp"), "abc1234")
         self.assertTrue(result.success)
         self.assertIn("abc1234", result.message)
+
+    @patch("meshing_around_clients.setup.system_maintenance.run_command")
+    def test_rollback_pop_conflict_fails_loud(self, mock_run):
+        # 3rd pass: a pop conflict after a successful checkout leaves the tree
+        # with conflict markers — it must NOT report success + "restart
+        # recommended" (which would invite restarting onto a broken tree).
+        mock_run.side_effect = [
+            (0, "M file.txt\n", ""),  # tracked change
+            (0, "Saved working directory", ""),  # git stash (real entry)
+            (0, "", ""),  # git checkout <hash>
+            (1, "", "CONFLICT (content): Merge conflict in file.txt"),  # pop fails
+        ]
+        result = rollback_to_version(Path("/tmp"), "abc1234")
+        self.assertFalse(result.success)
+        self.assertFalse(result.requires_restart)
+        self.assertTrue(any("stash pop failed" in e for e in result.errors))
 
     @patch("meshing_around_clients.setup.system_maintenance.run_command")
     def test_rollback_checkout_fails(self, mock_run):

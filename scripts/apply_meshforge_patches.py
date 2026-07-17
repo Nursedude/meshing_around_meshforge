@@ -240,7 +240,17 @@ def _atomic_write_py(target: Path, text: str) -> None:
     import tempfile
 
     target = Path(target)
+    # Capture the target's mode/owner BEFORE the swap: mkstemp creates the temp
+    # 0600 owned by the writer (root under the installer), and os.replace keeps
+    # the temp's metadata — without restoring it, a world-readable bot source
+    # became root:root 0600 and the User=<pi> service could no longer read it
+    # (PermissionError at next restart, fleet-wide — 3rd-pass CRITICAL).
+    target_stat = None
     if target.exists():
+        try:
+            target_stat = os.stat(str(target))
+        except OSError:
+            target_stat = None
         try:
             shutil.copy2(str(target), str(target) + ".bak")
         except OSError:
@@ -253,6 +263,18 @@ def _atomic_write_py(target: Path, text: str) -> None:
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
+        if target_stat is not None:
+            # Restore the original mode; restore owner too when we're root and
+            # able (best-effort — a non-root writer can't chown and shouldn't).
+            try:
+                os.chmod(tmp, target_stat.st_mode & 0o777)
+            except OSError:
+                pass
+            if os.geteuid() == 0:
+                try:
+                    os.chown(tmp, target_stat.st_uid, target_stat.st_gid)
+                except OSError:
+                    pass
         os.replace(tmp, str(target))
     except BaseException:
         try:
