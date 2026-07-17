@@ -422,12 +422,14 @@ class TestResetTerminalRobustness(unittest.TestCase):
             return 7
 
         closed = []
-        with patch.object(whiptail.os, "open", side_effect=fake_open), patch.object(
-            whiptail.os, "close", side_effect=lambda fd: closed.append(fd)
-        ), patch.object(
-            whiptail.subprocess,
-            "run",
-            side_effect=subprocess.TimeoutExpired(cmd="stty", timeout=5),
+        with (
+            patch.object(whiptail.os, "open", side_effect=fake_open),
+            patch.object(whiptail.os, "close", side_effect=lambda fd: closed.append(fd)),
+            patch.object(
+                whiptail.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(cmd="stty", timeout=5),
+            ),
         ):
             # Must not raise (TimeoutExpired is a SubprocessError, not OSError).
             whiptail._reset_terminal()

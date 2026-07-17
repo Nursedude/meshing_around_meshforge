@@ -21,16 +21,16 @@ Uses modular components from meshing_around_clients.core:
 - alert_configurators: Alert configuration wizards
 """
 
-import os
-import sys
-import subprocess
-import shutil
-import time
-import re
 import configparser
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from getpass import getpass
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
-from getpass import getpass
 
 # Version info — keep in sync with meshing_around_clients/__init__.py (the SSOT)
 VERSION = "0.6.0"
@@ -39,53 +39,53 @@ SUPPORTED_OS = ["bookworm", "trixie", "forky", "sid", "noble", "jammy"]
 # Try to import modular components - fallback to inline if not available
 try:
     from meshing_around_clients.core.config import get_user_home
-    from meshing_around_clients.setup.cli_utils import (
-        Colors,
-        print_header,
-        print_section,
-        print_success,
-        print_warning,
-        print_error,
-        print_info,
-        print_step,
-        get_input,
-        get_yes_no,
-        validate_mac_address,
-        validate_coordinates,
-    )
-    from meshing_around_clients.setup.pi_utils import (
-        is_raspberry_pi,
-        get_pi_model,
-        get_os_info,
-        is_bookworm_or_newer,
-        check_pep668_environment,
-        get_serial_ports,
-        check_user_groups,
-        get_pip_command,
-        get_pip_install_flags,
-        get_pi_config_path,
-        check_serial_enabled,
-    )
-    from meshing_around_clients.setup.system_maintenance import run_command, find_meshing_around
     from meshing_around_clients.setup.alert_configurators import (
-        configure_interface,
-        configure_general,
-        configure_emergency_alerts,
-        configure_proximity_alerts,
         configure_altitude_alerts,
-        configure_weather_alerts,
-        configure_ipaws_alerts,
-        configure_volcano_alerts,
         configure_battery_alerts,
-        configure_noisy_node_alerts,
-        configure_new_node_alerts,
-        configure_snr_alerts,
-        configure_disconnect_alerts,
         configure_custom_alerts,
+        configure_disconnect_alerts,
         configure_email_sms,
+        configure_emergency_alerts,
+        configure_general,
         configure_global_settings,
+        configure_interface,
+        configure_ipaws_alerts,
+        configure_new_node_alerts,
+        configure_noisy_node_alerts,
+        configure_proximity_alerts,
+        configure_snr_alerts,
+        configure_volcano_alerts,
+        configure_weather_alerts,
         create_basic_config,
     )
+    from meshing_around_clients.setup.cli_utils import (
+        Colors,
+        get_input,
+        get_yes_no,
+        print_error,
+        print_header,
+        print_info,
+        print_section,
+        print_step,
+        print_success,
+        print_warning,
+        validate_coordinates,
+        validate_mac_address,
+    )
+    from meshing_around_clients.setup.pi_utils import (
+        check_pep668_environment,
+        check_serial_enabled,
+        check_user_groups,
+        get_os_info,
+        get_pi_config_path,
+        get_pi_model,
+        get_pip_command,
+        get_pip_install_flags,
+        get_serial_ports,
+        is_bookworm_or_newer,
+        is_raspberry_pi,
+    )
+    from meshing_around_clients.setup.system_maintenance import find_meshing_around, run_command
 
     MODULES_AVAILABLE = True
 except ImportError:
@@ -1536,9 +1536,7 @@ def verify_bot_running(meshing_path: Path) -> bool:
 
     # Check if bot is already running.  Match the interpreter+script pair, not a
     # bare "mesh_bot.py" that also matches `nano mesh_bot.py` / a log tail (C6).
-    ret, stdout, _ = run_command(
-        ["pgrep", "-f", r"python[0-9.]* .*mesh_bot\.py"], capture=True
-    )
+    ret, stdout, _ = run_command(["pgrep", "-f", r"python[0-9.]* .*mesh_bot\.py"], capture=True)
     if ret == 0 and stdout.strip():
         print_success("Bot is already running!")
         print_info(f"PID(s): {stdout.strip()}")

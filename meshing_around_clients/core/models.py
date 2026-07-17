@@ -58,9 +58,8 @@ def sanitize_control_chars(value: str, keep_newlines: bool = False) -> str:
     allowed_newlines = {0x09, 0x0A} if keep_newlines else set()
     if not any(ord(c) in _CONTROL_CHARS and ord(c) not in allowed_newlines for c in value):
         return value
-    return "".join(
-        c for c in value if ord(c) not in _CONTROL_CHARS or ord(c) in allowed_newlines
-    )
+    return "".join(c for c in value if ord(c) not in _CONTROL_CHARS or ord(c) in allowed_newlines)
+
 
 # --- Message limits ---
 MAX_MESSAGE_BYTES = 228  # Meshtastic maximum text payload length (bytes)

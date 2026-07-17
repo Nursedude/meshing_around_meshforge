@@ -1328,16 +1328,12 @@ class MQTTMeshtasticClient(CallbackMixin):
                     # oldest-by-timestamp like the sibling _alert_cooldowns (B3).
                     if len(self._decrypt_warn_last) > _MAX_DECRYPT_WARN_ENTRIES:
                         cutoff = now - 300.0
-                        pruned = {
-                            k: v for k, v in self._decrypt_warn_last.items() if v > cutoff
-                        }
+                        pruned = {k: v for k, v in self._decrypt_warn_last.items() if v > cutoff}
                         # A fast unique-name flood can keep everything inside the
                         # time window; hard-cap to the newest half so the bound
                         # holds regardless of arrival rate.
                         if len(pruned) > _MAX_DECRYPT_WARN_ENTRIES:
-                            keep = sorted(pruned.items(), key=lambda kv: kv[1])[
-                                -(_MAX_DECRYPT_WARN_ENTRIES // 2):
-                            ]
+                            keep = sorted(pruned.items(), key=lambda kv: kv[1])[-(_MAX_DECRYPT_WARN_ENTRIES // 2) :]
                             pruned = dict(keep)
                         self._decrypt_warn_last = pruned
                 if now - last >= 60.0:

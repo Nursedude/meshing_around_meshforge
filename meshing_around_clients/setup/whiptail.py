@@ -33,9 +33,7 @@ def _sanitize(text: str) -> str:
     """
     if not isinstance(text, str) or not text:
         return text
-    return "".join(
-        c for c in text if c in ("\t", "\n") or not (ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F)
-    )
+    return "".join(c for c in text if c in ("\t", "\n") or not (ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F))
 
 
 def _is_tty() -> bool:

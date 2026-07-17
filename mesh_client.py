@@ -35,7 +35,8 @@ import socket
 import subprocess
 import sys
 import time
-from configparser import ConfigParser, Error as ConfigParserError
+from configparser import ConfigParser
+from configparser import Error as ConfigParserError
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -718,9 +719,11 @@ def load_config() -> ConfigParser:
             # broker) may now be in effect rather than the operator's private
             # config (honest_failure_modes #9).
             CONFIG_LOAD_ERROR = f"{type(e).__name__}: {e}"
-            log(f"Config at {CONFIG_FILE} is corrupt ({e}); "
+            log(
+                f"Config at {CONFIG_FILE} is corrupt ({e}); "
                 "built-in defaults may apply — VERIFY the broker before relying on it",
-                "ERROR")
+                "ERROR",
+            )
             return config
 
         # Migrate legacy [connection] section if present
@@ -1388,7 +1391,8 @@ def logs_menu(config: ConfigParser):
     Changes are saved to mesh_client.ini and applied immediately.
     Returns "exit" if user chose exit, None otherwise.
     """
-    from meshing_around_clients.setup.whiptail import menu as wt_menu, msgbox, radiolist, yesno
+    from meshing_around_clients.setup.whiptail import menu as wt_menu
+    from meshing_around_clients.setup.whiptail import msgbox, radiolist, yesno
 
     while True:
         items = [
@@ -1504,7 +1508,8 @@ def update_menu(config: ConfigParser):
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     Returns "exit" if user chose exit, None otherwise.
     """
-    from meshing_around_clients.setup.whiptail import menu as wt_menu, yesno
+    from meshing_around_clients.setup.whiptail import menu as wt_menu
+    from meshing_around_clients.setup.whiptail import yesno
 
     items = [
         ("check", "Check for updates"),
@@ -1769,7 +1774,9 @@ def configure_wifi_radio(config: ConfigParser) -> None:
     config, lets the user set the broker address (auto-detected), topic
     root, and encryption, then writes the config to the device.
     """
-    from meshing_around_clients.setup.whiptail import inputbox, menu as wt_menu, msgbox
+    from meshing_around_clients.setup.whiptail import inputbox
+    from meshing_around_clients.setup.whiptail import menu as wt_menu
+    from meshing_around_clients.setup.whiptail import msgbox
 
     log("Configure WiFi Radio MQTT Link", "INFO")
     log("This connects to a WiFi Meshtastic device and configures its", "INFO")
@@ -2239,7 +2246,8 @@ def launcher_menu(config: ConfigParser) -> bool:
     Uses whiptail dialogs on Raspberry Pi, falls back to numbered menus.
     Returns True if the user selected a mode and the app ran, False to exit.
     """
-    from meshing_around_clients.setup.whiptail import inputbox, menu as wt_menu
+    from meshing_around_clients.setup.whiptail import inputbox
+    from meshing_around_clients.setup.whiptail import menu as wt_menu
 
     items = [
         ("tui", "TUI Client (Terminal UI)"),
@@ -2341,7 +2349,8 @@ def launcher_menu(config: ConfigParser) -> bool:
             config.set("advanced", "demo_mode", "true")
             config.set("features", "mode", "tui")
         elif choice == "profile":
-            from meshing_around_clients.setup.whiptail import menu as profile_menu, msgbox as profile_msgbox
+            from meshing_around_clients.setup.whiptail import menu as profile_menu
+            from meshing_around_clients.setup.whiptail import msgbox as profile_msgbox
 
             profiles = list_profiles()
             if not profiles:

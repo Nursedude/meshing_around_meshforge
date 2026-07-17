@@ -18,9 +18,9 @@ from unittest.mock import MagicMock, patch
 
 from meshing_around_clients.core.config import Config
 from meshing_around_clients.core.models import (
+    MeshNetwork,
     Message,
     Node,
-    MeshNetwork,
     Position,
     sanitize_control_chars,
 )
@@ -132,15 +132,11 @@ class TestB3DecryptWarnBounded(unittest.TestCase):
         # Force every decrypt to fail so the warn-map write path runs, and feed a
         # flood of unique attacker channel names via the topic segment.
         client._packet_processor = MagicMock()
-        client._packet_processor.try_decrypt_with_keys.return_value = MagicMock(
-            success=False, decoded=None
-        )
+        client._packet_processor.try_decrypt_with_keys.return_value = MagicMock(success=False, decoded=None)
         with patch("meshing_around_clients.core.mqtt_client.CRYPTO_AVAILABLE", True):
             for i in range(cap * 2 + 50):
                 topic = f"msh/US/HI/2/e/chan{i}/!a2e95ba4"
-                client._handle_encrypted_message(
-                    topic, b"\x00" * 16, client._parse_topic(topic)
-                )
+                client._handle_encrypted_message(topic, b"\x00" * 16, client._parse_topic(topic))
         self.assertLessEqual(len(client._decrypt_warn_last), cap)
 
 
@@ -167,9 +163,7 @@ class TestB4TypeConfusedJson(unittest.TestCase):
     def test_nondict_payload_counted_not_raised(self):
         client = self._make_client()
         before = client._stats["messages_rejected"]
-        client._on_message(
-            None, None, self._msg(b'{"from":1,"type":"position","payload":"evil"}')
-        )
+        client._on_message(None, None, self._msg(b'{"from":1,"type":"position","payload":"evil"}'))
         self.assertGreater(client._stats["messages_rejected"], before)
 
 

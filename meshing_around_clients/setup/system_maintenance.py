@@ -139,9 +139,7 @@ def is_pkg_installed(package: str) -> bool:
     state), so they read as installed and skip a needed reinstall.  Query the
     Status field explicitly and require ``install ok installed``.
     """
-    ret, out, _ = run_command(
-        ["dpkg-query", "-W", "-f=${Status}", package], capture=True
-    )
+    ret, out, _ = run_command(["dpkg-query", "-W", "-f=${Status}", package], capture=True)
     return ret == 0 and out.strip() == "install ok installed"
 
 

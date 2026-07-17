@@ -54,9 +54,7 @@ class TestInstallerHardeningAdversarial(unittest.TestCase):
         mock_run.return_value = MagicMock(returncode=0, stdout="upgraded", stderr="")
         system_update(upgrade=True, autoremove=False)
         # Find the apt upgrade invocation.
-        upgrade_calls = [
-            c for c in mock_run.call_args_list if "upgrade" in c[0][0]
-        ]
+        upgrade_calls = [c for c in mock_run.call_args_list if "upgrade" in c[0][0]]
         self.assertTrue(upgrade_calls)
         call = upgrade_calls[0]
         cmd = call[0][0]
