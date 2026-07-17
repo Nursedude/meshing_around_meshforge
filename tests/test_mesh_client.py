@@ -128,6 +128,18 @@ class TestLoadSaveConfig(unittest.TestCase):
         loaded = mesh_client.load_config()
         self.assertEqual(loaded.get("interface", "type"), "mqtt")
 
+    @patch.object(mesh_client, "CONFIG_FILE")
+    def test_corrupt_config_does_not_raise_and_sets_witness(self, mock_config_file):
+        """A3b: a corrupt mesh_client.ini must not raise an unhandled
+        ConfigParser traceback — it records a witness instead."""
+        mesh_client.CONFIG_FILE = self.config_path
+        # Not-an-INI content (no section header) -> MissingSectionHeaderError.
+        self.config_path.write_text("this is not = a valid ini\nno section header\n")
+        mesh_client.CONFIG_LOAD_ERROR = None
+        config = mesh_client.load_config()  # must not raise
+        self.assertIsNotNone(config)
+        self.assertIsNotNone(mesh_client.CONFIG_LOAD_ERROR)
+
 
 class TestMigrateConnectionSection(unittest.TestCase):
     """Test _migrate_connection_section() for legacy config migration."""

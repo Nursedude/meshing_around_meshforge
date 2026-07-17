@@ -439,8 +439,12 @@ setup_serial_permissions() {
         log_info "Setting up serial port permissions..."
 
         if ! groups | grep -q dialout; then
-            sudo usermod -a -G dialout $USER
-            log_ok "Added $USER to dialout group"
+            # Quote and prefer the invoking (non-root) user; an unset/empty
+            # $USER under `set -e` would give usermod no argument -> usage error
+            # -> whole-script abort (C7).
+            _target_user="${SUDO_USER:-$USER}"
+            sudo usermod -a -G dialout "$_target_user"
+            log_ok "Added $_target_user to dialout group"
             log_warn "You may need to logout and login for group changes to take effect"
         else
             log_ok "Already in dialout group"
@@ -515,7 +519,10 @@ main() {
     install_local_broker
     setup_serial_permissions
     setup_systemd_service
-    setup_bot_service
+    # `|| true`: setup_bot_service returns 1 on the benign "meshing-around not
+    # found — skipping" path; under `set -e` that would abort before the summary
+    # (C7). The skip is not a failure — always reach print_summary.
+    setup_bot_service || true
     print_summary
 }
 

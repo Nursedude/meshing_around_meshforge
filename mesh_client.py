@@ -696,13 +696,32 @@ def _fix_known_stale_values(config: ConfigParser) -> bool:
     return fixed > 0
 
 
+# Witness for a corrupt config load (A3b): probes/callers can read this instead
+# of the failure being an unhandled ConfigParser traceback or a silent fallback.
+CONFIG_LOAD_ERROR: Optional[str] = None
+
+
 def load_config() -> ConfigParser:
     """Load or create configuration file."""
+    global CONFIG_LOAD_ERROR
     config = ConfigParser()
+    CONFIG_LOAD_ERROR = None
 
     if CONFIG_FILE.exists():
-        config.read(CONFIG_FILE)
-        log(f"Loaded config from {CONFIG_FILE}", "OK")
+        try:
+            config.read(CONFIG_FILE)
+            log(f"Loaded config from {CONFIG_FILE}", "OK")
+        except ConfigParserError as e:
+            # A corrupt mesh_client.ini previously raised an unhandled traceback
+            # here; parity with the typed Config loader (580d529) — record a
+            # loud witness and warn that built-in defaults (incl. the PUBLIC
+            # broker) may now be in effect rather than the operator's private
+            # config (honest_failure_modes #9).
+            CONFIG_LOAD_ERROR = f"{type(e).__name__}: {e}"
+            log(f"Config at {CONFIG_FILE} is corrupt ({e}); "
+                "built-in defaults may apply — VERIFY the broker before relying on it",
+                "ERROR")
+            return config
 
         # Migrate legacy [connection] section if present
         migrated = _migrate_connection_section(config)
