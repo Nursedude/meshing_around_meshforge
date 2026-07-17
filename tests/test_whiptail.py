@@ -90,8 +90,10 @@ class TestFallbackYesno(unittest.TestCase):
         self.assertFalse(whiptail._fallback_yesno("Continue?", default_yes=False))
 
     @patch("builtins.input", side_effect=KeyboardInterrupt)
-    def test_keyboard_interrupt_returns_default(self, _):
-        self.assertTrue(whiptail._fallback_yesno("Continue?", default_yes=True))
+    def test_keyboard_interrupt_is_cancel_not_consent(self, _):
+        # C8: Ctrl-C must be a cancel (False), never a silent "yes" — these
+        # prompts gate root actions.
+        self.assertFalse(whiptail._fallback_yesno("Continue?", default_yes=True))
         self.assertFalse(whiptail._fallback_yesno("Continue?", default_yes=False))
 
     @patch("builtins.input", side_effect=EOFError)
@@ -371,6 +373,65 @@ class TestRadiolistWhiptailPath(unittest.TestCase):
     def test_timeout_falls_back(self, _, __, ___):
         result = whiptail.radiolist("Pick", self.ITEMS)
         self.assertEqual(result, "a")
+
+
+class TestFallbackAnsiSanitized(unittest.TestCase):
+    """A3a: network-derived strings printed by the fallback must be scrubbed."""
+
+    HOSTILE = "node\x1b[2J\x1b]0;pwn\x07x"
+
+    def test_sanitize_strips_control_chars(self):
+        out = whiptail._sanitize(self.HOSTILE)
+        self.assertNotIn("\x1b", out)
+        self.assertNotIn("\x07", out)
+        self.assertIn("node", out)
+
+    def test_msgbox_fallback_no_escapes(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with patch("builtins.input", return_value=""), redirect_stdout(buf):
+            whiptail._fallback_msgbox(self.HOSTILE, title=self.HOSTILE)
+        printed = buf.getvalue()
+        # The color codes the fallback adds itself are fine; the injected ESC
+        # from the message/title must be gone.
+        self.assertNotIn("\x1b[2J", printed)
+        self.assertNotIn("\x07", printed)
+
+    def test_menu_fallback_no_escapes(self):
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with patch("builtins.input", return_value="0"), redirect_stdout(buf):
+            whiptail._fallback_menu(self.HOSTILE, [("a", self.HOSTILE)])
+        printed = buf.getvalue()
+        self.assertNotIn("\x1b[2J", printed)
+        self.assertNotIn("\x07", printed)
+
+
+class TestResetTerminalRobustness(unittest.TestCase):
+    """C8: a hung stty must not escape _reset_terminal or leak the tty fd."""
+
+    def test_stty_timeout_swallowed_and_fd_closed(self):
+        opened = {}
+
+        def fake_open(path, flags):
+            opened["fd"] = 7
+            return 7
+
+        closed = []
+        with patch.object(whiptail.os, "open", side_effect=fake_open), patch.object(
+            whiptail.os, "close", side_effect=lambda fd: closed.append(fd)
+        ), patch.object(
+            whiptail.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(cmd="stty", timeout=5),
+        ):
+            # Must not raise (TimeoutExpired is a SubprocessError, not OSError).
+            whiptail._reset_terminal()
+        self.assertEqual(closed, [7])  # fd closed despite the timeout
 
 
 if __name__ == "__main__":

@@ -23,6 +23,21 @@ _DIM = "\033[2m"
 _RESET = "\033[0m"
 
 
+def _sanitize(text: str) -> str:
+    """Strip terminal-control chars from network-derived display strings (A3a).
+
+    The plain-text fallback prints titles/descriptions/messages that can carry
+    attacker-set node names and mesh text; raw ESC/OSC sequences reaching the
+    operator's terminal are an injection primitive (screen wipe, title/clipboard
+    writes).  Keep only tab/newline; drop C0, DEL, and C1 controls.
+    """
+    if not isinstance(text, str) or not text:
+        return text
+    return "".join(
+        c for c in text if c in ("\t", "\n") or not (ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F)
+    )
+
+
 def _is_tty() -> bool:
     """Check if stdin/stdout are connected to a real terminal."""
     try:
@@ -46,12 +61,21 @@ def _reset_terminal() -> None:
     killed (timeout) or crashes before restoring, \n no longer implies
     \r and the fallback menus render garbled.  ``stty sane`` fixes this.
     """
+    tty_fd = None
     try:
         tty_fd = os.open("/dev/tty", os.O_RDWR)
         subprocess.run(["stty", "sane"], stdin=tty_fd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
-        os.close(tty_fd)
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
+        # TimeoutExpired is a SubprocessError, NOT an OSError — a hung `stty`
+        # would otherwise escape this handler (which runs from inside another
+        # except) and crash the configurator, and leak the /dev/tty fd (C8).
         pass
+    finally:
+        if tty_fd is not None:
+            try:
+                os.close(tty_fd)
+            except OSError:
+                pass
 
 
 def _run_whiptail(cmd: List[str]) -> Optional[subprocess.CompletedProcess]:
@@ -300,12 +324,12 @@ def _fallback_menu(
     default: str = "",
 ) -> Optional[str]:
     """Numbered menu using print/input."""
-    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n", flush=True)
+    print(f"\n{_CYAN}{_BOLD}{_sanitize(title)}{_RESET}\n", flush=True)
     for i, (tag, desc) in enumerate(items, 1):
         marker = f" {_DIM}(default){_RESET}" if tag == default else ""
         # Use tag as label for single-char non-digit tags (e.g. 'e' for Exit)
         label = tag if len(tag) == 1 and not tag.isdigit() else str(i)
-        print(f"  {label}. {desc}{marker}", flush=True)
+        print(f"  {label}. {_sanitize(desc)}{marker}", flush=True)
     print("  0. Cancel / Back", flush=True)
 
     default_num = "0"
@@ -341,10 +365,16 @@ def _fallback_yesno(question: str, default_yes: bool = True) -> bool:
     """Yes/No prompt using input()."""
     hint = "Y/n" if default_yes else "y/N"
     try:
-        answer = input(f"{question} [{hint}]: ").strip().lower()
-    except (KeyboardInterrupt, EOFError):
+        answer = input(f"{_sanitize(question)} [{hint}]: ").strip().lower()
+    except EOFError:
         print()
         return default_yes
+    except KeyboardInterrupt:
+        # Ctrl-C is a cancel, NOT consent — these prompts gate root actions
+        # ("Install as systemd service?", "Continue with git pull anyway?").
+        # Returning default_yes turned an interrupt into a silent "yes" (C8).
+        print()
+        return False
     if not answer:
         return default_yes
     return answer in ("y", "yes")
@@ -352,8 +382,8 @@ def _fallback_yesno(question: str, default_yes: bool = True) -> bool:
 
 def _fallback_msgbox(message: str, title: str = "Info") -> None:
     """Print a message."""
-    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}", flush=True)
-    print(message, flush=True)
+    print(f"\n{_CYAN}{_BOLD}{_sanitize(title)}{_RESET}", flush=True)
+    print(_sanitize(message), flush=True)
     try:
         input("\nPress Enter to continue...")
     except (KeyboardInterrupt, EOFError):
@@ -364,7 +394,7 @@ def _fallback_inputbox(prompt: str, default: str = "") -> Optional[str]:
     """Input prompt using input()."""
     hint = f" [{default}]" if default else ""
     try:
-        value = input(f"{prompt}{hint}: ").strip()
+        value = input(f"{_sanitize(prompt)}{hint}: ").strip()
     except (KeyboardInterrupt, EOFError):
         print()
         return None
@@ -376,11 +406,11 @@ def _fallback_radiolist(
     items: List[Tuple[str, str, bool]],
 ) -> Optional[str]:
     """Radio list using numbered print/input."""
-    print(f"\n{_CYAN}{_BOLD}{title}{_RESET}\n", flush=True)
+    print(f"\n{_CYAN}{_BOLD}{_sanitize(title)}{_RESET}\n", flush=True)
     default_num = "1"
     for i, (tag, desc, selected) in enumerate(items, 1):
         marker = " *" if selected else ""
-        print(f"  {i}. {desc}{marker}", flush=True)
+        print(f"  {i}. {_sanitize(desc)}{marker}", flush=True)
         if selected:
             default_num = str(i)
     print("  0. Cancel", flush=True)
