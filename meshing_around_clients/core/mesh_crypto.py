@@ -80,6 +80,19 @@ except ImportError:
     except ImportError:
         PROTOBUF_AVAILABLE = False
 
+# Authoritative portnum enum for the D1 plausibility gate AND display names.
+# The gate must track the firmware's vocabulary: a hand-maintained dict false-
+# rejected DETECTION_SENSOR/ALERT/AUDIO packets decrypted with the CORRECT key
+# (3rd-pass finding — worse than the wrong-key false-accept the gate replaced).
+_portnums_pb2 = None
+try:
+    from meshtastic.protobuf import portnums_pb2 as _portnums_pb2
+except ImportError:
+    try:
+        from meshtastic import portnums_pb2 as _portnums_pb2
+    except ImportError:
+        _portnums_pb2 = None
+
 
 # Meshtastic default channel key (AQ== in base64 = 0x01)
 DEFAULT_CHANNEL_KEY = bytes([0x01])
@@ -314,31 +327,55 @@ class ProtobufDecoder:
     - NEIGHBORINFO_APP (71): Neighbor information
     """
 
-    # Portnum to name mapping
-    PORTNUMS = {
-        0: "UNKNOWN",
-        1: "TEXT_MESSAGE_APP",
-        2: "REMOTE_HARDWARE_APP",
-        3: "POSITION_APP",
-        4: "NODEINFO_APP",
-        5: "ROUTING_APP",
-        6: "ADMIN_APP",
-        7: "TEXT_MESSAGE_COMPRESSED_APP",
-        8: "WAYPOINT_APP",
-        32: "REPLY_APP",
-        64: "IP_TUNNEL_APP",
-        65: "PAXCOUNTER_APP",
-        66: "SERIAL_APP",
-        67: "TELEMETRY_APP",
-        68: "ZPS_APP",
-        69: "SIMULATOR_APP",
-        70: "TRACEROUTE_APP",
-        71: "NEIGHBORINFO_APP",
-        72: "ATAK_PLUGIN",
-        73: "MAP_REPORT_APP",
-        256: "PRIVATE_APP",
-        257: "ATAK_FORWARDER",
-    }
+    # Portnum -> name. One constant serves BOTH display and the D1 plausibility
+    # gate (two consumers, one source — honest_failure_modes #5). Derived from
+    # the installed protobuf enum when available so it tracks firmware; the
+    # static fallback below mirrors the enum as of protobufs 2.6 (the old
+    # hand-typed dict was missing 9-13/33-36/74-78/112 and mislabeled 64-66,
+    # which made the gate reject real traffic).
+    if _portnums_pb2 is not None:
+        PORTNUMS = {v.number: v.name for v in _portnums_pb2.PortNum.DESCRIPTOR.values}
+    else:
+        PORTNUMS = {
+            0: "UNKNOWN_APP",
+            1: "TEXT_MESSAGE_APP",
+            2: "REMOTE_HARDWARE_APP",
+            3: "POSITION_APP",
+            4: "NODEINFO_APP",
+            5: "ROUTING_APP",
+            6: "ADMIN_APP",
+            7: "TEXT_MESSAGE_COMPRESSED_APP",
+            8: "WAYPOINT_APP",
+            9: "AUDIO_APP",
+            10: "DETECTION_SENSOR_APP",
+            11: "ALERT_APP",
+            12: "KEY_VERIFICATION_APP",
+            13: "REMOTE_SHELL_APP",
+            32: "REPLY_APP",
+            33: "IP_TUNNEL_APP",
+            34: "PAXCOUNTER_APP",
+            35: "STORE_FORWARD_PLUSPLUS_APP",
+            36: "NODE_STATUS_APP",
+            64: "SERIAL_APP",
+            65: "STORE_FORWARD_APP",
+            66: "RANGE_TEST_APP",
+            67: "TELEMETRY_APP",
+            68: "ZPS_APP",
+            69: "SIMULATOR_APP",
+            70: "TRACEROUTE_APP",
+            71: "NEIGHBORINFO_APP",
+            72: "ATAK_PLUGIN",
+            73: "MAP_REPORT_APP",
+            74: "POWERSTRESS_APP",
+            75: "LORAWAN_BRIDGE",
+            76: "RETICULUM_TUNNEL_APP",
+            77: "CAYENNE_APP",
+            78: "ATAK_PLUGIN_V2",
+            112: "GROUPALARM_APP",
+            256: "PRIVATE_APP",
+            257: "ATAK_FORWARDER",
+            511: "MAX",
+        }
 
     @staticmethod
     def is_available() -> bool:
