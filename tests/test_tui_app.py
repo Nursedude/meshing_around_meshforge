@@ -656,6 +656,19 @@ class TestSafePanelRender(unittest.TestCase):
         panel = screen.render()
         self.assertIsNotNone(panel)
 
+    def test_render_survives_header_exception(self):
+        """A2: an exception in _get_header must NOT freeze/crash the frame —
+        _render returns a Layout with a placeholder instead."""
+        self.tui._get_header = lambda: (_ for _ in ()).throw(ValueError("header boom"))
+        layout = self.tui._render()
+        self.assertIsNotNone(layout)
+
+    def test_render_survives_footer_exception(self):
+        """A2: same guard for the footer."""
+        self.tui._get_footer = lambda: (_ for _ in ()).throw(TypeError("footer boom"))
+        layout = self.tui._render()
+        self.assertIsNotNone(layout)
+
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")
 class TestConfigValidationOnStartup(unittest.TestCase):
@@ -969,6 +982,52 @@ class TestConfigScreenTemplateMerge(unittest.TestCase):
         panel = self.screen.render()
         # The panel should render without error
         self.assertIsNotNone(panel)
+
+    def test_save_does_not_bake_template_defaults(self):
+        """A1: saving after editing one key must NOT persist untouched template
+        defaults or commented-out example keys into the live config."""
+        import configparser
+        from pathlib import Path
+
+        self._setup_merge_test()  # merges whoami, ollamamodel(commented), sentry.*
+        self.screen._loaded = True
+        self.screen._rebuild_items()
+
+        # User edits ONE unrelated key -> discarded from _template_keys, others stay.
+        self.screen._parser.set("general", "motd", "Edited")
+        self.screen._template_keys.discard(("general", "motd"))
+        self.screen._dirty = True
+        self.screen._save()
+
+        saved = configparser.ConfigParser()
+        saved.read(self.config_path)
+        # The edited user key persists.
+        self.assertEqual(saved.get("general", "motd"), "Edited")
+        # Untouched template default must NOT be baked in.
+        self.assertFalse(saved.has_option("general", "whoami"))
+        # Commented-out example must NOT be baked in.
+        self.assertFalse(saved.has_option("general", "ollamamodel"))
+        # A whole section that existed only in the template must not appear.
+        self.assertFalse(saved.has_section("sentry"))
+
+    def test_save_persists_a_user_edited_former_default(self):
+        """A former template-default the user actually edits IS persisted."""
+        import configparser
+        from pathlib import Path
+
+        self._setup_merge_test()
+        self.screen._loaded = True
+        self.screen._rebuild_items()
+
+        # User edits a key that was a template default -> discard marks it user-set.
+        self.screen._parser.set("general", "whoami", "False")
+        self.screen._template_keys.discard(("general", "whoami"))
+        self.screen._dirty = True
+        self.screen._save()
+
+        saved = configparser.ConfigParser()
+        saved.read(self.config_path)
+        self.assertEqual(saved.get("general", "whoami"), "False")
 
 
 @unittest.skipUnless(RICH_AVAILABLE, "Rich library not available")

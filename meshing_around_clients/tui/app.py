@@ -1908,6 +1908,34 @@ class _BaseConfigEditor(Screen):
         self._load()
         self._dirty = False
 
+    def _parser_for_save(self) -> "object":
+        """Return a parser copy WITHOUT the merged template defaults (A1).
+
+        ``_merge_template_defaults`` seeds the in-memory parser with every
+        template key the user's file omits — including commented-out *example*
+        keys — purely so the editor can display and dim them.  Persisting those
+        would silently bake template/example values into the live config (the
+        #62 saved-defaults trap: bumps to a code/template default then never
+        take effect, and commented examples become live behavior).  A key the
+        user actually edits is ``discard``-ed from ``_template_keys`` at edit
+        time, so only *untouched* defaults are dropped here.
+        """
+        import configparser as _cp
+
+        out = _cp.ConfigParser()
+        for section in self._parser.sections():
+            kept = [
+                (key, self._parser.get(section, key, raw=True))
+                for key in self._parser.options(section)
+                if (section, key) not in self._template_keys
+            ]
+            if not kept:
+                continue
+            out.add_section(section)
+            for key, value in kept:
+                out.set(section, key, value)
+        return out
+
     def _save(self) -> None:
         """Save config back to file with .ini.bak backup."""
         import shutil as _shutil
@@ -1920,7 +1948,7 @@ class _BaseConfigEditor(Screen):
                 _shutil.copy2(str(self._config_path), str(bak))
             from meshing_around_clients.core.config import _atomic_write_parser
 
-            _atomic_write_parser(self._parser, self._config_path)
+            _atomic_write_parser(self._parser_for_save(), self._config_path)
             self._dirty = False
             self._template_keys.clear()
             self._post_save_hook()
@@ -2854,18 +2882,38 @@ class MeshingAroundTUI:
         flash.append(f" {text}", style="bold yellow")
         return Panel(Align.center(flash), box=box.HEAVY, border_style="red", padding=(0, 1))
 
+    def _safe_chrome(self, build, label):
+        """Build a header/footer/flash component, never letting it raise (A2).
+
+        ``_render`` only guarded ``screen.render()``; an exception from
+        ``_get_header``/``_get_footer``/``_get_alert_flash`` escaped to the run
+        loop, which swallowed a narrow tuple at DEBUG and left the last frame
+        frozen on screen with no staleness indicator (or crashed the TUI for an
+        un-tupled type).  Return a visible red placeholder + one WARNING per
+        signature instead of freezing.  A ``None`` return (no active flash) is
+        passed through unchanged.
+        """
+        try:
+            return build()
+        except Exception as e:  # noqa: BLE001 — chrome must never freeze the frame
+            sig = f"{label}:{type(e).__name__}:{e}"
+            if sig != getattr(self, "_last_chrome_error_sig", None):
+                self._last_chrome_error_sig = sig
+                logger.warning("Render error building %s", label, exc_info=True)
+            return Text(f"[{label} render error: {type(e).__name__}]", style="red")
+
     def _render(self) -> Layout:
         """Render the full application layout."""
         layout = Layout()
 
         # Check for active alert flash banner
-        flash_panel = self._get_alert_flash()
+        flash_panel = self._safe_chrome(self._get_alert_flash, "alert-flash")
 
-        parts = [Layout(self._get_header(), name="header", size=3)]
+        parts = [Layout(self._safe_chrome(self._get_header, "header"), name="header", size=3)]
         if flash_panel is not None:
             parts.append(Layout(flash_panel, name="flash", size=3))
         parts.append(Layout(name="body"))
-        parts.append(Layout(self._get_footer(), name="footer", size=3))
+        parts.append(Layout(self._safe_chrome(self._get_footer, "footer"), name="footer", size=3))
         layout.split_column(*parts)
 
         # Render current screen with connection-safety guard

@@ -206,10 +206,10 @@ class SentryConfig:
 
         return cls(
             enabled=_str_to_bool(get_ci("SentryEnabled", False)),
-            interface=int(get_ci("SentryInterface", 1)),
-            channel=int(get_ci("SentryChannel", 2)),
-            radius_meters=int(get_ci("SentryRadius", 100)),
-            holdoff_multiplier=int(get_ci("SentryHoldoff", 9)),
+            interface=_coerce_int(get_ci("SentryInterface", 1), 1),
+            channel=_coerce_int(get_ci("SentryChannel", 2), 2),
+            radius_meters=_coerce_int(get_ci("SentryRadius", 100), 100),
+            holdoff_multiplier=_coerce_int(get_ci("SentryHoldoff", 9), 9),
             ignore_list=_str_to_list(ignore_str),
             watch_list=_str_to_list(watch_str),
             email_alerts=_str_to_bool(get_ci("emailSentryAlerts", False)),
@@ -271,10 +271,10 @@ class AltitudeAlertConfig:
 
         return cls(
             enabled=_str_to_bool(get_ci("highFlyingAlert", False)),
-            min_altitude=int(get_ci("highFlyingAlertAltitude", 2000)),
+            min_altitude=_coerce_int(get_ci("highFlyingAlertAltitude", 2000), 2000),
             check_openskynetwork=_str_to_bool(get_ci("highflyOpenskynetwork", True)),
-            interface=int(get_ci("highFlyingAlertInterface", 1)),
-            channel=int(get_ci("highFlyingAlertChannel", 2)),
+            interface=_coerce_int(get_ci("highFlyingAlertInterface", 1), 1),
+            channel=_coerce_int(get_ci("highFlyingAlertChannel", 2), 2),
             ignore_list=_str_to_list(ignore_str),
         )
 

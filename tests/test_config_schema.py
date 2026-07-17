@@ -192,6 +192,35 @@ class TestAlertConfigs(unittest.TestCase):
         self.assertEqual(cfg.min_altitude, 3000)
         self.assertEqual(cfg.channel, 2)
 
+    def test_sentry_from_upstream_nonint_falls_back(self):
+        """A3c: a hand-typed non-numeric channel/radius must not raise
+        ValueError and abort the whole config import — coerce to the default."""
+        data = {
+            "SentryEnabled": "true",
+            "SentryChannel": "notanint",
+            "SentryRadius": "wide",
+            "SentryInterface": "",
+            "SentryHoldoff": "n/a",
+        }
+        cfg = SentryConfig.from_upstream(data)  # must not raise
+        self.assertEqual(cfg.channel, 2)
+        self.assertEqual(cfg.radius_meters, 100)
+        self.assertEqual(cfg.interface, 1)
+        self.assertEqual(cfg.holdoff_multiplier, 9)
+
+    def test_altitude_from_upstream_nonint_falls_back(self):
+        """A3c: same guard for the altitude-alert upstream conversion."""
+        data = {
+            "highFlyingAlert": "true",
+            "highFlyingAlertAltitude": "high",
+            "highFlyingAlertChannel": "x",
+            "highFlyingAlertInterface": "y",
+        }
+        cfg = AltitudeAlertConfig.from_upstream(data)  # must not raise
+        self.assertEqual(cfg.min_altitude, 2000)
+        self.assertEqual(cfg.channel, 2)
+        self.assertEqual(cfg.interface, 1)
+
 
 class TestMQTTConfig(unittest.TestCase):
     """Test MQTT configuration."""
