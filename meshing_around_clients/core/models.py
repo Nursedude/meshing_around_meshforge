@@ -446,6 +446,7 @@ class Node:
         # the log path, TUI, and geojson export all inherit clean identifiers.
         self.short_name = sanitize_control_chars(self.short_name)
         self.long_name = sanitize_control_chars(self.long_name)
+        self.hardware_model = sanitize_control_chars(str(self.hardware_model))
         if self.position is None:
             self.position = Position()
         if self.telemetry is None:
@@ -898,7 +899,9 @@ class MeshNetwork:
             if long_name is not None:
                 node.long_name = sanitize_control_chars(long_name)
             if hardware_model is not None:
-                node.hardware_model = hardware_model
+                # hwModel is attacker-controlled and rendered to the TUI/geojson
+                # too — scrub it like the name fields (3rd-pass B1 residual).
+                node.hardware_model = sanitize_control_chars(str(hardware_model))
             node.last_heard = datetime.now(timezone.utc)
             self._dirty = True
 

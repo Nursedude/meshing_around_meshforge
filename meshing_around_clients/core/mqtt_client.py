@@ -1320,8 +1320,18 @@ class MQTTMeshtasticClient(CallbackMixin):
                 with self._stats_lock:
                     self._stats["decrypt_failures"] += 1
                     now = time.monotonic()
-                    last = self._decrypt_warn_last.get(channel_name, 0.0)
-                    self._decrypt_warn_last[channel_name] = now
+                    last_logged = self._decrypt_warn_last.get(channel_name, 0.0)
+                    # ``last`` must track the last LOG time, not the last failure
+                    # time: writing it unconditionally on every failure made the
+                    # 60s gate never fire under a sustained sub-60s failure flood
+                    # (silence read as recovery — honest_failure_modes inversion).
+                    should_log = now - last_logged >= 60.0
+                    if should_log:
+                        self._decrypt_warn_last[channel_name] = now
+                    elif channel_name not in self._decrypt_warn_last:
+                        # First sighting inside the window still needs a slot so
+                        # the bound/prune accounting sees it.
+                        self._decrypt_warn_last[channel_name] = last_logged
                     # ``channel_name`` is an attacker-controlled topic segment;
                     # without a cap a wildcard-subscription flood of unique names
                     # grows this dict without bound (OOM on a Pi Zero).  Prune
@@ -1336,7 +1346,7 @@ class MQTTMeshtasticClient(CallbackMixin):
                             keep = sorted(pruned.items(), key=lambda kv: kv[1])[-(_MAX_DECRYPT_WARN_ENTRIES // 2) :]
                             pruned = dict(keep)
                         self._decrypt_warn_last = pruned
-                if now - last >= 60.0:
+                if should_log:
                     logger.debug(
                         "MQTT decrypt failed on channel %r (likely custom PSK)",
                         channel_name,
@@ -1370,9 +1380,9 @@ class MQTTMeshtasticClient(CallbackMixin):
             sender = struct.unpack("<I", payload[4:8])[0]
 
             sender_id = f"!{sender:08x}"
-            node = self.network.get_node(sender_id)
-            if node:
-                node.last_heard = datetime.now(timezone.utc)
+            if self.network.get_node(sender_id):
+                # Stamp under the lock (3rd-pass B5 residual).
+                self.network.touch_node(sender_id)
 
         except struct.error:
             pass
@@ -1451,7 +1461,10 @@ class MQTTMeshtasticClient(CallbackMixin):
             if pos_data and node:
                 position = self._extract_position(pos_data)
                 if position:
-                    node.position = position
+                    # Route through the lock-holding mutator (3rd-pass B5
+                    # residual — this decoded path rebound node fields off
+                    # network._lock, unlike the JSON handlers).
+                    self.network.update_node_position(sender_id, position)
                     with self._stats_lock:
                         self._stats["position_updates"] += 1
                     self._trigger_callbacks("on_position", sender_id)
@@ -1462,7 +1475,7 @@ class MQTTMeshtasticClient(CallbackMixin):
             env_metrics = telemetry_data.get("environment_metrics", {})
             node = self.network.get_node(sender_id)
             if node and (device_metrics or env_metrics):
-                node.telemetry = NodeTelemetry(
+                telemetry = NodeTelemetry(
                     battery_level=device_metrics.get("battery_level", 0),
                     voltage=device_metrics.get("voltage", 0),
                     channel_utilization=device_metrics.get("channel_utilization", 0),
@@ -1474,9 +1487,10 @@ class MQTTMeshtasticClient(CallbackMixin):
                     pressure=env_metrics.get("barometric_pressure") or None,
                     gas_resistance=env_metrics.get("gas_resistance") or None,
                 )
+                self.network.update_node_telemetry(sender_id, telemetry)
                 with self._stats_lock:
                     self._stats["telemetry_updates"] += 1
-                self._trigger_callbacks("on_telemetry", sender_id, node.telemetry)
+                self._trigger_callbacks("on_telemetry", sender_id, telemetry)
 
                 self._check_battery_alert(node, sender_id)
 
@@ -1484,11 +1498,16 @@ class MQTTMeshtasticClient(CallbackMixin):
             user_data = decoded.get("user", {})
             node = self.network.get_node(sender_id)
             if user_data and node:
-                node.short_name = user_data.get("short_name", node.short_name)
-                node.long_name = user_data.get("long_name", node.long_name)
+                # update_node_info scrubs control chars + holds the lock; the
+                # raw rebind here left hostile short/long/hw names unsanitized
+                # (3rd-pass B1/B5 residual on the decoded path).
                 hw_model = user_data.get("hw_model", 0)
-                if hw_model:
-                    node.hardware_model = str(hw_model)
+                self.network.update_node_info(
+                    sender_id,
+                    short_name=user_data.get("short_name"),
+                    long_name=user_data.get("long_name"),
+                    hardware_model=str(hw_model) if hw_model else None,
+                )
                 self._trigger_callbacks("on_node_update", sender_id, False)
 
         elif msg_type == "traceroute" or portnum == 70:
