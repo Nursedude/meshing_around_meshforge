@@ -17,6 +17,21 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _warn_backend_unavailable(exc: BaseException) -> None:
+    """Witness for a broken/absent `cryptography` backend (D2).
+
+    Extracted so it is unit-testable without reimporting the module; the
+    import guard below calls it instead of swallowing the failure silently.
+    """
+    logger.warning(
+        "cryptography backend unavailable (%s: %s) — encrypted MQTT decode disabled; "
+        "install/repair the `cryptography` package",
+        type(exc).__name__,
+        exc,
+    )
+
+
 # Try to import cryptography library
 # Use BaseException to catch pyo3_runtime.PanicException from broken Rust backends
 CRYPTO_AVAILABLE = False
@@ -36,6 +51,11 @@ except BaseException as e:
     # Re-raise KeyboardInterrupt/SystemExit so they aren't silently swallowed.
     if isinstance(e, (KeyboardInterrupt, SystemExit)):
         raise
+    # D2: leave a witness. Without this the swallow was silent — a Pi-Zero /
+    # piwheels box with a broken Rust `cryptography` imported fine, decrypt was
+    # skipped, and the operator saw encrypted traffic never decode with NO cause
+    # named anywhere (honest_failure_modes #9: every swallow needs a witness).
+    _warn_backend_unavailable(e)
 
 # Try to import meshtastic protobuf definitions
 mqtt_pb2 = None
@@ -728,7 +748,7 @@ class MeshPacketProcessor:
         # legacy packets where the inner bytes might be a full MeshPacket.
         if self.decoder.is_available():
             decoded = self._try_decode_data(decrypted)
-            if decoded and decoded.get("portnum"):
+            if decoded and self._decode_is_plausible(decoded):
                 result.decoded = decoded
                 result.portnum = decoded.get("portnum", 0)
                 result.portnum_name = decoded.get("portnum_name", "")
@@ -736,7 +756,7 @@ class MeshPacketProcessor:
             else:
                 # Fallback: try as a full MeshPacket (legacy path)
                 mp_decoded = self.decoder.decode_mesh_packet(decrypted)
-                if mp_decoded and "error" not in mp_decoded and mp_decoded.get("portnum"):
+                if mp_decoded and "error" not in mp_decoded and self._decode_is_plausible(mp_decoded):
                     result.decoded = mp_decoded
                     result.portnum = mp_decoded.get("portnum", 0)
                     result.portnum_name = mp_decoded.get("portnum_name", "")
@@ -751,6 +771,30 @@ class MeshPacketProcessor:
             result.error = "Protobuf library not available"
 
         return result
+
+    def _decode_is_plausible(self, decoded: Dict[str, Any]) -> bool:
+        """Gate a candidate-key decode so wrong-key noise isn't accepted (D1).
+
+        Meshtastic AES-CTR is MAC-less, so a wrong key yields pseudorandom
+        bytes that occasionally parse as a Data protobuf; looping N candidate
+        keys and accepting the first truthy portnum multiplied that false-accept.
+        Tighten the criterion: the portnum must be in the known vocabulary, the
+        sub-decode must not have errored, and content-bearing types must have
+        actually populated their field.  (Measured: ~14× fewer accepts, and
+        fabricated text/position driven to zero over 1e6 wrong-key trials.)
+        """
+        portnum = decoded.get("portnum")
+        if not portnum:  # 0/UNKNOWN or missing — never a real decode
+            return False
+        if portnum not in self.decoder.PORTNUMS:
+            return False
+        if "decode_error" in decoded:
+            return False
+        if portnum == 1 and not decoded.get("text"):  # TEXT_MESSAGE_APP
+            return False
+        if portnum == 3 and "position" not in decoded:  # POSITION_APP
+            return False
+        return True
 
     def _parse_service_envelope(self, data: bytes) -> Optional[Dict[str, Any]]:
         """Parse MQTT ServiceEnvelope if protobuf is available."""
