@@ -268,3 +268,59 @@ way.
 - The TUI Rich-markup-injection finding (PLAUSIBLE HIGH) is the highest-value
   unfixed item: a single hostile NodeInfo packet can persistently DoS the
   operator's primary node view. Good candidate for the next pass.
+
+---
+
+## THIRD PASS — re-review of my own 2nd-pass fixes (2026-07-16, Fable 5)
+
+Per [[feedback_review_your_own_fixes]] a self-applied fix is unreviewed code.
+Four adversarial reviewers (one per surface) re-checked the eight 2nd-pass
+commits `fe34186..ffc15d8`, refute-by-default, each finding independently
+verified against source (repro or complete-path read) before it counted.
+Suite at pass start: **1101 passed, exit 0.**
+
+**Result: the 2nd-pass fixes had real fix-introduced defects** — a self-review
+paid off. 15 confirmed, fixed red-test-first across 5 commits
+(`ffc15d8..a4ded40`). Suite **1101 → 1124, exit 0**; CI-scoped black/isort/
+flake8 + config-atomicity all exit 0.
+
+| ID | Fix-introduced defect | Sev | Commit |
+|----|-----------------------|-----|--------|
+| D1-vocab | The plausibility gate reused the hand-typed PORTNUMS display dict (missing 8+ real portnums 9-13/33-36/74-78/112, mislabeled 64-66) — packets decrypted with the CORRECT key on DETECTION_SENSOR/ALERT/AUDIO were **false-rejected**, worse than the ~1e-6 false-accept it replaced (repro: 0/3 real portnums → 5/5 after). Now derives from `portnums_pb2`. | **HIGH** | `97c7ad3` |
+| A1-resave | `_save()` cleared `_template_keys`, so the SECOND save of a session baked every default + commented example into live config — the exact #62 trap "closed" in the 2nd pass, resurrected. | **HIGH** | `83a1974` |
+| profile-drop | `_apply_regional_template` left applied values marked template-sourced → `_parser_for_save` silently DROPPED an applied profile on save (pre-fix it persisted). | HIGH | `83a1974` |
+| DEFAULT-mangle | `_parser_for_save` duplicated `[DEFAULT]` keys into every section and dropped the section itself. | LOW | `83a1974` |
+| chrome-dedup | A2's one shared dedup slot logged 2 WARNINGs+tracebacks per event-driven frame when header+footer both failed (Pi log flood); `str(e)` in the sig defeated dedup on varying messages. | MED | `83a1974` |
+| coerce-witness | A3c's `_coerce_int/_float` (both twins) traded the crash for a SILENT default — now a warning witness (honest_failure_modes #9). | MED | `83a1974` |
+| B1/B5-twin | B1/B5 fixed only the JSON handlers; `_process_decoded_packet` (encrypted/protobuf path, default PSK is in the candidate list) rebound node fields off `_lock` and stored hostile names unscrubbed. `hardware_model` was never scrubbed on any path. | MED | `1ab0c71` |
+| B3-cadence | The warn-map wrote `last` unconditionally, so the 60s log gate never fired under a sustained sub-60s failure flood (silence read as recovery). | MED | `1ab0c71` |
+| B2-test | The B2 test was tautological (bumped the counter manually, never ran the loop) — narrowing the except clause left it green. Replaced with a real loop-body survival test + source guard. | MED | `1ab0c71` |
+| C1-perms | `_atomic_write_py` (mkstemp 0600 writer-owned + `os.replace` no metadata restore) turned a world-readable bot source into root:root 0600 under the root installer → `User=<pi>` service PermissionError, fleet-wide (repro: 0o644→0o600). | **CRITICAL** | `5b68b84` |
+| C5-untracked | An untracked-only tree (the `.bak`/log files these fixes create) made stash a no-op then pop fail → false success=False on a good pull. Now only tracked changes stash, pop only if an entry was made; ported to `rollback_to_version` (pop-conflict now fails loud). | MED | `5b68b84` |
+| C2-sudo-env | `DEBIAN_FRONTEND` via `env=` on the sudo process is stripped by `env_reset` — apt never saw it. Now a `sudo VAR=val` argv element (repro: `sudo -n printenv` rc=1). | MED | `5b68b84` |
+| A3b-empty | The corrupt-config branch returned an EMPTY parser → the crash it cured resurfaced one menu write later (`config.set` NoSectionError, repro confirmed). Now populates in-memory defaults (no save; witness kept). | **HIGH** | `a4ded40` |
+| C8-EOF | The Ctrl-C-is-not-consent fix left the EOF leg returning `default_yes` — `echo \| mesh_client.py` auto-consented to sudo installs. EOF now declines. | MED | `a4ded40` |
+| C7-set-e | `setup_bot_service \|\| true` disabled `set -e` for the whole function → a real tee/systemctl failure printed a false "installed and enabled". Benign skip returns 0, `\|\| true` gone; dialout usermod target-resolution hardened. | MED | `a4ded40` |
+
+**Residuals — NOT fix-introduced (pre-existing incomplete-fix findings), logged
+for a future pass, not expanded into this one (calibrated scope):**
+- C4: `git_pull` still merges `origin/main` into a non-`main` HEAD (fork
+  branch / detached rollback HEAD) and reports success. `get_git_current_branch`
+  exists, unused. Fix = resolve current branch + refuse/`--ff-only`.
+- The C2/C3/C4 **twin sites in `configure_bot.py`** (`update_meshing_around`
+  pull-fallback; `dpkg -l/-s` installed-truth; fallback `run_command` no
+  DEVNULL/env) are untouched — the modular `system_maintenance.py` was fixed,
+  its legacy shim was not.
+- D2: `result.error` is still discarded at both decrypt consumers; a runtime
+  backend failure still collapses to a generic "Decryption failed" with no
+  cause surfaced. Only the import-time witness shipped.
+- A3d (from the 2nd pass) still open: the 7×-duplicated broker parser →
+  shared `parse_broker()` design.
+- Unicode bidi/zero-width controls survive `_sanitize` (display spoofing, not
+  execution); `CONFIG_LOAD_ERROR` witness still has no probe reader.
+
+**Method note:** every finding was verified before counting — the D1-vocab,
+A1-resave, profile-drop, A3b, C1-perms, C2-env findings each had a runnable
+repro; the rest were confirmed by complete-path source reads. This is the
+calibrated-claims consumer-of-record discipline: a reviewer agent's report is
+PLAUSIBLE until the error path is proven against what the consumer sees.
