@@ -97,8 +97,12 @@ class TestFallbackYesno(unittest.TestCase):
         self.assertFalse(whiptail._fallback_yesno("Continue?", default_yes=False))
 
     @patch("builtins.input", side_effect=EOFError)
-    def test_eof_returns_default(self, _):
-        self.assertTrue(whiptail._fallback_yesno("Continue?", default_yes=True))
+    def test_eof_is_decline_not_consent(self, _):
+        # 3rd pass: EOF (no interactive stdin, e.g. `echo | mesh_client.py`) at
+        # a root-action gate must NOT auto-consent — the C8 Ctrl-C fix left this
+        # leg returning default_yes, auto-yessing sudo installs on headless runs.
+        self.assertFalse(whiptail._fallback_yesno("Continue?", default_yes=True))
+        self.assertFalse(whiptail._fallback_yesno("Continue?", default_yes=False))
 
 
 class TestFallbackInputbox(unittest.TestCase):

@@ -721,9 +721,21 @@ def load_config() -> ConfigParser:
             CONFIG_LOAD_ERROR = f"{type(e).__name__}: {e}"
             log(
                 f"Config at {CONFIG_FILE} is corrupt ({e}); "
-                "built-in defaults may apply — VERIFY the broker before relying on it",
+                "built-in defaults are in effect — VERIFY the broker before relying on it",
                 "ERROR",
             )
+            # Populate the built-in defaults IN MEMORY so menu writes
+            # (config.set on [interface]/[advanced]/...) don't re-crash with
+            # NoSectionError one interaction later — the empty parser only
+            # deferred the traceback (3rd-pass finding). Do NOT save: the
+            # corrupt file stays on disk for the operator to repair, and the
+            # CONFIG_LOAD_ERROR witness above says the defaults (incl. the
+            # PUBLIC broker) are active.
+            try:
+                config = ConfigParser()
+                config.read_string(DEFAULT_CONFIG)
+            except ConfigParserError:
+                config = ConfigParser()
             return config
 
         # Migrate legacy [connection] section if present

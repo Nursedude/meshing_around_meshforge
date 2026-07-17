@@ -140,6 +140,28 @@ class TestLoadSaveConfig(unittest.TestCase):
         self.assertIsNotNone(config)
         self.assertIsNotNone(mesh_client.CONFIG_LOAD_ERROR)
 
+    @patch.object(mesh_client, "CONFIG_FILE")
+    def test_corrupt_config_returns_usable_parser(self, mock_config_file):
+        """3rd pass: A3b returned an EMPTY parser, so the crash it cured
+        resurfaced one menu interaction later — config.set(section, ...) on a
+        missing section raised NoSectionError. The parser must carry the
+        default sections so menus don't re-crash, while keeping the witness."""
+        import configparser
+
+        mesh_client.CONFIG_FILE = self.config_path
+        self.config_path.write_text("this is not = a valid ini\nno section header\n")
+        mesh_client.CONFIG_LOAD_ERROR = None
+        config = mesh_client.load_config()
+
+        # The witness stays set...
+        self.assertIsNotNone(mesh_client.CONFIG_LOAD_ERROR)
+        # ...and every menu-write path is safe (the exact resurfacing crash).
+        try:
+            config.set("interface", "type", "mqtt")
+            config.set("advanced", "demo_mode", "true")
+        except configparser.NoSectionError as e:
+            self.fail(f"corrupt-config parser missing a default section: {e}")
+
 
 class TestMigrateConnectionSection(unittest.TestCase):
     """Test _migrate_connection_section() for legacy config migration."""

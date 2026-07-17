@@ -361,8 +361,12 @@ setup_bot_service() {
     fi
 
     if [[ -z "$BOT_DIR" ]]; then
+        # Benign skip, not a failure — return 0 so `set -e` doesn't abort and
+        # the caller needs no `|| true` (which would have disabled `set -e` for
+        # this whole function, masking a REAL tee/systemctl failure below as a
+        # false "installed and enabled" — 3rd-pass finding).
         log_warn "meshing-around not found — skipping bot service install"
-        return 1
+        return 0
     fi
 
     log_ok "Found meshing-around at: $BOT_DIR"
@@ -438,16 +442,19 @@ setup_serial_permissions() {
     if [ "$CONN_TYPE" = "serial" ] || [ "$CONN_TYPE" = "auto" ]; then
         log_info "Setting up serial port permissions..."
 
-        if ! groups | grep -q dialout; then
-            # Quote and prefer the invoking (non-root) user; an unset/empty
-            # $USER under `set -e` would give usermod no argument -> usage error
-            # -> whole-script abort (C7).
-            _target_user="${SUDO_USER:-$USER}"
+        # Prefer the invoking (non-root) user, then $USER, then the uid-owner of
+        # the login session. If we STILL can't resolve a target, skip loudly —
+        # an empty argument to usermod is a usage error that would abort the
+        # whole script under `set -e` (3rd-pass residual of C7).
+        _target_user="${SUDO_USER:-${USER:-$(id -un 2>/dev/null || true)}}"
+        if [ -z "$_target_user" ] || [ "$_target_user" = "root" ]; then
+            log_warn "Could not resolve a non-root user for the dialout group — skipping (add manually: sudo usermod -a -G dialout <user>)"
+        elif id -nG "$_target_user" 2>/dev/null | grep -qw dialout; then
+            log_ok "$_target_user already in dialout group"
+        else
             sudo usermod -a -G dialout "$_target_user"
             log_ok "Added $_target_user to dialout group"
             log_warn "You may need to logout and login for group changes to take effect"
-        else
-            log_ok "Already in dialout group"
         fi
     fi
 }
@@ -519,10 +526,11 @@ main() {
     install_local_broker
     setup_serial_permissions
     setup_systemd_service
-    # `|| true`: setup_bot_service returns 1 on the benign "meshing-around not
-    # found — skipping" path; under `set -e` that would abort before the summary
-    # (C7). The skip is not a failure — always reach print_summary.
-    setup_bot_service || true
+    # setup_bot_service returns 0 on the benign "meshing-around not found" skip,
+    # so no `|| true` is needed here — and omitting it keeps `set -e` active
+    # inside the function so a real tee/systemctl failure aborts loudly instead
+    # of printing a false "installed and enabled" (3rd-pass finding).
+    setup_bot_service
     print_summary
 }
 

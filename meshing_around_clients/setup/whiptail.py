@@ -364,13 +364,13 @@ def _fallback_yesno(question: str, default_yes: bool = True) -> bool:
     hint = "Y/n" if default_yes else "y/N"
     try:
         answer = input(f"{_sanitize(question)} [{hint}]: ").strip().lower()
-    except EOFError:
-        print()
-        return default_yes
-    except KeyboardInterrupt:
-        # Ctrl-C is a cancel, NOT consent — these prompts gate root actions
-        # ("Install as systemd service?", "Continue with git pull anyway?").
-        # Returning default_yes turned an interrupt into a silent "yes" (C8).
+    except (EOFError, KeyboardInterrupt):
+        # No affirmative answer was given — Ctrl-C (interrupt) OR EOF (no
+        # interactive stdin, e.g. `echo | mesh_client.py` on a headless box).
+        # These prompts gate ROOT actions, so an absent "yes" must NOT be read
+        # as consent: EOF returning default_yes auto-consented to sudo installs
+        # on exactly the non-interactive path where it matters (3rd-pass — the
+        # C8 Ctrl-C fix left the EOF leg open). Decline in both cases.
         print()
         return False
     if not answer:
