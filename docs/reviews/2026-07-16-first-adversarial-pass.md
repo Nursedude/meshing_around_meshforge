@@ -211,7 +211,29 @@ to **duplicated config machinery** (`mesh_client.py` raw ConfigParser /
 would collapse the drift class.
 
 ### Fix log (second pass, red-test-first, suite re-derived per commit)
-_(updated as each batch lands)_
+
+All confirmed findings fixed red-test-first, suite green per commit
+(1058 → **1101 passed, exit 0**; config-atomicity lint exit 0). Seven commits:
+
+| Commit | Findings | Δ tests |
+|--------|----------|---------|
+| `fe34186` | B1 B2 B3 B4 B5 (parse surface) | +14 |
+| `3b3d097` | D1 D2 (crypto residuals) | +9 |
+| `7878936` | **A1** A2 A3c (TUI/config) | +6 |
+| `55d2721` | C2 C3 C4 C5 (installer subprocess) | +5 (3 updated) |
+| `a81afa1` | C1 C6 (patch-apply / verify_bot) | +4 |
+| `1ea9d79` | A3a C8 (whiptail fallback) | +4 (1 updated) |
+| `9147c1a` | A3b C7 (mesh_client / setup_headless) | +1 |
+
+**DEFERRED — A3d (IPv6 broker `rsplit(":",1)`, PARTIAL / LOW-MED).** Not a
+crash on the realistic path (verifier: mostly-refuted); the genuine issue is a
+**7×-duplicated broker parser** across `mesh_client.py` / `core/config.py` /
+`config_schema.py` / `app.py`, and the correct fix is a single shared
+`parse_broker()` helper (a refactor spanning four modules that each re-implement
+config load), NOT four scattered patches. Tracked as a next-pass dedup item
+alongside the A1/A3b cross-cutting "duplicated config machinery" note above.
+Deferring is the calibrated call: the fix is a design change, and doing it
+piecemeal would spread the drift it's meant to remove.
 
 ## Crypto fix — field-test result (2026-07-16, same session)
 
