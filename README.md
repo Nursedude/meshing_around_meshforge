@@ -7,7 +7,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 [![Version](https://img.shields.io/badge/version-0.6.0-blue.svg)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-843-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
 [![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
 
 > **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
@@ -18,7 +18,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 
 > **BETA SOFTWARE** - Under active development. Some features are incomplete or untested. See [Feature Status](#feature-status) below.
 
-> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (843 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
+> **NEEDS TESTING** - The TUI, Demo mode, and core models are well-tested (~1,100 automated tests). Serial, TCP, BLE, and SMS modes have **zero real-world testing** and need community validation with actual hardware. MQTT has limited testing against live brokers. If you can help test, see [HARDWARE_TESTING.md](HARDWARE_TESTING.md).
 
 > **NO RADIO REQUIRED** - meshing_around_meshforge can connect to the Meshtastic mesh via MQTT broker without any radio hardware. Use Demo mode to explore the interface with simulated data, or MQTT mode to participate in live mesh channels using only a network connection.
 
@@ -854,7 +854,7 @@ meshing_around_meshforge/
 
 ### Automated Tests
 
-The project has **806 automated tests** across 17 test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and the encrypted MQTT downlink path (envelope build, channel hash, v1/v2 topic parsing, echo dedupe).
+The project has **~1,100 automated tests** (run `python3 -m pytest tests/ --co -q` for the live count) across <!--STAT:testfiles-->27<!--/STAT--> test files covering core models, config, TUI rendering, MQTT client, crypto, API, chunk reassembly, and the encrypted MQTT downlink path (envelope build, channel hash, v1/v2 topic parsing, echo dedupe).
 
 ```bash
 # Run all tests
