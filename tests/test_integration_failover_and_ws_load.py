@@ -213,8 +213,14 @@ class TestMQTTBrokerFailoverIntegration(unittest.TestCase):
         try:
             self.assertTrue(client.connect())
 
-            # Wait up to 30 seconds for any traffic
-            deadline = time.monotonic() + 30
+            # Wait up to 15 seconds for any traffic. NOT 30: healthcheck runs
+            # the suite with `--timeout=30` (thread method), and an internal
+            # deadline equal to the harness budget kills the WHOLE run with no
+            # pytest summary whenever the broker is reachable but quiet
+            # (observed 2026-08-06 — the old `pytest | tail` gate then
+            # reported the crash as a pass). The wait is best-effort traffic
+            # observation only; the assertion below is connection-liveness.
+            deadline = time.monotonic() + 15
             while time.monotonic() < deadline:
                 if client._message_count > 0 or len(client.network.nodes) > 0:
                     break

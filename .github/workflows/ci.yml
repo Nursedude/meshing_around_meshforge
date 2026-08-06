@@ -42,13 +42,20 @@ jobs:
       - name: Run tests
         run: |
           set -o pipefail
-          python -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/pytest.log
+          rc=0
+          python -m pytest tests/ -v --tb=short 2>&1 | tee /tmp/pytest.log || rc=$?
+          # The raw exit code alone is a proven liar (MF measured 2026-07-28:
+          # ~50% of failed full runs exit 0 — a shutdown race that only loses
+          # failures toward zero). Classify from LOG + rc; UNKNOWN fails.
+          bash scripts/pytest_verdict.sh --log /tmp/pytest.log --rc "$rc"
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.11' || matrix.python-version == '3.9'
         run: |
           set -o pipefail
-          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=65 2>&1 | tee /tmp/pytest-coverage.log
+          rc=0
+          python -m pytest tests/ --cov=meshing_around_clients --cov-report=xml --cov-fail-under=65 2>&1 | tee /tmp/pytest-coverage.log || rc=$?
+          bash scripts/pytest_verdict.sh --log /tmp/pytest-coverage.log --rc "$rc"
 
       - name: Post pytest failure summary
         if: failure() && github.event_name == 'pull_request'

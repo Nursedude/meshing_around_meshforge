@@ -88,12 +88,22 @@ fi
 
 if [ "$RUN_TESTS" -eq 1 ] && [ "$RC" -eq 0 ]; then
     print_step "Tests"
-    if python3 -m pytest tests/ -q --tb=short --timeout=30 --timeout-method=thread 2>&1 | tail -30 ; then
-        print_ok "Tests passed"
+    # File-capture the REAL pytest exit code — the old `pytest | tail` tested
+    # TAIL's exit code, so a failing suite could read as healthy. Then
+    # classify from LOG + rc (MF pytest_verdict port, 2026-08-06): the rc
+    # alone was measured flapping to 0 on FAILED runs — the flap only loses
+    # failures toward zero. UNKNOWN is never a pass.
+    PYTEST_LOG="$(mktemp)"
+    python3 -m pytest tests/ -q --tb=short --timeout=30 --timeout-method=thread \
+        >"$PYTEST_LOG" 2>&1; PYTEST_RC=$?
+    tail -30 "$PYTEST_LOG"
+    if VERDICT="$(bash scripts/pytest_verdict.sh --log "$PYTEST_LOG" --rc "$PYTEST_RC")"; then
+        print_ok "Tests — $VERDICT"
     else
-        print_fail "Tests failed"
+        print_fail "Tests — $VERDICT"
         RC=2
     fi
+    rm -f "$PYTEST_LOG"
 fi
 
 print_step "Summary"
