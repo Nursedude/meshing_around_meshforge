@@ -45,7 +45,6 @@ meshing_around_meshforge works with any [Meshtastic-compatible device](https://m
 | **Raspberry Pi 3/4/5** | Serial, MQTT | Full functionality |
 | **Raspberry Pi Zero 2W** | MQTT | See [Pi Zero 2W Guide](#raspberry-pi-zero-2w) below |
 | **Any Linux Server** | MQTT, TCP | Headless via systemd service |
-| **Docker** | MQTT, TCP | No USB passthrough needed for MQTT |
 
 ### Raspberry Pi Zero 2W
 

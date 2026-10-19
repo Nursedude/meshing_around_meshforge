@@ -24,8 +24,8 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 
 ### TCP Mode
 - [ ] Test with meshtastic device in TCP mode
-- [ ] Implement connection timeout handling
-- [ ] Add reconnection with exponential backoff
+- [x] Implement connection timeout handling (`CONNECT_TIMEOUT_SECONDS`, `core/meshtastic_api.py`; checked 2026-10-18)
+- [x] Add reconnection with exponential backoff (`connect_with_retry`, all interface types incl. TCP, ±25% jitter; used by the TUI; checked 2026-10-18)
 - [ ] Test with `meshtasticd` remote connections
 
 ### MQTT Mode
@@ -70,7 +70,7 @@ This document tracks reliability improvements needed for MeshForge to reach stab
 ### Display
 - [ ] Test on various terminal sizes (80x24, 120x40, etc.)
 - [ ] Verify color rendering on different terminals
-- [ ] Test Rich fallback when library missing (see CODE_REVIEW.md — currently exits)
+- [ ] Test Rich fallback when library missing (the fallback now EXISTS — `PlainTextTUI`, `tui/app.py`; the test is still owed)
 - [ ] Handle Unicode/emoji in messages correctly
 
 ### Input

@@ -1,3 +1,7 @@
+> ⚠️ **Snapshot as of 2026-04-16.** Its version and test counts are history, not
+> current (domain audit 2026-10-18). Live: `python3 -m pytest tests/ --co -q`
+> and the version in the package metadata.
+
 # MeshForge Session Notes
 
 **Purpose:** Memory for Claude to maintain continuity across sessions.
