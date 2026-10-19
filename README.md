@@ -8,7 +8,7 @@ Full companion client for [meshing-around](https://github.com/SpudGunMan/meshing
 [![License](https://img.shields.io/badge/license-GPL--3.0-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://python.org)
 [![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](tests/)
-[![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://nursedude.substack.com)
+[![Blog](https://img.shields.io/badge/blog-Substack-orange.svg)](https://wh6gxznursedude.substack.com)
 
 > **Part of the MeshForge ecosystem** — works alongside [meshforge](https://github.com/Nursedude/meshforge) (NOC) and [meshforge-maps](https://github.com/Nursedude/meshforge-maps) (visualization). MeshForge NOC imports alert types, crypto, and MockAPI from this repo via `safe_import`.
 >
