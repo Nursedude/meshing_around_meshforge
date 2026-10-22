@@ -5,6 +5,8 @@
 **Owner:** Nursedude ([@Nursedude](https://github.com/Nursedude))
 **Repository:** `Nursedude/meshing_around_meshforge`
 
+**Domain roadmap SSOT: meshforge `.claude/ROADMAP.md`** — items tagged `[bot]` are this repo's (roadmap cohesion, decided 2026-10-19). `RELIABILITY_ROADMAP.md` here predates that decision; its open items are being folded into the domain roadmap (item `BOT-REL`) — add new future work THERE, not here.
+
 ### Session Workflow
 
 1. **Pull to Sync:** User will ask to "pull from meshforge/nursedude" to sync new features

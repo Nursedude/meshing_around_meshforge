@@ -1,3 +1,5 @@
+> ⚠️ **Being folded into the domain roadmap** (meshforge `.claude/ROADMAP.md`, item `BOT-REL`, 2026-10-22). Add new future work there; this file's open items move as they are triaged.
+
 # Reliability Improvement Roadmap
 
 **Version:** 0.5.0-beta
