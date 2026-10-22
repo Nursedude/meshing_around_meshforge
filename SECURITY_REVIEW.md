@@ -330,4 +330,4 @@ The setup script only warned when running as root but did not require confirmati
 ---
 
 *See CODE_REVIEW.md for code quality (non-security) findings.*
-*See RELIABILITY_ROADMAP.md for the full development tracking list.*
+*Future work: the domain roadmap, meshforge `.claude/ROADMAP.md`, items tagged `[bot]`.*

@@ -117,4 +117,4 @@ The following categories of issues were fixed in PRs #13, #14, #16, the security
 ---
 
 *See SECURITY_REVIEW.md for the full security audit.*
-*See RELIABILITY_ROADMAP.md for the full development tracking list.*
+*Future work: the domain roadmap, meshforge `.claude/ROADMAP.md`, items tagged `[bot]`.*
